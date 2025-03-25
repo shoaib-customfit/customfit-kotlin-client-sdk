@@ -10,6 +10,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import customfit.ai.kotlinclient.CFConfig
 import org.joda.time.DateTime
+import java.util.concurrent.LinkedBlockingQueue
+import kotlin.concurrent.fixedRateTimer
+
 
 class CFClient private constructor(
     private val config: CFConfig,
@@ -17,14 +20,125 @@ class CFClient private constructor(
 ) {
 
     private var previousSdkSettingsHash: String? = null
-    private var previousLastModified: String? = null  // Store Last-Modified timestamp
-    private var configMap: Map<String, Any> = emptyMap()  // Store the configuration map
+    private var previousLastModified: String? = null
+    private var configMap: Map<String, Any> = emptyMap()
+
+    private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue()
+    private val maxQueueSize = 100 
+    private val maxTimeInSeconds = 60
+
+    private val sessionId: String = UUID.randomUUID().toString()
 
     init {
         println("CFClient initialized with config: $config and user: $user")
         // Start periodic check every 5 minutes
         startSdkSettingsCheck()
+         startFlushEventCheck()
     }
+
+        // Function to track events
+    fun trackEvent(eventName: String, properties: Map<String, Any>) {
+        // Create the EventData object internally with necessary fields
+        val finalEvent = EventData(
+            event_customer_id = UUID.randomUUID().toString(),
+            event_type = EventType.TRACK,  // Hardcoded as TRACK
+            properties = properties.toMutableMap(),  // Convert Map to MutableMap
+            event_timestamp = DateTime.now(),
+            session_id = sessionId,  // Using generated session ID
+            timeuuid = UUID.randomUUID(),
+            insert_id = UUID.randomUUID().toString()  // Automatically generate insert_id
+        )
+
+        // Add event to the queue
+        eventQueue.offer(finalEvent)
+        println("Event added to the queue: $finalEvent")
+
+        // Check if the event queue should be flushed based on size
+        if (eventQueue.size >= maxQueueSize) {
+            flushEvents()
+        }
+    }
+
+    // Function to check if the time condition for flushing is met
+    private fun startFlushEventCheck() {
+        fixedRateTimer("EventFlushCheck", daemon = true, period = 1000) {
+            // Launch a coroutine to call the suspend function flushEvents
+            CoroutineScope(Dispatchers.Default).launch {
+                val lastEvent = eventQueue.peek()
+                val currentTime = DateTime.now()
+                if (lastEvent != null && currentTime.minusSeconds(maxTimeInSeconds).isAfter(lastEvent.event_timestamp)) {
+                    // Call the suspend function flushEvents inside the coroutine
+                    flushEvents()
+                }
+            }
+        }
+    }
+
+
+    // Function to flush events to the server
+    private suspend fun flushEvents() {
+        if (eventQueue.isEmpty()) {
+            println("No events to flush.")
+            return
+        }
+
+        val eventsToFlush = mutableListOf<EventData>()
+
+        // Drain the event queue into a list
+        eventQueue.drainTo(eventsToFlush)
+
+        // Send the events to the server through CFClient
+        sendTrackEvents(eventsToFlush)
+        println("Flushed ${eventsToFlush.size} events.")
+    }
+
+
+    // Function to send events to the server
+    private suspend fun sendTrackEvents(events: List<EventData>) {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = URL("https://example.com/v1/cfe")  // Replace with actual URL
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.doOutput = true
+
+                val eventsJson = events.map { event ->
+                    mapOf(
+                        "event_customer_id" to event.event_customer_id,
+                        "event_type" to event.event_type.toString(),                        
+                        "properties" to event.properties,
+                        "event_timestamp" to event.event_timestamp.toString(),
+                        "session_id" to event.session_id,
+                        "insert_id" to event.insert_id
+                    )
+                }
+
+                val jsonPayload = JSONObject(
+                    mapOf(
+                        "user" to user,
+                        "events" to eventsJson,
+                        "cf_client_sdk_version" to "1.0.0" // Use actual version
+                    )
+                )
+
+                connection.outputStream.use { os ->
+                    val input = jsonPayload.toString().toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    println("Events successfully sent to the server.")
+                } else {
+                    println("Error sending events. Response code: $responseCode")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
 
     // Function to check for updates every 5 minutes
     private fun startSdkSettingsCheck() {
