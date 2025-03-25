@@ -22,6 +22,9 @@ dependencies {
     implementation("io.jsonwebtoken:jjwt-api:0.11.5")
     implementation("io.jsonwebtoken:jjwt-impl:0.11.5")
     implementation("io.jsonwebtoken:jjwt-jackson:0.11.5")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.2") 
+    implementation("org.json:json:20250107")
+    implementation("joda-time:joda-time:2.10.10")
 }
 
 tasks.test {
