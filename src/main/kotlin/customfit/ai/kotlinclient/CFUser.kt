@@ -2,16 +2,16 @@ package customfit.ai.kotlinclient
 
 import java.util.*
 
-data class CFUser private constructor(
-    val userCustomerId: String?,
-    val anonymous: Boolean,
-    val privateFields: PrivateAttributesRequest?,
-    val sessionFields: PrivateAttributesRequest?,
-    val properties: Map<String, Any>
+data class CFUser(
+        val userCustomerId: String?,
+        val anonymous: Boolean,
+        val privateFields: PrivateAttributesRequest?,
+        val sessionFields: PrivateAttributesRequest?,
+        val properties: Map<String, Any>
 ) {
+
     companion object {
-        @JvmStatic
-        fun builder(userCustomerId: String) = Builder(userCustomerId)
+        @JvmStatic fun builder(userCustomerId: String) = Builder(userCustomerId)
     }
 
     class Builder(private val userCustomerId: String) {
@@ -21,11 +21,16 @@ data class CFUser private constructor(
         private var properties: MutableMap<String, Any> = mutableMapOf()
 
         fun makeAnonymous(anonymous: Boolean) = apply { this.anonymous = anonymous }
-        fun withPrivateFields(privateFields: PrivateAttributesRequest) = apply { this.privateFields = privateFields }
-        fun withSessionFields(sessionFields: PrivateAttributesRequest) = apply { this.sessionFields = sessionFields }
-        fun withProperties(properties: Map<String, Any>) = apply { this.properties.putAll(properties) }
+        fun withPrivateFields(privateFields: PrivateAttributesRequest) = apply {
+            this.privateFields = privateFields
+        }
+        fun withSessionFields(sessionFields: PrivateAttributesRequest) = apply {
+            this.sessionFields = sessionFields
+        }
+        fun withProperties(properties: Map<String, Any>) = apply {
+            this.properties.putAll(properties)
+        }
 
-        // Type-Specific Methods
         fun withNumberProperty(key: String, value: Number) = apply {
             validateType(key, value)
             this.properties[key] = value
@@ -50,51 +55,76 @@ data class CFUser private constructor(
             this.properties[key] = mapOf("lat" to lat, "lon" to lon)
         }
 
-        // Type-Agnostic Methods
         fun withProperty(key: String) = apply { this.properties[key] = Any() }
-        fun withPrivateProperty(key: String) = apply { 
+        fun withPrivateProperty(key: String) = apply {
             this.properties[key] = Any()
             this.privateFields?.properties?.add(key)
         }
-        fun withSessionProperty(key: String) = apply { 
+        fun withSessionProperty(key: String) = apply {
             this.properties[key] = Any()
             this.sessionFields?.properties?.add(key)
         }
 
-        fun withJsonProperty(key: String, value: Map<String, Any>) = apply {
-            if (value !is Map<*, *>) {
-                throw IllegalArgumentException("Value for $key must be a Map<String, Any>")
+        fun withJsonProperty(key: String, value: Map<String, Any?>) = apply {
+            require(value.values.all { it.isJsonCompatible() }) {
+                "Value for $key contains non-JSON-serializable types"
             }
             this.properties[key] = value
         }
 
+        private fun Any?.isJsonCompatible(): Boolean =
+                when (this) {
+                    null -> true
+                    is String, is Number, is Boolean -> true
+                    is Map<*, *> -> this.values.all { it.isJsonCompatible() }
+                    is Collection<*> -> this.all { it.isJsonCompatible() }
+                    else -> false
+                }
+
         fun withPrivateJsonProperty(key: String, value: Map<String, Any>) = apply {
-            if (value !is Map<*, *>) {
-                throw IllegalArgumentException("Value for $key must be a Map<String, Any>")
+            require(value.values.all { it.isJsonCompatible() }) {
+                "Value for $key contains non-JSON-serializable types"
             }
             this.properties[key] = value
             this.privateFields?.properties?.add(key)
         }
 
         fun withSessionJsonProperty(key: String, value: Map<String, Any>) = apply {
-            if (value !is Map<*, *>) {
-                throw IllegalArgumentException("Value for $key must be a Map<String, Any>")
+            require(value.values.all { it.isJsonCompatible() }) {
+                "Value for $key contains non-JSON-serializable types"
             }
             this.properties[key] = value
             this.sessionFields?.properties?.add(key)
         }
 
-        // Helper function to validate type for type-specific properties
         private fun validateType(key: String, value: Any) {
             when (value) {
-                is Number -> { /* Allow any number (Integer, Double, etc.) */ }
-                is String -> { if (value.isBlank()) throw IllegalArgumentException("String value for property '$key' cannot be blank") }
-                is Boolean -> { /* Allow boolean values */ }
-                is Date -> { /* Allow Date objects */ }
-                is Map<*, *> -> { 
-                    if (value.keys.any { it !is String }) throw IllegalArgumentException("JSON for property '$key' must have String keys")
+                is Number -> {
+                    /* Allow any number (Integer, Double, etc.) */
                 }
-                else -> { throw IllegalArgumentException("Unsupported type for property '$key': ${value::class.simpleName}") }
+                is String -> {
+                    if (value.isBlank())
+                            throw IllegalArgumentException(
+                                    "String value for property '$key' cannot be blank"
+                            )
+                }
+                is Boolean -> {
+                    /* Allow boolean values */
+                }
+                is Date -> {
+                    /* Allow Date objects */
+                }
+                is Map<*, *> -> {
+                    if (value.keys.any { it !is String })
+                            throw IllegalArgumentException(
+                                    "JSON for property '$key' must have String keys"
+                            )
+                }
+                else -> {
+                    throw IllegalArgumentException(
+                            "Unsupported type for property '$key': ${value::class.simpleName}"
+                    )
+                }
             }
         }
 
@@ -105,7 +135,7 @@ data class CFUser private constructor(
 }
 
 data class PrivateAttributesRequest(
-    val userFields: List<String> = mutableListOf(),
-    val properties: MutableList<String> = mutableListOf(),
-    val tags: List<String> = mutableListOf()
+        val userFields: List<String> = mutableListOf(),
+        val properties: MutableList<String> = mutableListOf(),
+        val tags: List<String> = mutableListOf()
 )

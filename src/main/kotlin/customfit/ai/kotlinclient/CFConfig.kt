@@ -10,7 +10,6 @@ data class CFConfig(
 ) {
     companion object {
         fun fromClientKey(clientKey: String): CFConfig {
-            val clientKey = clientKey as String
             return CFConfig(clientKey)
         }
     }
