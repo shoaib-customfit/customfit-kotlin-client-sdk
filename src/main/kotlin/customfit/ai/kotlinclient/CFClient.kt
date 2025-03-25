@@ -28,6 +28,7 @@ class CFClient private constructor(
     private val maxTimeInSeconds = 60
 
     private val sessionId: String = UUID.randomUUID().toString()
+    private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue()
 
     init {
         println("CFClient initialized with config: $config and user: $user")
@@ -358,22 +359,46 @@ class CFClient private constructor(
     }
 
     // Get Methods for each type (String, Boolean, Number, Json)
-    fun getString(key: String, fallbackValue: String): String {
-        return getConfigValue(key, fallbackValue) { value -> value is String }
+fun getString(key: String, fallbackValue: String): String {
+    return getConfigValue(key, fallbackValue) { value -> value is String }.also {
+        val configValue = configMap[key]
+        if (configValue != null && configValue is Map<*, *>) {
+            // Assuming pushSummary requires a Map or a similar object
+            this.pushSummary(configValue)
+        }
     }
+}
 
+    // Function to get a Number configuration value
     fun getNumber(key: String, fallbackValue: Number): Number {
-        return getConfigValue(key, fallbackValue) { value -> value is Number }
+        return getConfigValue(key, fallbackValue) { value -> value is Number }.also {
+           val configValue = configMap[key]
+            if (configValue != null && configValue is Map<*, *>) {
+                // Assuming pushSummary requires a Map or a similar object
+                this.pushSummary(configValue)
+            }
+        }
     }
 
+    // Function to get a Boolean configuration value
     fun getBoolean(key: String, fallbackValue: Boolean): Boolean {
-        return getConfigValue(key, fallbackValue) { value -> value is Boolean }
+        return getConfigValue(key, fallbackValue) { value -> value is Boolean }.also {
+            val configValue = configMap[key]
+            if (configValue != null && configValue is Map<*, *>) {
+                this.pushSummary(configValue)
+            }
+        }
     }
 
+    // Function to get a JSON configuration value
     fun getJson(key: String, fallbackValue: Map<String, Any>): Map<String, Any> {
-        return getConfigValue(key, fallbackValue) { value -> value is Map<*, *> && value.keys.all { it is String } }
+        return getConfigValue(key, fallbackValue) { value -> value is Map<*, *> && value.keys.all { it is String } }.also {
+            val configValue = configMap[key]
+            if (configValue != null && configValue is Map<*, *>) {
+                this.pushSummary(configValue)
+            }
+        }
     }
-
     // Generic function to get config value based on type check
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
         val config = configMap[key] // Now reading from the configMap
@@ -381,6 +406,85 @@ class CFClient private constructor(
             config as T
         } else {
             fallbackValue
+        }
+    }
+
+    private fun pushSummary(config: Any) {
+        // Ensure config is a Map<String, Any> (or cast it)
+        if (config is Map<*, *>) {
+            val configMap = config as Map<String, Any>
+
+            // Extract the necessary values from the configMap
+            val configSummary = CFConfigRequestSummary(
+                config_id = configMap["config_id"] as? String,
+                version = configMap["version"] as? String,
+                user_id = configMap["user_id"] as? String,
+                requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss"),
+                variation_id = configMap["variation_id"] as? String,
+                user_customer_id = user.userCustomerId,
+                session_id = sessionId,
+                behaviour_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("behaviour_id") as? String,
+                experience_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("experience_id") as? String,
+                rule_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("rule_id") as? String,
+                is_template_config = configMap["template_info"] != null
+            )
+
+            // Add to the summaries queue
+            this.summaries.offer(configSummary)
+            println("Summary added to the queue: $configSummary")
+        } else {
+            println("Config is not a valid map")
+        }
+    }
+
+
+    // Function to flush summaries
+    private suspend fun flushSummaries() {
+        if (summaries.isEmpty()) {
+            println("No summaries to flush.")
+            return
+        }
+
+        val summariesToFlush = mutableListOf<CFConfigRequestSummary>()
+        summaries.drainTo(summariesToFlush)
+
+        // Send the summaries to the server
+        sendSummaryToServer(summariesToFlush)
+        println("Flushed ${summariesToFlush.size} summaries.")
+    }
+
+    // Function to send summaries to the server
+    private suspend fun sendSummaryToServer(summaries: List<CFConfigRequestSummary>) {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = URL("https://example.com/v1/config/request/summary")  // Replace with actual URL
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.doOutput = true
+
+                val jsonPayload = JSONObject(
+                    mapOf(
+                        "user" to user,
+                        "summaries" to summaries,
+                        "cf_client_sdk_version" to "1.0.0" // Use actual version
+                    )
+                )
+
+                connection.outputStream.use { os ->
+                    val input = jsonPayload.toString().toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    println("Summaries successfully sent to the server.")
+                } else {
+                    println("Error sending summaries. Response code: $responseCode")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
