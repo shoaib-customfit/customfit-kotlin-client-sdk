@@ -29,6 +29,7 @@ class CFClient private constructor(
 
     private val sessionId: String = UUID.randomUUID().toString()
     private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue()
+    private val summaryTrackMap = mutableMapOf<String, Boolean>()
 
     init {
         println("CFClient initialized with config: $config and user: $user")
@@ -359,15 +360,15 @@ class CFClient private constructor(
     }
 
     // Get Methods for each type (String, Boolean, Number, Json)
-fun getString(key: String, fallbackValue: String): String {
-    return getConfigValue(key, fallbackValue) { value -> value is String }.also {
-        val configValue = configMap[key]
-        if (configValue != null && configValue is Map<*, *>) {
-            // Assuming pushSummary requires a Map or a similar object
-            this.pushSummary(configValue)
+    fun getString(key: String, fallbackValue: String): String {
+        return getConfigValue(key, fallbackValue) { value -> value is String }.also {
+            val configValue = configMap[key]
+            if (configValue != null && configValue is Map<*, *>) {
+                // Assuming pushSummary requires a Map or a similar object
+                this.pushSummary(configValue)
+            }
         }
     }
-}
 
     // Function to get a Number configuration value
     fun getNumber(key: String, fallbackValue: Number): Number {
@@ -414,7 +415,23 @@ fun getString(key: String, fallbackValue: String): String {
         if (config is Map<*, *>) {
             val configMap = config as Map<String, Any>
 
-            // Extract the necessary values from the configMap
+             // Check if the cast was successful
+            if (configMap == null) {
+                println("Config is not a valid Map<String, Any>")
+                return
+            }
+
+            // Extract the experience_id from the config
+            val experienceBehaviourResponse = configMap["experience_behaviour_response"] as? Map<String, Any>
+            val experienceId = experienceBehaviourResponse?.get("experience_id") as? String
+
+            // If experience_id is already in summaryTrackMap, skip adding the summary
+            if (experienceId != null && summaryTrackMap.containsKey(experienceId)) {
+                println("Experience already processed, skipping summary addition.")
+                return
+            }
+
+            // Safely extract the necessary values from the configMap
             val configSummary = CFConfigRequestSummary(
                 config_id = configMap["config_id"] as? String,
                 version = configMap["version"] as? String,
@@ -423,20 +440,25 @@ fun getString(key: String, fallbackValue: String): String {
                 variation_id = configMap["variation_id"] as? String,
                 user_customer_id = user.userCustomerId,
                 session_id = sessionId,
-                behaviour_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("behaviour_id") as? String,
-                experience_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("experience_id") as? String,
-                rule_id = (configMap["experience_behaviour_response"] as? Map<String, Any>)?.get("rule_id") as? String,
+                behaviour_id = experienceBehaviourResponse?.get("behaviour_id") as? String,
+                experience_id = experienceBehaviourResponse?.get("experience_id") as? String,
+                rule_id = experienceBehaviourResponse?.get("rule_id") as? String,
                 is_template_config = configMap["template_info"] != null
             )
 
             // Add to the summaries queue
             this.summaries.offer(configSummary)
+
+            // Mark the experience as processed by adding it to the summaryTrackMap
+            experienceId?.let {
+                summaryTrackMap[it] = true
+            }
+
             println("Summary added to the queue: $configSummary")
         } else {
             println("Config is not a valid map")
         }
     }
-
 
     // Function to flush summaries
     private suspend fun flushSummaries() {
