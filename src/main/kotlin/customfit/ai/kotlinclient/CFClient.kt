@@ -55,20 +55,23 @@ class CFClient private constructor(
 
         // Check if the event queue should be flushed based on size
         if (eventQueue.size >= maxQueueSize) {
-            flushEvents()
+            // Launch a coroutine to call the suspend function flushEvents
+            CoroutineScope(Dispatchers.Default).launch {
+                flushEvents()  // Call flushEvents inside a coroutine
+            }
         }
     }
+
 
     // Function to check if the time condition for flushing is met
     private fun startFlushEventCheck() {
         fixedRateTimer("EventFlushCheck", daemon = true, period = 1000) {
-            // Launch a coroutine to call the suspend function flushEvents
             CoroutineScope(Dispatchers.Default).launch {
                 val lastEvent = eventQueue.peek()
                 val currentTime = DateTime.now()
                 if (lastEvent != null && currentTime.minusSeconds(maxTimeInSeconds).isAfter(lastEvent.event_timestamp)) {
-                    // Call the suspend function flushEvents inside the coroutine
-                    flushEvents()
+                    // Explicitly reference CFClient's flushEvents
+                    this@CFClient.flushEvents()
                 }
             }
         }
