@@ -1,22 +1,28 @@
-package customfit.ai.kotlinclient
+package customfit.ai.kotlinclient.events
 
+import customfit.ai.kotlinclient.core.CFUser
+import customfit.ai.kotlinclient.network.HttpClient
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.joda.time.DateTime
 import org.json.JSONObject
+import org.slf4j.LoggerFactory
 
 class EventTracker(
         private val sessionId: String,
         private val httpClient: HttpClient,
         private val user: CFUser
 ) {
+    private val logger = LoggerFactory.getLogger(EventTracker::class.java)
     private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue()
     private val maxQueueSize = 100
     private val maxTimeInSeconds = 60
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     init {
         startFlushEventCheck()
@@ -27,22 +33,22 @@ class EventTracker(
                 EventData(
                         event_customer_id = eventName,
                         event_type = EventType.TRACK,
-                        properties = properties.toMutableMap(),
+                        properties = properties,
                         event_timestamp = DateTime.now(),
                         session_id = sessionId,
                         timeuuid = UUID.randomUUID(),
                         insert_id = UUID.randomUUID().toString()
                 )
         eventQueue.offer(event)
-        println("Event added to queue: $event")
+        logger.info("Event added to queue: $event")
         if (eventQueue.size >= maxQueueSize) {
-            CoroutineScope(Dispatchers.Default).launch { flushEvents() }
+            scope.launch { flushEvents() }
         }
     }
 
     private fun startFlushEventCheck() {
         fixedRateTimer("EventFlushCheck", daemon = true, period = 1000) {
-            CoroutineScope(Dispatchers.Default).launch {
+            scope.launch {
                 val lastEvent = eventQueue.peek()
                 val currentTime = DateTime.now()
                 if (lastEvent != null &&
@@ -58,13 +64,13 @@ class EventTracker(
 
     suspend fun flushEvents() {
         if (eventQueue.isEmpty()) {
-            println("No events to flush.")
+            logger.info("No events to flush")
             return
         }
         val eventsToFlush = mutableListOf<EventData>()
         eventQueue.drainTo(eventsToFlush)
         sendTrackEvents(eventsToFlush)
-        println("Flushed ${eventsToFlush.size} events.")
+        logger.info("Flushed ${eventsToFlush.size} events")
     }
 
     private suspend fun sendTrackEvents(events: List<EventData>) {
@@ -90,6 +96,6 @@ class EventTracker(
                         .toString()
 
         val success = httpClient.postJson("https://example.com/v1/cfe", jsonPayload)
-        println(if (success) "Events sent successfully." else "Error sending events.")
+        logger.info(if (success) "Events sent successfully" else "Error sending events")
     }
 }

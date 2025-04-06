@@ -1,4 +1,4 @@
-package customfit.ai.kotlinclient
+package customfit.ai.kotlinclient.core
 
 import org.joda.time.DateTime
 import org.json.JSONObject

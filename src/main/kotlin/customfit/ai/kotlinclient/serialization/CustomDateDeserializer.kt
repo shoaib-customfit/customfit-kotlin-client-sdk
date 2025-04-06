@@ -1,4 +1,4 @@
-package customfit.ai.kotlinclient
+package customfit.ai.kotlinclient.serialization
 
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.DeserializationContext

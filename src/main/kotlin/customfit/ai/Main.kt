@@ -1,8 +1,8 @@
 package customfit.ai
 
-import customfit.ai.kotlinclient.CFClient
-import customfit.ai.kotlinclient.CFConfig
-import customfit.ai.kotlinclient.CFUser
+import customfit.ai.kotlinclient.client.CFClient
+import customfit.ai.kotlinclient.core.CFConfig
+import customfit.ai.kotlinclient.core.CFUser
 
 fun main() {
         val clientKey =
