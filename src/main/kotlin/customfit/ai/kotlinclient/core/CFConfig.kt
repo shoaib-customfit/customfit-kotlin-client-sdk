@@ -1,9 +1,11 @@
 package customfit.ai.kotlinclient.core
 
 import java.util.*
+import kotlinx.serialization.Serializable
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 
+@Serializable
 data class CFConfig(val clientKey: String) {
     val dimensionId: String? by lazy { extractDimensionIdFromToken(clientKey) }
 

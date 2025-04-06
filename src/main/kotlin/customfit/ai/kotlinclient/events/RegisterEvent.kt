@@ -1,6 +1,5 @@
 package customfit.ai.kotlinclient.events
 
-
 import customfit.ai.kotlinclient.core.CFUser
 
 data class RegisterEvent(
