@@ -232,9 +232,6 @@ class CFClient private constructor(private val config: CFConfig, private val use
                     fallbackValue
                 }
 
-        println("key: $key")
-        println("configMap: $config")
-
         // Ensure that the value is either a Map or emptyMap to avoid type inference issues
         // Here, the configMap[key] value is being passed to pushSummary, with nested map handling
         summaryManager.pushSummary(config as? Map<String, Any> ?: emptyMap<String, Any>())

@@ -13,7 +13,6 @@ data class CFConfigRequestSummary(
         val behaviour_id: String?,
         val experience_id: String?,
         val rule_id: String?,
-        val is_template_config: Boolean = false
 ) {
         constructor(
                 config: Map<String, Any>,
@@ -40,6 +39,5 @@ data class CFConfigRequestSummary(
                 rule_id =
                         (config["experience_behaviour_response"] as? Map<*, *>)?.get("rule_id") as?
                                 String,
-                is_template_config = config.containsKey("template_info")
         )
 }
