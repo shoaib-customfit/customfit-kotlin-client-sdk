@@ -3,29 +3,29 @@ package customfit.ai.kotlinclient
 import java.util.*
 
 data class CFUser(
-        val userCustomerId: String?,
+        val user_customer_id: String?,
         val anonymous: Boolean,
-        val privateFields: PrivateAttributesRequest?,
-        val sessionFields: PrivateAttributesRequest?,
+        val private_fields: PrivateAttributesRequest?,
+        val session_fields: PrivateAttributesRequest?,
         val properties: Map<String, Any>
 ) {
 
     companion object {
-        @JvmStatic fun builder(userCustomerId: String) = Builder(userCustomerId)
+        @JvmStatic fun builder(user_customer_id: String) = Builder(user_customer_id)
     }
 
-    class Builder(private val userCustomerId: String) {
+    class Builder(private val user_customer_id: String) {
         private var anonymous: Boolean = false
-        private var privateFields: PrivateAttributesRequest? = null
-        private var sessionFields: PrivateAttributesRequest? = null
+        private var private_fields: PrivateAttributesRequest? = null
+        private var session_fields: PrivateAttributesRequest? = null
         private var properties: MutableMap<String, Any> = mutableMapOf()
 
         fun makeAnonymous(anonymous: Boolean) = apply { this.anonymous = anonymous }
-        fun withPrivateFields(privateFields: PrivateAttributesRequest) = apply {
-            this.privateFields = privateFields
+        fun withprivate_fields(private_fields: PrivateAttributesRequest) = apply {
+            this.private_fields = private_fields
         }
-        fun withSessionFields(sessionFields: PrivateAttributesRequest) = apply {
-            this.sessionFields = sessionFields
+        fun withsession_fields(session_fields: PrivateAttributesRequest) = apply {
+            this.session_fields = session_fields
         }
         fun withProperties(properties: Map<String, Any>) = apply {
             this.properties.putAll(properties)
@@ -58,11 +58,11 @@ data class CFUser(
         fun withProperty(key: String) = apply { this.properties[key] = Any() }
         fun withPrivateProperty(key: String) = apply {
             this.properties[key] = Any()
-            this.privateFields?.properties?.add(key)
+            this.private_fields?.properties?.add(key)
         }
         fun withSessionProperty(key: String) = apply {
             this.properties[key] = Any()
-            this.sessionFields?.properties?.add(key)
+            this.session_fields?.properties?.add(key)
         }
 
         fun withJsonProperty(key: String, value: Map<String, Any?>) = apply {
@@ -86,7 +86,7 @@ data class CFUser(
                 "Value for $key contains non-JSON-serializable types"
             }
             this.properties[key] = value
-            this.privateFields?.properties?.add(key)
+            this.private_fields?.properties?.add(key)
         }
 
         fun withSessionJsonProperty(key: String, value: Map<String, Any>) = apply {
@@ -94,7 +94,7 @@ data class CFUser(
                 "Value for $key contains non-JSON-serializable types"
             }
             this.properties[key] = value
-            this.sessionFields?.properties?.add(key)
+            this.session_fields?.properties?.add(key)
         }
 
         private fun validateType(key: String, value: Any) {
@@ -129,7 +129,7 @@ data class CFUser(
         }
 
         fun build(): CFUser {
-            return CFUser(userCustomerId, anonymous, privateFields, sessionFields, properties)
+            return CFUser(user_customer_id, anonymous, private_fields, session_fields, properties)
         }
     }
 }
