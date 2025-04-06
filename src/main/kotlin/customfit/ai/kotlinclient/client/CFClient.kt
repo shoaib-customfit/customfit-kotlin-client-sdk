@@ -1,6 +1,8 @@
 package customfit.ai.kotlinclient.client
 
-import customfit.ai.kotlinclient.core.*
+import customfit.ai.kotlinclient.core.CFConfig
+import customfit.ai.kotlinclient.core.CFUser
+import customfit.ai.kotlinclient.core.SdkSettings
 import customfit.ai.kotlinclient.events.EventTracker
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.summaries.SummaryManager
@@ -8,8 +10,8 @@ import java.net.HttpURLConnection
 import java.util.*
 import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.*
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 
@@ -17,20 +19,17 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private val logger = LoggerFactory.getLogger(CFClient::class.java)
     private val sessionId: String = UUID.randomUUID().toString()
     private val httpClient = HttpClient()
-    private val eventTracker = EventTracker(sessionId, httpClient, user)
-    private val summaryManager = SummaryManager(sessionId, user, httpClient)
+    val summaryManager = SummaryManager(sessionId, user, httpClient)
+    val eventTracker = EventTracker(sessionId, httpClient, user, summaryManager)
 
-    private var previousLastModified: String? = null
-    private var configMap: Map<String, Any> = emptyMap()
+    @Volatile private var previousLastModified: String? = null
+    private val configMap: MutableMap<String, Any> =
+            Collections.synchronizedMap(mutableMapOf()) // Thread-safe
+    private val configMutex = Mutex() // For atomic updates
     private val sdkSettingsDeferred: CompletableDeferred<Unit> = CompletableDeferred()
 
     init {
-        val configJson = Json { prettyPrint = true }.encodeToString(config)
-        val userJson = Json { prettyPrint = true }.encodeToString(user)
-
-        // Log the config and user as JSON
-        logger.info("CFClient initialized with config: \n$configJson\nand user: \n$userJson")
-
+        logger.info("CFClient initialized with config: {} and user: {}", config, user)
         initializeSdkSettings()
         startPeriodicSdkSettingsCheck()
     }
@@ -41,8 +40,9 @@ class CFClient private constructor(private val config: CFConfig, private val use
                 logger.info("Initializing SDK settings")
                 checkSdkSettings()
                 sdkSettingsDeferred.complete(Unit)
+                logger.info("SDK settings initialized successfully")
             } catch (e: Exception) {
-                logger.error("Error initializing SDK settings: ${e.message}", e)
+                logger.error("Failed to initialize SDK settings: {}", e.message, e)
                 sdkSettingsDeferred.completeExceptionally(e)
             }
         }
@@ -66,8 +66,8 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
     private fun startPeriodicSdkSettingsCheck() {
         fixedRateTimer("SdkSettingsCheck", daemon = true, period = 300_000) {
-            CoroutineScope(Dispatchers.IO).launch {
-                logger.info("Periodic SDK settings check triggered")
+            CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                logger.debug("Periodic SDK settings check triggered")
                 checkSdkSettings()
             }
         }
@@ -75,55 +75,86 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
     private suspend fun checkSdkSettings() {
         try {
-            val metadata = fetchSdkSettingsMetadata() ?: return
-
-            val currentLastModified = metadata["Last-Modified"]
+            val metadata =
+                    fetchSdkSettingsMetadata()
+                            ?: run {
+                                logger.warn("Failed to fetch SDK settings metadata")
+                                return
+                            }
+            val currentLastModified = metadata["Last-Modified"] ?: return
             if (currentLastModified != previousLastModified) {
-                // Logging the change
-                logger.info("SDK settings changed:")
-                logger.info("Previous Last-Modified: $previousLastModified")
-                logger.info("Current Last-Modified: $currentLastModified")
-
-                // Fetch new configs
-                fetchConfigs()
-
-                // Update the previousLastModified
-                previousLastModified = currentLastModified
-
-                // Log that the fetch was triggered
-                logger.info("Fetching new SDK settings as the last modified value has changed.")
+                logger.info(
+                        "SDK settings changed: Previous={}, Current={}",
+                        previousLastModified,
+                        currentLastModified
+                )
+                val newConfigs = fetchConfigs() ?: emptyMap()
+                configMutex.withLock {
+                    configMap.clear()
+                    configMap.putAll(newConfigs)
+                    previousLastModified = currentLastModified
+                }
+                logger.info("Configs updated successfully with {} entries", newConfigs.size)
             } else {
-                logger.info("SDK settings have not changed. No fetch needed.")
+                logger.debug("No change in SDK settings")
             }
         } catch (e: Exception) {
-            logger.error("Error checking SDK settings: ${e.message}", e)
+            logger.error("Error checking SDK settings: {}", e.message, e)
         }
     }
 
     private suspend fun fetchSdkSettingsMetadata(): Map<String, String>? =
             httpClient.fetchMetadata(
-                    "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
-            )
+                            "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
+                    )
+                    ?.also { logger.debug("Fetched metadata: {}", it) }
 
     private suspend fun fetchSdkSettings(): SdkSettings? {
         val json =
                 httpClient.fetchJson(
                         "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
                 )
-        return json?.let { SdkSettings.fromJson(it) }?.takeUnless {
-            !it.cf_account_enabled || it.cf_skip_sdk
+                        ?: run {
+                            logger.warn("Failed to fetch SDK settings JSON")
+                            return null
+                        }
+        return try {
+            val settings = SdkSettings.fromJson(json)
+            if (settings == null) {
+                logger.warn("SdkSettings.fromJson returned null for JSON: {}", json)
+                return null
+            }
+            if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
+                logger.debug(
+                        "SDK settings skipped: cf_account_enabled={}, cf_skip_sdk={}",
+                        settings.cf_account_enabled,
+                        settings.cf_skip_sdk
+                )
+                null
+            } else {
+                logger.debug("Fetched SDK settings: {}", settings)
+                settings
+            }
+        } catch (e: Exception) {
+            logger.error("Error parsing SDK settings: {}", e.message, e)
+            null
         }
     }
 
     private suspend fun fetchConfigs(): Map<String, Any>? {
         val url = "https://api.customfit.ai/v1/users/configs?cfenc=${config.clientKey}"
         val payload =
-                JSONObject()
-                        .apply {
-                            put("user", JSONObject(user.toMap()))
-                            put("include_only_features_flags", true)
-                        }
-                        .toString()
+                try {
+                    JSONObject()
+                            .apply {
+                                put("user", JSONObject(user.toMap()))
+                                put("include_only_features_flags", true)
+                            }
+                            .toString()
+                } catch (e: Exception) {
+                    logger.error("Error creating config payload: {}", e.message, e)
+                    return null
+                }
 
         val json =
                 httpClient.performRequest(
@@ -132,110 +163,127 @@ class CFClient private constructor(private val config: CFConfig, private val use
                         mapOf("Content-Type" to "application/json"),
                         payload
                 ) { conn ->
-                    if (conn.responseCode == HttpURLConnection.HTTP_OK)
-                            JSONObject(conn.inputStream.bufferedReader().readText())
-                    else null
+                    when (conn.responseCode) {
+                        HttpURLConnection.HTTP_OK ->
+                                JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                        else -> {
+                            logger.warn("Config fetch failed with code: {}", conn.responseCode)
+                            null
+                        }
+                    }
                 }
                         ?: return null
 
-        val configs = json.getJSONObject("configs")
+        val configs =
+                json.optJSONObject("configs")
+                        ?: run {
+                            logger.warn("No 'configs' object in response")
+                            return null
+                        }
         val newConfigMap = mutableMapOf<String, Any>()
 
-        // Process each config object in the "configs" map
         configs.keys().forEach { key ->
-            val config = configs.getJSONObject(key)
-            val experience = config.getJSONObject("experience_behaviour_response")
-
-            // Collect all relevant fields
-            val experienceId = experience.getString("experience_id")
-            val behaviour = experience.getString("behaviour")
-            val behaviourId = experience.getString("behaviour_id")
-            val variationId = experience.getString("variation_id")
-            val version = config.getNumber("version")
-            val configId = config.getString("config_id")
-            val userId = json.getString("user_id")
-
-            val priority = experience.getInt("priority")
-            val experienceCreatedTime = experience.getLong("experience_created_time")
-            val ruleId = experience.getString("rule_id")
-            val experienceKey = experience.getString("experience")
-
-            // Extract variation-related fields
-            val variationName = experience.getString("behaviour")
-            val variationDataType = config.getString("variation_data_type")
-            val variation: Any =
-                    when (variationDataType.uppercase()) {
-                        "STRING" -> config.getString("variation")
-                        "BOOLEAN" -> config.getBoolean("variation")
-                        "NUMBER" -> config.getDouble("variation")
-                        "JSON" -> config.getJSONObject("variation").toMap()
-                        else ->
-                                config.get("variation").also {
+            try {
+                val config = configs.getJSONObject(key)
+                val experience =
+                        config.optJSONObject("experience_behaviour_response")
+                                ?: run {
                                     logger.warn(
-                                            "Unknown variation_data_type: $variationDataType for $key"
+                                            "Missing 'experience_behaviour_response' for key: {}",
+                                            key
                                     )
+                                    return@forEach
                                 }
-                    }
 
-            // Create a map of the full experience data
-            val experienceData =
-                    mapOf(
-                            "version" to version,
-                            "config_id" to configId,
-                            "user_id" to userId,
-                            "experience_id" to experienceId,
-                            "behaviour" to behaviour,
-                            "behaviour_id" to behaviourId,
-                            "variation_name" to variationName,
-                            "variation_id" to variationId,
-                            "priority" to priority,
-                            "experience_created_time" to experienceCreatedTime,
-                            "rule_id" to ruleId,
-                            "experience" to experienceKey,
-                            "audience_name" to experience.optString("audience_name", null),
-                            "ga_measurement_id" to experience.optString("ga_measurement_id", null),
-                            "type" to experience.optString("type", null),
-                            "config_modifications" to
-                                    experience.optString("config_modifications", null),
-                            "variation_data_type" to variationDataType,
-                            "variation" to variation
-                    )
+                val experienceKey =
+                        experience.optString("experience", null)
+                                ?: run {
+                                    logger.warn("Missing 'experience' field for key: {}", key)
+                                    return@forEach
+                                }
+                val variationDataType = config.optString("variation_data_type", "UNKNOWN")
+                val variation: Any =
+                        when (variationDataType.uppercase()) {
+                            "STRING" -> config.optString("variation", "")
+                            "BOOLEAN" -> config.optBoolean("variation", false)
+                            "NUMBER" -> config.optDouble("variation", 0.0)
+                            "JSON" -> config.optJSONObject("variation")?.toMap()
+                                            ?: emptyMap<String, Any>()
+                            else ->
+                                    config.opt("variation")?.also {
+                                        logger.warn(
+                                                "Unknown variation type: {} for {}",
+                                                variationDataType,
+                                                key
+                                        )
+                                    }
+                                            ?: ""
+                        }
 
-            // Add the full experience data to the map under the experienceKey
-            newConfigMap[experienceKey] = experienceData
+                val experienceData =
+                        mapOf(
+                                "version" to config.optNumber("version"),
+                                "config_id" to config.optString("config_id", null),
+                                "user_id" to json.optString("user_id", null),
+                                "experience_id" to experience.optString("experience_id", null),
+                                "behaviour" to experience.optString("behaviour", null),
+                                "behaviour_id" to experience.optString("behaviour_id", null),
+                                "variation_name" to experience.optString("behaviour", null),
+                                "variation_id" to experience.optString("variation_id", null),
+                                "priority" to experience.optInt("priority", 0),
+                                "experience_created_time" to
+                                        experience.optLong("experience_created_time", 0L),
+                                "rule_id" to experience.optString("rule_id", null),
+                                "experience" to experienceKey,
+                                "audience_name" to experience.optString("audience_name", null),
+                                "ga_measurement_id" to
+                                        experience.optString("ga_measurement_id", null),
+                                "type" to experience.optString("type", null),
+                                "config_modifications" to
+                                        experience.optString("config_modifications", null),
+                                "variation_data_type" to variationDataType,
+                                "variation" to variation
+                        )
+
+                newConfigMap[experienceKey] = experienceData
+            } catch (e: Exception) {
+                logger.error("Error processing config key '{}': {}", key, e.message, e)
+            }
         }
 
-        // Update the configMap with the new structured config
-        configMap = newConfigMap
-        return configMap
+        return newConfigMap
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
-        // Get the value of configMap[key]
         val config = configMap[key]
-
-        // Check if the config value is valid and if it is a map (to be able to access .variation)
+        if (config == null) {
+            logger.warn("No config found for key '{}'", key)
+            return fallbackValue
+        }
+        if (config !is Map<*, *>) {
+            logger.warn("Config for '{}' is not a map: {}", key, config)
+            return fallbackValue
+        }
+        val variation = config["variation"]
         val result =
-                if (config is Map<*, *> && config.containsKey("variation")) {
-                    // Now, access the 'variation' field from the map
-                    val variation = config["variation"]
-                    if (variation != null && typeCheck(variation)) {
-                        variation as? T ?: fallbackValue
-                    } else {
-                        // If variation is null or doesn't match the expected type, use the fallback
+                if (variation != null && typeCheck(variation)) {
+                    try {
+                        variation as T
+                    } catch (e: ClassCastException) {
+                        logger.warn(
+                                "Type mismatch for '{}': expected {}, got {}",
+                                key,
+                                fallbackValue!!::class.simpleName,
+                                variation::class.simpleName
+                        )
                         fallbackValue
                     }
                 } else {
-                    // If config is not a map or doesn't contain "variation", return fallback
-                    logger.warn("Key '$key' does not have a 'variation' field or is not a map")
+                    logger.warn("No valid variation for '{}': {}", key, variation)
                     fallbackValue
                 }
-
-        // Ensure that the value is either a Map or emptyMap to avoid type inference issues
-        // Here, the configMap[key] value is being passed to pushSummary, with nested map handling
-        summaryManager.pushSummary(config as? Map<String, Any> ?: emptyMap<String, Any>())
-
+        summaryManager.pushSummary(config as Map<String, Any>)
         return result
     }
 
@@ -243,8 +291,20 @@ class CFClient private constructor(private val config: CFConfig, private val use
             mapOf(
                     "user_customer_id" to user_customer_id,
                     "anonymous" to anonymous,
-                    "private_fields" to private_fields,
-                    "session_fields" to session_fields,
+                    "private_fields" to
+                            private_fields?.let {
+                                mapOf(
+                                        "userFields" to it.userFields,
+                                        "properties" to it.properties,
+                                )
+                            },
+                    "session_fields" to
+                            session_fields?.let {
+                                mapOf(
+                                        "userFields" to it.userFields,
+                                        "properties" to it.properties,
+                                )
+                            },
                     "properties" to properties
             )
 
