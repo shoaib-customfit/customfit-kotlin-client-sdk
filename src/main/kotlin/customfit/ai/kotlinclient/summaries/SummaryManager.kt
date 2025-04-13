@@ -153,7 +153,8 @@ class SummaryManager(
                         
                         summary.variation_id?.let { summaryObject.put("variation_id", it) }
                         summary.user_customer_id?.let { summaryObject.put("user_customer_id", it) }
-                        summary.session_id?.let { summaryObject.put("session_id", it) }
+                        // Always include session ID
+                        summaryObject.put("session_id", sessionId)
                         summary.behaviour_id?.let { summaryObject.put("behaviour_id", it) }
                         summary.experience_id?.let { summaryObject.put("experience_id", it) }
                         summary.rule_id?.let { summaryObject.put("rule_id", it) }
@@ -173,9 +174,9 @@ class SummaryManager(
 
         // Print the API payload for debugging
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
-        println("\n[$timestamp] ================ SUMMARY API PAYLOAD ================")
-        println("[$timestamp] $jsonPayload")
-        println("[$timestamp] =====================================================")
+        logger.debug { "================ SUMMARY API PAYLOAD ================" }
+        logger.debug { jsonPayload }
+        logger.debug { "====================================================" }
 
         val success =
                 httpClient.postJson("https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}", jsonPayload)

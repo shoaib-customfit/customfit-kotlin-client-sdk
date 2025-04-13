@@ -81,21 +81,21 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                 
                 // Print API response
                 val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
-                println("\n[$timestamp] ================ API RESPONSE (${url.substringAfterLast("/")}) ================")
-                println("[$timestamp] Status Code: $responseCode")
+                logger.info { "================ API RESPONSE (${url.substringAfterLast("/")}) ================" }
+                logger.info { "Status Code: $responseCode" }
                 
                 try {
                     if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED) {
                         val responseBody = conn.inputStream.bufferedReader().readText()
-                        println("[$timestamp] $responseBody")
+                        logger.info { responseBody }
                     } else {
                         val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
-                        println("[$timestamp] Error: $errorBody")
+                        logger.error { "Error: $errorBody" }
                     }
                 } catch (e: Exception) {
-                    println("[$timestamp] Failed to read response: ${e.message}")
+                    logger.error { "Failed to read response: ${e.message}" }
                 } finally {
-                    println("[$timestamp] =================================================================")
+                    logger.info { "=================================================================" }
                 }
                 
                 responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED

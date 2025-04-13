@@ -161,9 +161,9 @@ class EventTracker(
 
         // Print the API payload for debugging
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
-        println("\n[$timestamp] ================ EVENT API PAYLOAD ================")
-        println("[$timestamp] $jsonPayload")
-        println("[$timestamp] ==================================================")
+        logger.debug { "================ EVENT API PAYLOAD ================" }
+        logger.debug { jsonPayload }
+        logger.debug { "==================================================" }
 
         val success = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
         if (!success) {
