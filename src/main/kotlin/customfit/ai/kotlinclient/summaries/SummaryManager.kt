@@ -47,7 +47,9 @@ class SummaryManager(
         }
         val configMap =
                 config.takeIf { it.keys.all { k -> k is String } }?.let {
-                    @Suppress("UNCHECKED_CAST") it as Map<String, Any>
+                    @Suppress("UNCHECKED_CAST")
+                    (it as Map<String, Any>).also { 
+                    }
                 }
                         ?: run {
                             logger.warn { "Config map has non-string keys: $config" }
@@ -165,15 +167,8 @@ class SummaryManager(
     private fun startPeriodicFlush() {
         fixedRateTimer("SummaryFlush", daemon = true, period = summariesFlushIntervalMs) {
             scope.launch {
-                val oldestSummary = summaries.peek()
-                val currentTime = DateTime.now()
-                
-                if (oldestSummary != null && 
-                    currentTime.minusSeconds(summariesFlushTimeSeconds)
-                    .isAfter(DateTime.parse(oldestSummary.requested_time))) {
-                    logger.debug { "Time-based flush triggered for summaries" }
-                    flushSummaries()
-                }
+                logger.debug { "Periodic flush triggered for summaries" }
+                flushSummaries()
             }
         }
     }

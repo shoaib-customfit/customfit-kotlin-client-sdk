@@ -38,7 +38,3 @@ tasks.withType<Jar> {
         if (it.isDirectory) it else zipTree(it) 
     })
 }
-
-kotlin {
-    jvmToolchain(17)
-}

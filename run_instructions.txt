@@ -1,0 +1,29 @@
+### Instructions to Build and Run the CustomFit Kotlin Client SDK
+
+To test the SDK settings metadata check functionality:
+
+1. Build the project:
+```
+./gradlew clean build
+```
+
+2. If you encounter build errors like "languageVersion is final", modify build.gradle.kts:
+   - Remove the kotlin { jvmToolchain(17) } block
+   - Or replace it with: kotlin.jvmToolchain { languageVersion.set(JavaLanguageVersion.of(17)) }
+
+3. Run the application:
+```
+java -jar build/libs/kotlin-client-sdk-1.1.1.jar
+```
+
+4. If that doesn't work, try:
+```
+./gradlew run
+```
+
+5. The application will run through three phases:
+   - Phase 1: Normal SDK settings checks (cycles 1-3)
+   - Phase 2: Forced metadata refresh using reflection to reset previousLastModified
+   - Phase 3: Continued normal checks (cycles 4-5)
+
+6. Watch for timestamp logs showing SDK settings check activity and any changes detected 

@@ -46,7 +46,7 @@ fun main(args: Array<String>) {
     
     // Run normal check cycles
     println("\n[${timestamp()}] --- PHASE 1: Normal SDK Settings Checks ---")
-    for (i in 1..3) {
+    for (i in 1..300) {
         println("\n[${timestamp()}] Check cycle $i...")
         
         // Wait for next check
