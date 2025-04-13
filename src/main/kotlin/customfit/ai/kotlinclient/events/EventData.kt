@@ -15,6 +15,5 @@ data class EventData(
         @JsonSerialize(using = CustomDateSerializer::class)
         val event_timestamp: DateTime,
         val session_id: String?,
-        val timeuuid: UUID = UUID.randomUUID(),
         val insert_id: String? = null
 )

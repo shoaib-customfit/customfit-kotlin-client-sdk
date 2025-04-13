@@ -77,7 +77,7 @@ class SummaryManager(
                             config_id = configMap["config_id"] as? String,
                             version = configMap["version"]?.toString(),
                             user_id = configMap["user_id"] as? String,
-                            requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss"),
+                            requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"),
                             variation_id = configMap["variation_id"] as? String,
                             user_customer_id = user.user_customer_id,
                             session_id = sessionId,
@@ -119,15 +119,51 @@ class SummaryManager(
         val jsonPayload =
                 try {
                     val jsonObject = JSONObject()
+                    
+                    // Add user object
                     jsonObject.put("user", JSONObject().apply {
                         put("user_customer_id", user.user_customer_id)
                         put("anonymous", user.anonymous)
-                        put("private_fields", user.private_fields)
-                        put("session_fields", user.session_fields)
+                        // Include private_fields if available
+                        if (user.private_fields != null) {
+                            put("private_fields", JSONObject(user.private_fields))
+                        }
+                        // Include session_fields if available
+                        if (user.session_fields != null) {
+                            put("session_fields", JSONObject(user.session_fields))
+                        }
+                        // Include properties
                         put("properties", JSONObject(user.properties))
+                        // Include any other available fields from the user
+                       
+                        // dimension_id would be added here if available
                     })
-                    jsonObject.put("summaries", JSONArray(summaries))
+                    
+                    // Add summaries array with properly formatted summary objects
+                    val summariesArray = JSONArray()
+                    summaries.forEach { summary ->
+                        val summaryObject = JSONObject()
+                        // Only add non-null fields
+                        summary.config_id?.let { summaryObject.put("config_id", it) }
+                        summary.version?.let { summaryObject.put("version", it) }
+                        summary.user_id?.let { summaryObject.put("user_id", it) }
+                        
+                        // Always use current time with correct format for requested_time
+                        summaryObject.put("requested_time", DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"))
+                        
+                        summary.variation_id?.let { summaryObject.put("variation_id", it) }
+                        summary.user_customer_id?.let { summaryObject.put("user_customer_id", it) }
+                        summary.session_id?.let { summaryObject.put("session_id", it) }
+                        summary.behaviour_id?.let { summaryObject.put("behaviour_id", it) }
+                        summary.experience_id?.let { summaryObject.put("experience_id", it) }
+                        summary.rule_id?.let { summaryObject.put("rule_id", it) }
+                        summariesArray.put(summaryObject)
+                    }
+                    jsonObject.put("summaries", summariesArray)
+                    
+                    // Add SDK version
                     jsonObject.put("cf_client_sdk_version", "1.0.0")
+                    
                     jsonObject.toString()
                 } catch (e: Exception) {
                     logger.error(e) { "Error serializing summaries: ${e.message}" }
@@ -135,8 +171,14 @@ class SummaryManager(
                     return
                 }
 
+        // Print the API payload for debugging
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
+        println("\n[$timestamp] ================ SUMMARY API PAYLOAD ================")
+        println("[$timestamp] $jsonPayload")
+        println("[$timestamp] =====================================================")
+
         val success =
-                httpClient.postJson("https://api.customfit.ai/v1/config/request/summary", jsonPayload)
+                httpClient.postJson("https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${summaries.size} summaries, re-queuing" }
             // Re-add summaries to queue in case of failure, but avoid infinite growth

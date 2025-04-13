@@ -22,7 +22,7 @@ data class CFConfigRequestSummary(
                 config_id = config["config_id"] as? String,
                 version = config["version"] as? String,
                 user_id = config["user_id"] as? String,
-                requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss"),
+                requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"),
                 variation_id = config["variation_id"] as? String,
                 user_customer_id = customerUserId,
                 session_id = sessionId,

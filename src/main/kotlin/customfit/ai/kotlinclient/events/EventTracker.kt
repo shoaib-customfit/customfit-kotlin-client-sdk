@@ -19,7 +19,7 @@ import org.json.JSONObject
 private val logger = KotlinLogging.logger {}
 
 class EventTracker(
-        private val sessionId: String,
+        private val sessionId: String,  // This is the session ID that will be used for all events
         private val httpClient: HttpClient,
         private val user: CFUser,
         private val summaryManager: SummaryManager,
@@ -45,15 +45,18 @@ class EventTracker(
         }
         val validatedProperties =
                 properties.filterKeys { it is String }.mapKeys { it.key as String }
+        
+        // Create event with:
+        // - session_id from the tracker initialization (consistent across events)
+        // - insert_id that's unique for each event (UUID)
         val event =
                 EventData(
                         event_customer_id = eventName,
                         event_type = EventType.TRACK,
                         properties = validatedProperties,
-                        event_timestamp = DateTime.now(),
-                        session_id = sessionId,
-                        timeuuid = UUID.randomUUID(),
-                        insert_id = UUID.randomUUID().toString()
+                        event_timestamp = DateTime.now(),  // Raw DateTime object, formatting applied during serialization
+                        session_id = sessionId,  // Use session ID from initialization
+                        insert_id = UUID.randomUUID().toString()  // Generate unique insert_id for each event
                 )
         if (eventQueue.size >= eventsQueueSize) {
             logger.warn { "Event queue is full (size = $eventsQueueSize), dropping oldest event" }
@@ -106,40 +109,63 @@ class EventTracker(
     private suspend fun sendTrackEvents(events: List<EventData>) {
         val jsonPayload =
                 try {
-                    JSONArray().apply {
-                        events.forEach { event ->
-                            put(
-                                    JSONObject()
-                                            .apply {
-                                                put("event_customer_id", event.event_customer_id)
-                                                put("event_type", event.event_type.name)
-                                                put("properties", JSONObject(event.properties))
-                                                put("event_timestamp", event.event_timestamp)
-                                                put("session_id", event.session_id)
-                                                put("timeuuid", event.timeuuid)
-                                                put("insert_id", event.insert_id)
-                                                
-                                                // Add user properties
-                                                put("user_id", user.user_customer_id)
-                                                put("anonymous_id", user.anonymous)
-                                                val userProperties = user.getCurrentProperties()
-                                                if (userProperties.isNotEmpty()) {
-                                                    put("user_properties", JSONObject(userProperties))
-                                                }
-                                                
-                                                // No summary data in event payload - handled by SummaryManager
-                                            }
-                            )
+                    val jsonObject = JSONObject()
+                    
+                    // Add events array with properly formatted event objects
+                    val eventsArray = JSONArray()
+                    events.forEach { event ->
+                        val eventObject = JSONObject()
+                        eventObject.put("event_customer_id", event.event_customer_id)
+                        eventObject.put("event_type", event.event_type.name)
+                        eventObject.put("properties", JSONObject(event.properties))
+                        
+                        // Format timestamp to match server expectation: yyyy-MM-dd HH:mm:ss.SSSZ (no 'T')
+                        event.event_timestamp?.let { 
+                            eventObject.put("event_timestamp", it.toString("yyyy-MM-dd HH:mm:ss.SSSZ")) 
                         }
+                        
+                        eventObject.put("session_id", event.session_id)
+                        eventObject.put("insert_id", event.insert_id)
+                        eventsArray.put(eventObject)
                     }
-                            .toString()
+                    jsonObject.put("events", eventsArray)
+                    
+                    // Add user object
+                    jsonObject.put("user", JSONObject().apply {
+                        put("user_customer_id", user.user_customer_id)
+                        put("anonymous", user.anonymous)
+                        // Include private_fields if available
+                        if (user.private_fields != null) {
+                            put("private_fields", JSONObject(user.private_fields))
+                        }
+                        // Include session_fields if available
+                        if (user.session_fields != null) {
+                            put("session_fields", JSONObject(user.session_fields))
+                        }
+                        // Include properties
+                        put("properties", JSONObject(user.properties))
+                        // Include any other available fields from the user
+                      
+                        // dimension_id would be added here if available
+                    })
+                    
+                    // Add SDK version
+                    jsonObject.put("cf_client_sdk_version", "1.0.0")
+                    
+                    jsonObject.toString()
                 } catch (e: Exception) {
                     logger.error(e) { "Error serializing events: ${e.message}" }
                     events.forEach { eventQueue.offer(it) }
                     return
                 }
 
-        val success = httpClient.postJson("https://api.customfit.ai/v1/cfe", jsonPayload)
+        // Print the API payload for debugging
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
+        println("\n[$timestamp] ================ EVENT API PAYLOAD ================")
+        println("[$timestamp] $jsonPayload")
+        println("[$timestamp] ==================================================")
+
+        val success = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${events.size} events, re-queuing" }
             events.forEach { eventQueue.offer(it) }

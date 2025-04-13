@@ -18,12 +18,24 @@ fun main(args: Array<String>) {
     
     val config = CFConfig.Builder(clientKey)
         .sdkSettingsCheckIntervalMs(5_000L) // 5 seconds for quick testing
+        .summariesFlushTimeSeconds(3)       // 3 seconds for summaries flush time
+        .summariesFlushIntervalMs(3_000L)   // 3 seconds for summaries flush interval
+        .eventsFlushTimeSeconds(3)          // 3 seconds for events flush time
+        .eventsFlushIntervalMs(3_000L)      // 3 seconds for events flush interval
         .debugLoggingEnabled(true)
         .build()
         
     println("\n[${timestamp()}] Test config for SDK settings check:")
     println("[${timestamp()}] - SDK Settings Check Interval: ${config.sdkSettingsCheckIntervalMs}ms")
+    println("[${timestamp()}] - Summaries Flush Time: ${config.summariesFlushTimeSeconds}s")
+    println("[${timestamp()}] - Summaries Flush Interval: ${config.summariesFlushIntervalMs}ms")
+    println("[${timestamp()}] - Events Flush Time: ${config.eventsFlushTimeSeconds}s")
+    println("[${timestamp()}] - Events Flush Interval: ${config.eventsFlushIntervalMs}ms")
     println("[${timestamp()}] - Debug Logging Enabled: ${config.debugLoggingEnabled}")
+    
+    println("\n[${timestamp()}] --- Timing Parameters Explanation ---")
+    println("[${timestamp()}] Flush Time: Maximum time an item can stay in queue before forcing a flush")
+    println("[${timestamp()}] Flush Interval: How often the system checks for items to flush")
     
     // Create a user
     val user = CFUser.builder("user123")
@@ -38,6 +50,12 @@ fun main(args: Array<String>) {
     val initialValue = cfClient.getString("shoaib-1", "default-value")
     println("[${timestamp()}] Initial value of shoaib-1: $initialValue")
     
+    // Track some events to test summary flush
+    println("[${timestamp()}] Testing event tracking with summaries...")
+    cfClient.trackEvent("login_event", mapOf("source" to "app"))
+    cfClient.trackEvent("page_view", mapOf("page" to "home", "duration" to 30))
+    cfClient.trackEvent("button_click", mapOf("button_id" to "submit", "page" to "checkout"))
+    
     // Register a listener to detect changes in real-time
     val flagListener: (String) -> Unit = { newValue ->
         println("[${timestamp()}] CHANGE DETECTED: shoaib-1 updated to: $newValue")
@@ -46,8 +64,11 @@ fun main(args: Array<String>) {
     
     // Run normal check cycles
     println("\n[${timestamp()}] --- PHASE 1: Normal SDK Settings Checks ---")
-    for (i in 1..300) {
+    for (i in 1..5) {
         println("\n[${timestamp()}] Check cycle $i...")
+        
+        // Track an event in each cycle
+        cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 1))
         
         // Wait for next check
         println("[${timestamp()}] Waiting for SDK settings check...")
@@ -67,6 +88,9 @@ fun main(args: Array<String>) {
         previousLastModifiedField.isAccessible = true
         val previousValue = previousLastModifiedField.get(cfClient)
         println("[${timestamp()}] Current previousLastModified value: $previousValue")
+        
+        // Track events during forced refresh
+        cfClient.trackEvent("forced_refresh", mapOf("timestamp" to System.currentTimeMillis()))
         
         // Set to null to force a refresh on next check
         previousLastModifiedField.set(cfClient, null)
@@ -91,6 +115,9 @@ fun main(args: Array<String>) {
     println("\n[${timestamp()}] --- PHASE 3: Continuing Normal Checks ---")
     for (i in 4..5) {
         println("\n[${timestamp()}] Check cycle $i...")
+        
+        // Track an event in each cycle
+        cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 3))
         
         // Wait for next check
         println("[${timestamp()}] Waiting for SDK settings check...")

@@ -77,6 +77,27 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
 
     suspend fun postJson(url: String, payload: String): Boolean =
             performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn ->
-                conn.responseCode == HttpURLConnection.HTTP_OK
+                val responseCode = conn.responseCode
+                
+                // Print API response
+                val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
+                println("\n[$timestamp] ================ API RESPONSE (${url.substringAfterLast("/")}) ================")
+                println("[$timestamp] Status Code: $responseCode")
+                
+                try {
+                    if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED) {
+                        val responseBody = conn.inputStream.bufferedReader().readText()
+                        println("[$timestamp] $responseBody")
+                    } else {
+                        val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
+                        println("[$timestamp] Error: $errorBody")
+                    }
+                } catch (e: Exception) {
+                    println("[$timestamp] Failed to read response: ${e.message}")
+                } finally {
+                    println("[$timestamp] =================================================================")
+                }
+                
+                responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED
             } ?: false
 }
