@@ -1,5 +1,4 @@
     // Provide a way to add attributes in config
     // One screen to another screen how things work ?
     // Make queue size 1
-    // client.getString("shoaib-1", "shoaib-default") should support callback methods
     // Add timer and test if values change

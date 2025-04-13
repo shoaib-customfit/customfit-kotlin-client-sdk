@@ -139,7 +139,7 @@ class EventTracker(
                     return
                 }
 
-        val success = httpClient.postJson("https://example.com/v1/cfe", jsonPayload)
+        val success = httpClient.postJson("https://api.customfit.ai/v1/cfe", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${events.size} events, re-queuing" }
             events.forEach { eventQueue.offer(it) }

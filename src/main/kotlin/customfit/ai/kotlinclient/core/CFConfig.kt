@@ -79,7 +79,7 @@
             private var summariesQueueSize: Int = 100
             private var summariesFlushTimeSeconds: Int = 60
             private var summariesFlushIntervalMs: Long = 60_000L
-            private var sdkSettingsCheckIntervalMs: Long = 300_000
+            private var sdkSettingsCheckIntervalMs: Long = 3_000
             private var networkConnectionTimeoutMs: Int = 10_000
             private var networkReadTimeoutMs: Int = 10_000
             private var loggingEnabled: Boolean = true

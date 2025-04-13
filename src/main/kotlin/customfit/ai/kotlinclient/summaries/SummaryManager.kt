@@ -134,7 +134,7 @@ class SummaryManager(
                 }
 
         val success =
-                httpClient.postJson("https://example.com/v1/config/request/summary", jsonPayload)
+                httpClient.postJson("https://api.customfit.ai/v1/config/request/summary", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${summaries.size} summaries, re-queuing" }
             // Re-add summaries to queue in case of failure, but avoid infinite growth
