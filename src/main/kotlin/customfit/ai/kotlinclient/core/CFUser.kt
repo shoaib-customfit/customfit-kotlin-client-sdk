@@ -170,6 +170,30 @@ data class CFUser(
     }
 
     /**
+     * Set application info in the properties
+     */
+    fun setApplicationInfo(appInfo: ApplicationInfo) {
+        _properties["application"] = appInfo.toMap()
+    }
+    
+    /**
+     * Get application info from properties
+     */
+    fun getApplicationInfo(): ApplicationInfo? {
+        val appInfoMap = _properties["application"] as? Map<String, Any> ?: return null
+        return ApplicationInfo.fromMap(appInfoMap)
+    }
+    
+    /**
+     * Update application launch count
+     */
+    fun incrementAppLaunchCount() {
+        val appInfo = getApplicationInfo() ?: return
+        val updatedAppInfo = appInfo.copy(launchCount = appInfo.launchCount + 1)
+        setApplicationInfo(updatedAppInfo)
+    }
+
+    /**
      * Converts user data to a map for API requests
      */
     fun toUserMap(): Map<String, Any?> = mapOf(
@@ -250,6 +274,13 @@ data class CFUser(
          */
         fun withDeviceContext(device: DeviceContext) = apply {
             properties["device"] = device.toMap()
+        }
+        
+        /**
+         * Add application info for targeting
+         */
+        fun withApplicationInfo(appInfo: ApplicationInfo) = apply {
+            properties["application"] = appInfo.toMap()
         }
 
         private fun Any?.isJsonCompatible(): Boolean =

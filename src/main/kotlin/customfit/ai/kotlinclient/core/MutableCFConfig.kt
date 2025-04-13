@@ -37,6 +37,7 @@ class MutableCFConfig(initConfig: CFConfig) {
     val networkReadTimeoutMs: Int get() = _config.networkReadTimeoutMs
     val loggingEnabled: Boolean get() = _config.loggingEnabled
     val debugLoggingEnabled: Boolean get() = _config.debugLoggingEnabled
+    val autoEnvAttributesEnabled: Boolean get() = _config.autoEnvAttributesEnabled
     
     // Background polling settings
     val disableBackgroundPolling: Boolean get() = _config.disableBackgroundPolling
@@ -168,6 +169,15 @@ class MutableCFConfig(initConfig: CFConfig) {
     suspend fun setMaxStoredEvents(maxEvents: Int) = updateConfig {
         require(maxEvents > 0) { "Max stored events must be greater than 0" }
         _config.copy(maxStoredEvents = maxEvents)
+    }
+    
+    /**
+     * Updates the auto environment attributes enabled setting
+     * 
+     * @param enabled true to enable automatic environment attribute collection
+     */
+    suspend fun setAutoEnvAttributesEnabled(enabled: Boolean) = updateConfig {
+        _config.copy(autoEnvAttributesEnabled = enabled)
     }
     
     /**

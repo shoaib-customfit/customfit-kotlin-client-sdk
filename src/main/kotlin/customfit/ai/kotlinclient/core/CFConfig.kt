@@ -33,7 +33,9 @@
         val backgroundPollingIntervalMs: Long = 3_600_000, // 1 hour by default
         val useReducedPollingWhenBatteryLow: Boolean = true,
         val reducedPollingIntervalMs: Long = 7_200_000, // 2 hours when battery low
-        val maxStoredEvents: Int = 100 // Maximum events to store when offline
+        val maxStoredEvents: Int = 100, // Maximum events to store when offline
+        // Auto environment attributes enabled - when true, automatically collect device and app info
+        val autoEnvAttributesEnabled: Boolean = false
     ) {
         val dimensionId: String? by lazy { extractDimensionIdFromToken(clientKey) }
 
@@ -98,6 +100,7 @@
             private var useReducedPollingWhenBatteryLow: Boolean = true
             private var reducedPollingIntervalMs: Long = 7_200_000
             private var maxStoredEvents: Int = 100
+            private var autoEnvAttributesEnabled: Boolean = false
             
             fun eventsQueueSize(size: Int) = apply { this.eventsQueueSize = size }
             fun eventsFlushTimeSeconds(seconds: Int) = apply { this.eventsFlushTimeSeconds = seconds }
@@ -128,6 +131,14 @@
                 this.maxStoredEvents = maxEvents 
             }
             
+            /**
+             * Enable or disable automatic environment attributes collection
+             * When enabled, device context and application info will be automatically detected
+             */
+            fun autoEnvAttributesEnabled(enabled: Boolean) = apply {
+                this.autoEnvAttributesEnabled = enabled
+            }
+            
             fun build(): CFConfig = CFConfig(
                 clientKey = clientKey,
                 eventsQueueSize = eventsQueueSize,
@@ -146,7 +157,8 @@
                 backgroundPollingIntervalMs = backgroundPollingIntervalMs,
                 useReducedPollingWhenBatteryLow = useReducedPollingWhenBatteryLow,
                 reducedPollingIntervalMs = reducedPollingIntervalMs,
-                maxStoredEvents = maxStoredEvents
+                maxStoredEvents = maxStoredEvents,
+                autoEnvAttributesEnabled = autoEnvAttributesEnabled
             )
         }
     }

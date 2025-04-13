@@ -7,6 +7,7 @@ import customfit.ai.kotlinclient.core.DeviceContext
 import customfit.ai.kotlinclient.core.EvaluationContext
 import customfit.ai.kotlinclient.core.MutableCFConfig
 import customfit.ai.kotlinclient.core.SdkSettings
+import customfit.ai.kotlinclient.core.ApplicationInfo
 import customfit.ai.kotlinclient.events.EventPropertiesBuilder
 import customfit.ai.kotlinclient.events.EventTracker
 import customfit.ai.kotlinclient.network.ConfigFetcher
@@ -27,6 +28,7 @@ import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
 import org.json.JSONObject
 import org.joda.time.DateTime
+import customfit.ai.kotlinclient.utils.ApplicationInfoDetector
 
 private val logger = KotlinLogging.logger {}
 
@@ -65,6 +67,9 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private val configListeners = ConcurrentHashMap<String, MutableList<(Any) -> Unit>>()
     private val featureFlagListeners = ConcurrentHashMap<String, MutableList<FeatureFlagChangeListener>>()
     private val allFlagsListeners = ConcurrentHashMap.newKeySet<AllFlagsListener>()
+    
+    // Application info
+    private var applicationInfo: ApplicationInfo? = null
     
     /**
      * Register a listener for a specific feature flag
@@ -106,15 +111,38 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             logger.info { "CF client initialized in offline mode" }
         }
         
-        // Initialize device context if it's not already set
-        val existingDeviceContext = user.getDeviceContext()
-        if (existingDeviceContext == null) {
-            deviceContext = DeviceContext.createBasic()
-            // Update user with device context
-            updateUserWithDeviceContext()
+        // Initialize environment attributes based on config
+        if (mutableConfig.autoEnvAttributesEnabled) {
+            logger.debug { "Auto environment attributes enabled, detecting device and application info" }
+            
+            // Initialize device context if it's not already set
+            val existingDeviceContext = user.getDeviceContext()
+            if (existingDeviceContext == null) {
+                deviceContext = DeviceContext.createBasic()
+                // Update user with device context
+                updateUserWithDeviceContext()
+            } else {
+                // Use the device context from the user if available
+                deviceContext = existingDeviceContext
+            }
+            
+            // Get application info from user if available, otherwise detect it
+            val existingAppInfo = user.getApplicationInfo()
+            if (existingAppInfo != null) {
+                applicationInfo = existingAppInfo
+                // Increment launch count
+                val updatedAppInfo = existingAppInfo.copy(launchCount = existingAppInfo.launchCount + 1)
+                updateUserWithApplicationInfo(updatedAppInfo)
+            } else {
+                // Try to auto-detect application info
+                val detectedAppInfo = ApplicationInfoDetector.detectApplicationInfo()
+                if (detectedAppInfo != null) {
+                    updateUserWithApplicationInfo(detectedAppInfo)
+                    logger.debug { "Auto-detected application info: $detectedAppInfo" }
+                }
+            }
         } else {
-            // Use the device context from the user if available
-            deviceContext = existingDeviceContext
+            logger.debug { "Auto environment attributes disabled, skipping device and application info detection" }
         }
         
         // Set up connection status monitoring
@@ -968,8 +996,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     }
     
     /**
-     * Updates user properties with the current device context as a sub-JSON
-     * under the key 'mobile_device_context'
+     * Updates user properties with the current device context
      */
     private fun updateUserWithDeviceContext() {
         val deviceContextMap = deviceContext.toMap()
@@ -982,6 +1009,18 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             user.addProperty("mobile_device_context", deviceContextMap)
             
             logger.debug { "Updated user properties with device context" }
+        }
+    }
+    
+    /**
+     * Updates user properties with the current application info
+     */
+    private fun updateUserWithApplicationInfo(appInfo: ApplicationInfo) {
+        val appInfoMap = appInfo.toMap()
+        if (appInfoMap.isNotEmpty()) {
+            user.setApplicationInfo(appInfo)
+            this.applicationInfo = appInfo
+            logger.debug { "Updated user properties with application info" }
         }
     }
     
@@ -1053,6 +1092,77 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 logger.error(e) { "Error flushing events during shutdown: ${e.message}" }
             }
         }
+    }
+
+    /**
+     * Sets application information for targeting and analytics
+     * 
+     * @param appInfo the application info to set
+     */
+    fun setApplicationInfo(appInfo: ApplicationInfo) {
+        this.applicationInfo = appInfo
+        updateUserWithApplicationInfo(appInfo)
+        logger.debug { "Application info updated: $appInfo" }
+    }
+    
+    /**
+     * Gets the current application info
+     */
+    fun getApplicationInfo(): ApplicationInfo? {
+        return applicationInfo
+    }
+    
+    /**
+     * Increments the application launch count
+     */
+    fun incrementAppLaunchCount() {
+        val currentAppInfo = applicationInfo ?: return
+        val updatedAppInfo = currentAppInfo.copy(launchCount = currentAppInfo.launchCount + 1)
+        updateUserWithApplicationInfo(updatedAppInfo)
+        logger.debug { "Application launch count incremented to: ${updatedAppInfo.launchCount}" }
+    }
+    
+    /**
+     * Checks if automatic environment attributes collection is enabled
+     */
+    fun isAutoEnvAttributesEnabled(): Boolean {
+        return mutableConfig.autoEnvAttributesEnabled
+    }
+    
+    /**
+     * Enables automatic environment attributes collection
+     * When enabled, device and application info will be automatically detected
+     */
+    fun enableAutoEnvAttributes() {
+        CoroutineScope(Dispatchers.IO).launch {
+            mutableConfig.setAutoEnvAttributesEnabled(true)
+        }
+        logger.debug { "Auto environment attributes collection enabled" }
+        
+        // If not already initialized, detect and set now
+        if (deviceContext.toMap().isEmpty() && applicationInfo == null) {
+            // Initialize device context
+            deviceContext = DeviceContext.createBasic()
+            updateUserWithDeviceContext()
+            
+            // Initialize application info
+            val detectedAppInfo = ApplicationInfoDetector.detectApplicationInfo()
+            if (detectedAppInfo != null) {
+                setApplicationInfo(detectedAppInfo)
+                logger.debug { "Auto-detected application info: $detectedAppInfo" }
+            }
+        }
+    }
+    
+    /**
+     * Disables automatic environment attributes collection
+     * When disabled, device and application info will not be automatically detected
+     */
+    fun disableAutoEnvAttributes() {
+        CoroutineScope(Dispatchers.IO).launch {
+            mutableConfig.setAutoEnvAttributesEnabled(false)
+        }
+        logger.debug { "Auto environment attributes collection disabled" }
     }
 
     companion object {
