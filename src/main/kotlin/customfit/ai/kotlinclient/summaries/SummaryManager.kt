@@ -1,5 +1,6 @@
 package customfit.ai.kotlinclient.summaries
 
+import customfit.ai.kotlinclient.core.CFConfig
 import customfit.ai.kotlinclient.core.CFUser
 import customfit.ai.kotlinclient.network.HttpClient
 import java.util.Collections
@@ -21,19 +22,21 @@ private val logger = KotlinLogging.logger {}
 class SummaryManager(
         private val sessionId: String,
         private val httpClient: HttpClient,
-        private val user: CFUser
-
+        private val user: CFUser,
+        private val cfConfig: CFConfig
 ) {
-    private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue()
+    // Use values from config or fallback to defaults
+    private val summariesQueueSize = cfConfig.summariesQueueSize
+    private val summariesFlushTimeSeconds = cfConfig.summariesFlushTimeSeconds
+    private val summariesFlushIntervalMs = cfConfig.summariesFlushIntervalMs
+    
+    private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue(summariesQueueSize)
     private val summaryTrackMap = Collections.synchronizedMap(mutableMapOf<String, Boolean>())
     private val trackMutex = Mutex()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    companion object {
-        private const val FLUSH_INTERVAL_MS = 60_000L // 1 minute
-    }
-
     init {
+        logger.info { "SummaryManager initialized with summariesQueueSize=$summariesQueueSize, summariesFlushTimeSeconds=$summariesFlushTimeSeconds, summariesFlushIntervalMs=$summariesFlushIntervalMs" }
         startPeriodicFlush()
     }
 
@@ -87,8 +90,13 @@ class SummaryManager(
                 if (!summaries.offer(configSummary)) {
                     logger.error { "Failed to queue summary after flush: $configSummary" }
                 }
+            } else {
+                logger.debug { "Summary added to queue: $configSummary" }
+                // Check if queue size threshold is reached
+                if (summaries.size >= summariesQueueSize) {
+                    flushSummaries()
+                }
             }
-            logger.debug { "Summary added to queue: $configSummary" }
         }
     }
 
@@ -129,7 +137,13 @@ class SummaryManager(
                 httpClient.postJson("https://example.com/v1/config/request/summary", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${summaries.size} summaries, re-queuing" }
-            summaries.forEach { this.summaries.offer(it) }
+            // Re-add summaries to queue in case of failure, but avoid infinite growth
+            val capacity = summariesQueueSize - this.summaries.size
+            if (capacity > 0) {
+                summaries.take(capacity).forEach { this.summaries.offer(it) }
+            } else {
+                logger.warn { "Summary queue is full, couldn't re-queue failed summaries" }
+            }
         } else {
             logger.info { "Successfully sent ${summaries.size} summaries" }
         }
@@ -149,8 +163,21 @@ class SummaryManager(
     }
 
     private fun startPeriodicFlush() {
-        fixedRateTimer("SummaryFlush", daemon = true, period = FLUSH_INTERVAL_MS) {
-            scope.launch { flushSummaries() }
+        fixedRateTimer("SummaryFlush", daemon = true, period = summariesFlushIntervalMs) {
+            scope.launch {
+                val oldestSummary = summaries.peek()
+                val currentTime = DateTime.now()
+                
+                if (oldestSummary != null && 
+                    currentTime.minusSeconds(summariesFlushTimeSeconds)
+                    .isAfter(DateTime.parse(oldestSummary.requested_time))) {
+                    logger.debug { "Time-based flush triggered for summaries" }
+                    flushSummaries()
+                }
+            }
         }
     }
+    
+    // Method to retrieve all active summaries for other components
+    fun getSummaries(): Map<String, Boolean> = summaryTrackMap.toMap()
 }

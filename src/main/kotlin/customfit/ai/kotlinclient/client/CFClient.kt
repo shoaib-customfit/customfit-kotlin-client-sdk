@@ -20,11 +20,11 @@ import org.joda.time.DateTime
 
 private val logger = KotlinLogging.logger {}
 
-class CFClient private constructor(private val config: CFConfig, private val user: CFUser) {
+class CFClient private constructor(private val cfConfig: CFConfig, private val user: CFUser) {
     private val sessionId: String = UUID.randomUUID().toString()
-    private val httpClient = HttpClient()
-    val summaryManager = SummaryManager(sessionId, httpClient, user)
-    val eventTracker = EventTracker(sessionId, httpClient, user, summaryManager)
+    private val httpClient = HttpClient(cfConfig)
+    val summaryManager = SummaryManager(sessionId, httpClient, user, cfConfig)
+    val eventTracker = EventTracker(sessionId, httpClient, user, summaryManager, cfConfig)
 
     @Volatile private var previousLastModified: String? = null
     private val configMap: MutableMap<String, Any> =
@@ -67,7 +67,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
     }
 
     init {
-        logger.info { "CFClient initialized with config: $config and user: $user" }
+        logger.info { "CFClient initialized with config: $cfConfig and user: $user" }
         initializeSdkSettings()
         startPeriodicSdkSettingsCheck()
     }
@@ -188,7 +188,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
     fun getUserProperties(): Map<String, Any> = user.getCurrentProperties()
 
     private fun startPeriodicSdkSettingsCheck() {
-        fixedRateTimer("SdkSettingsCheck", daemon = true, period = 300_000) {
+        fixedRateTimer("SdkSettingsCheck", daemon = true, period = cfConfig.sdkSettingsCheckIntervalMs) {
             CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
                 logger.debug { "Periodic SDK settings check triggered" }
                 checkSdkSettings()
@@ -246,14 +246,14 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
     private suspend fun fetchSdkSettingsMetadata(): Map<String, String>? =
             httpClient.fetchMetadata(
-                            "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
+                            "https://sdk.customfit.ai/${cfConfig.dimensionId}/cf-sdk-settings.json"
                     )
                     ?.also { logger.debug { "Fetched metadata: $it" } }
 
     private suspend fun fetchSdkSettings(): SdkSettings? {
         val json =
                 httpClient.fetchJson(
-                        "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
+                        "https://sdk.customfit.ai/${cfConfig.dimensionId}/cf-sdk-settings.json"
                 )
                         ?: run {
                             logger.warn { "Failed to fetch SDK settings JSON" }
@@ -280,7 +280,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
     }
 
     private suspend fun fetchConfigs(): Map<String, Any>? {
-        val url = "https://api.customfit.ai/v1/users/configs?cfenc=${config.clientKey}"
+        val url = "https://api.customfit.ai/v1/users/configs?cfenc=${cfConfig.clientKey}"
         val payload =
                 try {
                     JSONObject()
@@ -444,6 +444,6 @@ class CFClient private constructor(private val config: CFConfig, private val use
     }
 
     companion object {
-        fun init(config: CFConfig, user: CFUser): CFClient = CFClient(config, user)
+        fun init(cfConfig: CFConfig, user: CFUser): CFClient = CFClient(cfConfig, user)
     }
 }

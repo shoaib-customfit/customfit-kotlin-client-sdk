@@ -1,45 +1,52 @@
 package customfit.ai.kotlinclient.network
 
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.json.JSONObject
+import customfit.ai.kotlinclient.core.CFConfig
 
 private val logger = KotlinLogging.logger {}
 
-class HttpClient {
+class HttpClient(private val cfConfig: CFConfig? = null) {
+    private val networkConnectionTimeout = cfConfig?.networkConnectionTimeoutMs ?: 10_000 // Default 10 seconds
+    private val networkReadTimeout = cfConfig?.networkReadTimeoutMs ?: 10_000 // Default 10 seconds
+    
     suspend fun <T> performRequest(
             url: String,
             method: String,
             headers: Map<String, String> = emptyMap(),
             body: String? = null,
-            responseHandler: (HttpURLConnection) -> T?
+            responseHandler: suspend (HttpURLConnection) -> T?
     ): T? =
             withContext(Dispatchers.IO) {
                 var connection: HttpURLConnection? = null
                 try {
-                    connection =
-                            (URL(url).openConnection() as HttpURLConnection).apply {
-                                requestMethod = method
-                                connectTimeout = 10_000 // 10 seconds
-                                readTimeout = 10_000 // 10 seconds
-                                headers.forEach { (key, value) -> setRequestProperty(key, value) }
-                                if (body != null) {
-                                    doOutput = true
-                                    outputStream.use { os ->
-                                        os.write(body.toByteArray(Charsets.UTF_8))
-                                    }
-                                }
-                            }
-                    connection.connect()
-                    responseHandler(connection)
+                    logger.debug { "Making $method request to $url" }
+                    connection = URL(url).openConnection() as HttpURLConnection
+                    connection.requestMethod = method
+                    connection.connectTimeout = networkConnectionTimeout
+                    connection.readTimeout = networkReadTimeout
+                    connection.doInput = true
+
+                    headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+
+                    if (body != null) {
+                        connection.doOutput = true
+                        connection.outputStream.use { it.write(body.toByteArray()) }
+                    }
+
+                    val response = responseHandler(connection)
+                    connection.disconnect()
+                    return@withContext response
                 } catch (e: Exception) {
-                    logger.error(e) { "HTTP request failed for $url: ${e.message}" }
-                    null
-                } finally {
+                    logger.error(e) { "Error making request to $url: ${e.message}" }
                     connection?.disconnect()
+                    null
                 }
             }
 

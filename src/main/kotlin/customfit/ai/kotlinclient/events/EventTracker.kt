@@ -1,5 +1,6 @@
 package customfit.ai.kotlinclient.events
 
+import customfit.ai.kotlinclient.core.CFConfig
 import customfit.ai.kotlinclient.core.CFUser
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.summaries.SummaryManager
@@ -21,22 +22,23 @@ class EventTracker(
         private val sessionId: String,
         private val httpClient: HttpClient,
         private val user: CFUser,
-        private val summaryManager: SummaryManager
+        private val summaryManager: SummaryManager,
+        private val cfConfig: CFConfig
 ) {
-    private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue(MAX_QUEUE_SIZE)
+    // Use values from config or fallback to defaults
+    private val eventsQueueSize = cfConfig.eventsQueueSize
+    private val eventsFlushTimeSeconds = cfConfig.eventsFlushTimeSeconds
+    private val eventsFlushIntervalMs = cfConfig.eventsFlushIntervalMs
+    
+    private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue(eventsQueueSize)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    companion object {
-        private const val MAX_QUEUE_SIZE = 100
-        private const val MAX_TIME_IN_SECONDS = 60
-        private const val FLUSH_INTERVAL_MS = 1000L
-    }
-
     init {
-        startFlushEventCheck()
+        logger.info { "EventTracker initialized with eventsQueueSize=$eventsQueueSize, eventsFlushTimeSeconds=$eventsFlushTimeSeconds, eventsFlushIntervalMs=$eventsFlushIntervalMs" }
+        startPeriodicFlush()
     }
 
-    fun trackEvent(eventName: String, properties: Map<String, Any>) {
+    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
         if (eventName.isBlank()) {
             logger.warn { "Event name cannot be blank" }
             return
@@ -53,6 +55,10 @@ class EventTracker(
                         timeuuid = UUID.randomUUID(),
                         insert_id = UUID.randomUUID().toString()
                 )
+        if (eventQueue.size >= eventsQueueSize) {
+            logger.warn { "Event queue is full (size = $eventsQueueSize), dropping oldest event" }
+            eventQueue.poll() // Remove the oldest event
+        }
         if (!eventQueue.offer(event)) {
             logger.warn { "Event queue full, forcing flush for event: $event" }
             scope.launch { flushEvents() }
@@ -61,20 +67,20 @@ class EventTracker(
             }
         } else {
             logger.debug { "Event added to queue: $event" }
-            if (eventQueue.size >= MAX_QUEUE_SIZE) {
+            if (eventQueue.size >= eventsQueueSize) {
                 scope.launch { flushEvents() }
             }
         }
     }
 
-    private fun startFlushEventCheck() {
-        fixedRateTimer("EventFlushCheck", daemon = true, period = FLUSH_INTERVAL_MS) {
+    private fun startPeriodicFlush() {
+        fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs) {
             scope.launch {
                 val lastEvent = eventQueue.peek()
                 val currentTime = DateTime.now()
                 if (lastEvent != null &&
                                 currentTime
-                                        .minusSeconds(MAX_TIME_IN_SECONDS)
+                                        .minusSeconds(eventsFlushTimeSeconds)
                                         .isAfter(lastEvent.event_timestamp)
                 ) {
                     flushEvents()
@@ -112,6 +118,16 @@ class EventTracker(
                                                 put("session_id", event.session_id)
                                                 put("timeuuid", event.timeuuid)
                                                 put("insert_id", event.insert_id)
+                                                
+                                                // Add user properties
+                                                put("user_id", user.user_customer_id)
+                                                put("anonymous_id", user.anonymous)
+                                                val userProperties = user.getCurrentProperties()
+                                                if (userProperties.isNotEmpty()) {
+                                                    put("user_properties", JSONObject(userProperties))
+                                                }
+                                                
+                                                // No summary data in event payload - handled by SummaryManager
                                             }
                             )
                         }
