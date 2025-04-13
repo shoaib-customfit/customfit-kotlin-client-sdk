@@ -83,6 +83,7 @@ class EventTracker(
     }
 
     suspend fun flushEvents() {
+        summaryManager.flushSummaries()
         if (eventQueue.isEmpty()) {
             logger.debug("No events to flush")
             return
@@ -91,7 +92,6 @@ class EventTracker(
         eventQueue.drainTo(eventsToFlush)
         if (eventsToFlush.isNotEmpty()) {
             sendTrackEvents(eventsToFlush)
-            summaryManager.flushSummaries() // After events
             logger.info("Flushed {} events successfully", eventsToFlush.size)
         }
     }
