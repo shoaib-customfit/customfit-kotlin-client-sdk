@@ -92,6 +92,28 @@ data class DeviceContext(
                 timezone = TimeZone.getDefault().id
             )
         }
+        
+        /**
+         * Creates a DeviceContext from a map representation
+         */
+        fun fromMap(map: Map<String, Any>): DeviceContext {
+            return DeviceContext(
+                manufacturer = map["manufacturer"] as? String,
+                model = map["model"] as? String,
+                osName = map["os_name"] as? String,
+                osVersion = map["os_version"] as? String,
+                sdkVersion = (map["sdk_version"] as? String) ?: "1.0.0",
+                appId = map["app_id"] as? String,
+                appVersion = map["app_version"] as? String,
+                locale = map["locale"] as? String,
+                timezone = map["timezone"] as? String,
+                screenWidth = map["screen_width"] as? Int,
+                screenHeight = map["screen_height"] as? Int,
+                screenDensity = map["screen_density"] as? Float,
+                networkType = map["network_type"] as? String,
+                customAttributes = (map["custom_attributes"] as? Map<String, String>) ?: emptyMap()
+            )
+        }
     }
     
     /**

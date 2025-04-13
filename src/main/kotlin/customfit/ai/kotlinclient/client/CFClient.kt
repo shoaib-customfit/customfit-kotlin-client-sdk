@@ -107,13 +107,14 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         }
         
         // Initialize device context if it's not already set
-        if (user.device == null) {
+        val existingDeviceContext = user.getDeviceContext()
+        if (existingDeviceContext == null) {
             deviceContext = DeviceContext.createBasic()
             // Update user with device context
             updateUserWithDeviceContext()
         } else {
             // Use the device context from the user if available
-            deviceContext = user.device
+            deviceContext = existingDeviceContext
         }
         
         // Set up connection status monitoring
@@ -974,8 +975,13 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         val deviceContextMap = deviceContext.toMap()
         // Only add non-empty device context
         if (deviceContextMap.isNotEmpty()) {
+            // Update the device context in the properties map
+            user.setDeviceContext(deviceContext)
+            
+            // Also keep the legacy mobile_device_context for backward compatibility
             user.addProperty("mobile_device_context", deviceContextMap)
-            logger.debug { "Updated user properties with mobile_device_context" }
+            
+            logger.debug { "Updated user properties with device context" }
         }
     }
     

@@ -100,12 +100,7 @@ data class CFUser(
         val anonymous: Boolean,
         val private_fields: PrivateAttributesRequest?= PrivateAttributesRequest(),
         val session_fields: PrivateAttributesRequest?= PrivateAttributesRequest(),
-        @Serializable(with = MapSerializer::class) val properties: Map<String, Any>,
-        
-        /**
-         * Device context for more accurate targeting
-         */
-        val device: DeviceContext? = null
+        @Serializable(with = MapSerializer::class) val properties: Map<String, Any>
 ) {
     // Mutable properties map to allow updates after creation
     @kotlinx.serialization.Transient
@@ -158,6 +153,21 @@ data class CFUser(
             }
         }
     }
+    
+    /**
+     * Add device context to the properties
+     */
+    fun setDeviceContext(device: DeviceContext) {
+        _properties["device"] = device.toMap()
+    }
+    
+    /**
+     * Get device context from properties
+     */
+    fun getDeviceContext(): DeviceContext? {
+        val deviceMap = _properties["device"] as? Map<String, Any> ?: return null
+        return DeviceContext.fromMap(deviceMap)
+    }
 
     /**
      * Converts user data to a map for API requests
@@ -179,8 +189,7 @@ data class CFUser(
                             "properties" to it.properties,
                     )
                 },
-        "properties" to properties,
-        "device" to device?.toMap()
+        "properties" to properties
     ).filterValues { it != null }
 
     companion object {
@@ -192,7 +201,6 @@ data class CFUser(
         private var private_fields: PrivateAttributesRequest? = PrivateAttributesRequest()
         private var session_fields: PrivateAttributesRequest? = PrivateAttributesRequest()
         private val properties: MutableMap<String, Any> = mutableMapOf()
-        private var device: DeviceContext? = null
 
         fun makeAnonymous(anonymous: Boolean) = apply { this.anonymous = anonymous }
 
@@ -241,7 +249,7 @@ data class CFUser(
          * Add device context for targeting
          */
         fun withDeviceContext(device: DeviceContext) = apply {
-            this.device = device
+            properties["device"] = device.toMap()
         }
 
         private fun Any?.isJsonCompatible(): Boolean =
@@ -260,8 +268,7 @@ data class CFUser(
                         anonymous,
                         private_fields,
                         session_fields,
-                        properties.toMap(),
-                        device
+                        properties.toMap()
                 )
     }
 }
