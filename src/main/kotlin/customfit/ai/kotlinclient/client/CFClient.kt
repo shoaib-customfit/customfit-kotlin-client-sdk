@@ -13,10 +13,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
-import org.slf4j.LoggerFactory
+import timber.log.Timber
 
 class CFClient private constructor(private val config: CFConfig, private val user: CFUser) {
-    private val logger = LoggerFactory.getLogger(CFClient::class.java)
     private val sessionId: String = UUID.randomUUID().toString()
     private val httpClient = HttpClient()
     val summaryManager = SummaryManager(sessionId, user, httpClient)
@@ -29,7 +28,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private val sdkSettingsDeferred: CompletableDeferred<Unit> = CompletableDeferred()
 
     init {
-        logger.info("CFClient initialized with config: {} and user: {}", config, user)
+        Timber.i("CFClient initialized with config: $config and user: $user")
         initializeSdkSettings()
         startPeriodicSdkSettingsCheck()
     }
@@ -37,12 +36,12 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private fun initializeSdkSettings() {
         runBlocking(Dispatchers.IO) {
             try {
-                logger.info("Initializing SDK settings")
+                Timber.i("Initializing SDK settings")
                 checkSdkSettings()
                 sdkSettingsDeferred.complete(Unit)
-                logger.info("SDK settings initialized successfully")
+                Timber.i("SDK settings initialized successfully")
             } catch (e: Exception) {
-                logger.error("Failed to initialize SDK settings: {}", e.message, e)
+                Timber.e(e, "Failed to initialize SDK settings: ${e.message}")
                 sdkSettingsDeferred.completeExceptionally(e)
             }
         }
@@ -67,7 +66,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private fun startPeriodicSdkSettingsCheck() {
         fixedRateTimer("SdkSettingsCheck", daemon = true, period = 300_000) {
             CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                logger.debug("Periodic SDK settings check triggered")
+                Timber.d("Periodic SDK settings check triggered")
                 checkSdkSettings()
             }
         }
@@ -78,15 +77,13 @@ class CFClient private constructor(private val config: CFConfig, private val use
             val metadata =
                     fetchSdkSettingsMetadata()
                             ?: run {
-                                logger.warn("Failed to fetch SDK settings metadata")
+                                Timber.w("Failed to fetch SDK settings metadata")
                                 return
                             }
             val currentLastModified = metadata["Last-Modified"] ?: return
             if (currentLastModified != previousLastModified) {
-                logger.info(
-                        "SDK settings changed: Previous={}, Current={}",
-                        previousLastModified,
-                        currentLastModified
+                Timber.i(
+                        "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified"
                 )
                 val newConfigs = fetchConfigs() ?: emptyMap()
                 configMutex.withLock {
@@ -94,12 +91,12 @@ class CFClient private constructor(private val config: CFConfig, private val use
                     configMap.putAll(newConfigs)
                     previousLastModified = currentLastModified
                 }
-                logger.info("Configs updated successfully with {} entries", newConfigs.size)
+                Timber.i("Configs updated successfully with ${newConfigs.size} entries")
             } else {
-                logger.debug("No change in SDK settings")
+                Timber.d("No change in SDK settings")
             }
         } catch (e: Exception) {
-            logger.error("Error checking SDK settings: {}", e.message, e)
+            Timber.e(e, "Error checking SDK settings: ${e.message}")
         }
     }
 
@@ -107,7 +104,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
             httpClient.fetchMetadata(
                             "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
                     )
-                    ?.also { logger.debug("Fetched metadata: {}", it) }
+                    ?.also { Timber.d("Fetched metadata: $it") }
 
     private suspend fun fetchSdkSettings(): SdkSettings? {
         val json =
@@ -115,28 +112,27 @@ class CFClient private constructor(private val config: CFConfig, private val use
                         "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
                 )
                         ?: run {
-                            logger.warn("Failed to fetch SDK settings JSON")
+                            Timber.w("Failed to fetch SDK settings JSON")
                             return null
                         }
+
         return try {
             val settings = SdkSettings.fromJson(json)
             if (settings == null) {
-                logger.warn("SdkSettings.fromJson returned null for JSON: {}", json)
+                Timber.w("SdkSettings.fromJson returned null for JSON: $json")
                 return null
             }
             if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
-                logger.debug(
-                        "SDK settings skipped: cf_account_enabled={}, cf_skip_sdk={}",
-                        settings.cf_account_enabled,
-                        settings.cf_skip_sdk
+                Timber.d(
+                        "SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}"
                 )
                 null
             } else {
-                logger.debug("Fetched SDK settings: {}", settings)
+                Timber.d("Fetched SDK settings: $settings")
                 settings
             }
         } catch (e: Exception) {
-            logger.error("Error parsing SDK settings: {}", e.message, e)
+            Timber.e(e, "Error parsing SDK settings: ${e.message}")
             null
         }
     }
@@ -152,7 +148,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                             }
                             .toString()
                 } catch (e: Exception) {
-                    logger.error("Error creating config payload: {}", e.message, e)
+                    Timber.e(e, "Error creating config payload: ${e.message}")
                     return null
                 }
 
@@ -167,7 +163,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                         HttpURLConnection.HTTP_OK ->
                                 JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
                         else -> {
-                            logger.warn("Config fetch failed with code: {}", conn.responseCode)
+                            Timber.w("Config fetch failed with code: ${conn.responseCode}")
                             null
                         }
                     }
@@ -177,7 +173,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
         val configs =
                 json.optJSONObject("configs")
                         ?: run {
-                            logger.warn("No 'configs' object in response")
+                            Timber.w("No 'configs' object in response")
                             return null
                         }
         val newConfigMap = mutableMapOf<String, Any>()
@@ -188,9 +184,8 @@ class CFClient private constructor(private val config: CFConfig, private val use
                 val experience =
                         config.optJSONObject("experience_behaviour_response")
                                 ?: run {
-                                    logger.warn(
-                                            "Missing 'experience_behaviour_response' for key: {}",
-                                            key
+                                    Timber.w(
+                                            "Missing 'experience_behaviour_response' for key: $key"
                                     )
                                     return@forEach
                                 }
@@ -198,7 +193,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                 val experienceKey =
                         experience.optString("experience", null)
                                 ?: run {
-                                    logger.warn("Missing 'experience' field for key: {}", key)
+                                    Timber.w("Missing 'experience' field for key: $key")
                                     return@forEach
                                 }
                 val variationDataType = config.optString("variation_data_type", "UNKNOWN")
@@ -211,10 +206,8 @@ class CFClient private constructor(private val config: CFConfig, private val use
                                             ?: emptyMap<String, Any>()
                             else ->
                                     config.opt("variation")?.also {
-                                        logger.warn(
-                                                "Unknown variation type: {} for {}",
-                                                variationDataType,
-                                                key
+                                        Timber.w(
+                                                "Unknown variation type: $variationDataType for $key"
                                         )
                                     }
                                             ?: ""
@@ -247,7 +240,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
                 newConfigMap[experienceKey] = experienceData
             } catch (e: Exception) {
-                logger.error("Error processing config key '{}': {}", key, e.message, e)
+                Timber.e(e, "Error processing config key '$key': ${e.message}")
             }
         }
 
@@ -258,11 +251,11 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
         val config = configMap[key]
         if (config == null) {
-            logger.warn("No config found for key '{}'", key)
+            Timber.w("No config found for key '$key'")
             return fallbackValue
         }
         if (config !is Map<*, *>) {
-            logger.warn("Config for '{}' is not a map: {}", key, config)
+            Timber.w("Config for '$key' is not a map: $config")
             return fallbackValue
         }
         val variation = config["variation"]
@@ -271,16 +264,13 @@ class CFClient private constructor(private val config: CFConfig, private val use
                     try {
                         variation as T
                     } catch (e: ClassCastException) {
-                        logger.warn(
-                                "Type mismatch for '{}': expected {}, got {}",
-                                key,
-                                fallbackValue!!::class.simpleName,
-                                variation::class.simpleName
+                        Timber.w(
+                                "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}"
                         )
                         fallbackValue
                     }
                 } else {
-                    logger.warn("No valid variation for '{}': {}", key, variation)
+                    Timber.w("No valid variation for '$key': $variation")
                     fallbackValue
                 }
         summaryManager.pushSummary(config as Map<String, Any>)

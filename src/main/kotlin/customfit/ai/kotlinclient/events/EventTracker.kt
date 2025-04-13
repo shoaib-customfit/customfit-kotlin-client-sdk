@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import org.joda.time.DateTime
 import org.json.JSONArray
 import org.json.JSONObject
-import org.slf4j.LoggerFactory
+import timber.log.Timber
 
 class EventTracker(
         private val sessionId: String,
@@ -21,7 +21,6 @@ class EventTracker(
         private val user: CFUser,
         private val summaryManager: SummaryManager
 ) {
-    private val logger = LoggerFactory.getLogger(EventTracker::class.java)
     private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue(MAX_QUEUE_SIZE)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -37,7 +36,7 @@ class EventTracker(
 
     fun trackEvent(eventName: String, properties: Map<String, Any>) {
         if (eventName.isBlank()) {
-            logger.warn("Event name cannot be blank")
+            Timber.w("Event name cannot be blank")
             return
         }
         val validatedProperties =
@@ -53,13 +52,13 @@ class EventTracker(
                         insert_id = UUID.randomUUID().toString()
                 )
         if (!eventQueue.offer(event)) {
-            logger.warn("Event queue full, forcing flush for event: {}", event)
+            Timber.w("Event queue full, forcing flush for event: $event")
             scope.launch { flushEvents() }
             if (!eventQueue.offer(event)) {
-                logger.error("Failed to queue event after flush: {}", event)
+                Timber.e("Failed to queue event after flush: $event")
             }
         } else {
-            logger.debug("Event added to queue: {}", event)
+            Timber.d("Event added to queue: $event")
             if (eventQueue.size >= MAX_QUEUE_SIZE) {
                 scope.launch { flushEvents() }
             }
@@ -85,14 +84,14 @@ class EventTracker(
     suspend fun flushEvents() {
         summaryManager.flushSummaries()
         if (eventQueue.isEmpty()) {
-            logger.debug("No events to flush")
+            Timber.d("No events to flush")
             return
         }
         val eventsToFlush = mutableListOf<EventData>()
         eventQueue.drainTo(eventsToFlush)
         if (eventsToFlush.isNotEmpty()) {
             sendTrackEvents(eventsToFlush)
-            logger.info("Flushed {} events successfully", eventsToFlush.size)
+            Timber.i("Flushed %d events successfully", eventsToFlush.size)
         }
     }
 
@@ -118,17 +117,17 @@ class EventTracker(
                             }
                             .toString()
                 } catch (e: Exception) {
-                    logger.error("Error serializing events: {}", e.message, e)
+                    Timber.e("Error serializing events: $e")
                     events.forEach { eventQueue.offer(it) }
                     return
                 }
 
         val success = httpClient.postJson("https://example.com/v1/cfe", jsonPayload)
         if (!success) {
-            logger.warn("Failed to send {} events, re-queuing", events.size)
+            Timber.w("Failed to send %d events, re-queuing", events.size)
             events.forEach { eventQueue.offer(it) }
         } else {
-            logger.info("Successfully sent {} events", events.size)
+            Timber.i("Successfully sent %d events", events.size)
         }
     }
 

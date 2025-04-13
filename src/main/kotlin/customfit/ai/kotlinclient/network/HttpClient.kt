@@ -5,11 +5,9 @@ import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import org.slf4j.LoggerFactory
+import timber.log.Timber
 
 class HttpClient {
-    private val logger = LoggerFactory.getLogger(HttpClient::class.java)
-
     suspend fun <T> performRequest(
             url: String,
             method: String,
@@ -36,7 +34,7 @@ class HttpClient {
                     connection.connect()
                     responseHandler(connection)
                 } catch (e: Exception) {
-                    logger.error("HTTP request failed for $url: ${e.message}", e)
+                    Timber.e(e, "HTTP request failed for $url: ${e.message}")
                     null
                 } finally {
                     connection?.disconnect()
@@ -53,7 +51,7 @@ class HttpClient {
                         )
                     }
                 } else {
-                    logger.warn("Failed to fetch metadata from $url: ${conn.responseCode}")
+                    Timber.w("Failed to fetch metadata from $url: ${conn.responseCode}")
                     null
                 }
             }
@@ -63,15 +61,13 @@ class HttpClient {
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     JSONObject(conn.inputStream.bufferedReader().readText())
                 } else {
-                    logger.warn("Failed to fetch JSON from $url: ${conn.responseCode}")
+                    Timber.w("Failed to fetch JSON from $url: ${conn.responseCode}")
                     null
                 }
             }
 
     suspend fun postJson(url: String, payload: String): Boolean =
-            performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn
-                ->
+            performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn ->
                 conn.responseCode == HttpURLConnection.HTTP_OK
-            }
-                    ?: false
+            } ?: false
 }

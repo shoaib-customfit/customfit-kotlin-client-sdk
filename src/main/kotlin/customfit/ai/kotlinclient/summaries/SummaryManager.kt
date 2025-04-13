@@ -14,14 +14,13 @@ import kotlinx.coroutines.sync.withLock
 import org.joda.time.DateTime
 import org.json.JSONArray
 import org.json.JSONObject
-import org.slf4j.LoggerFactory
+import timber.log.Timber
 
 class SummaryManager(
         private val sessionId: String,
         private val user: CFUser,
         private val httpClient: HttpClient
 ) {
-    private val logger = LoggerFactory.getLogger(SummaryManager::class.java)
     private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue()
     private val summaryTrackMap = Collections.synchronizedMap(mutableMapOf<String, Boolean>())
     private val trackMutex = Mutex()
@@ -37,7 +36,7 @@ class SummaryManager(
 
     fun pushSummary(config: Any) {
         if (config !is Map<*, *>) {
-            logger.warn("Config is not a map: {}", config)
+            Timber.w("Config is not a map: $config")
             return
         }
         val configMap =
@@ -45,24 +44,21 @@ class SummaryManager(
                     @Suppress("UNCHECKED_CAST") it as Map<String, Any>
                 }
                         ?: run {
-                            logger.warn("Config map has non-string keys: {}", config)
+                            Timber.w("Config map has non-string keys: $config")
                             return
                         }
 
         val experienceId =
                 configMap["experience_id"] as? String
                         ?: run {
-                            logger.warn(
-                                    "Missing mandatory 'experience_id' in config: {}",
-                                    configMap
-                            )
+                            Timber.w("Missing mandatory 'experience_id' in config: $configMap")
                             return
                         }
 
         scope.launch {
             trackMutex.withLock {
                 if (summaryTrackMap.containsKey(experienceId)) {
-                    logger.debug("Experience already processed: {}", experienceId)
+                    Timber.d("Experience already processed: $experienceId")
                     return@launch
                 }
                 summaryTrackMap[experienceId] = true
@@ -83,26 +79,26 @@ class SummaryManager(
                     )
 
             if (!summaries.offer(configSummary)) {
-                logger.warn("Summary queue full, forcing flush for: {}", configSummary)
+                Timber.w("Summary queue full, forcing flush for: $configSummary")
                 flushSummaries()
                 if (!summaries.offer(configSummary)) {
-                    logger.error("Failed to queue summary after flush: {}", configSummary)
+                    Timber.e("Failed to queue summary after flush: $configSummary")
                 }
             }
-            logger.debug("Summary added to queue: {}", configSummary)
+            Timber.d("Summary added to queue: $configSummary")
         }
     }
 
     suspend fun flushSummaries() {
         if (summaries.isEmpty()) {
-            logger.debug("No summaries to flush")
+            Timber.d("No summaries to flush")
             return
         }
         val summariesToFlush = mutableListOf<CFConfigRequestSummary>()
         summaries.drainTo(summariesToFlush)
         if (summariesToFlush.isNotEmpty()) {
             sendSummaryToServer(summariesToFlush)
-            logger.info("Flushed {} summaries successfully", summariesToFlush.size)
+            Timber.i("Flushed %d summaries successfully", summariesToFlush.size)
         }
     }
 
@@ -115,7 +111,7 @@ class SummaryManager(
                     jsonObject.put("cf_client_sdk_version", "1.0.0")
                     jsonObject.toString()
                 } catch (e: Exception) {
-                    logger.error("Error serializing summaries: {}", e.message, e)
+                    Timber.e("Error serializing summaries: $e")
                     summaries.forEach { this.summaries.offer(it) }
                     return
                 }
@@ -123,10 +119,10 @@ class SummaryManager(
         val success =
                 httpClient.postJson("https://example.com/v1/config/request/summary", jsonPayload)
         if (!success) {
-            logger.warn("Failed to send {} summaries, re-queuing", summaries.size)
+            Timber.w("Failed to send %d summaries, re-queuing", summaries.size)
             summaries.forEach { this.summaries.offer(it) }
         } else {
-            logger.info("Successfully sent {} summaries", summaries.size)
+            Timber.i("Successfully sent %d summaries", summaries.size)
         }
     }
 
