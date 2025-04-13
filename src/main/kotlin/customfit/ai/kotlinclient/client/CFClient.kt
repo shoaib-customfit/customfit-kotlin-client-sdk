@@ -10,6 +10,7 @@ import customfit.ai.kotlinclient.core.SdkSettings
 import customfit.ai.kotlinclient.core.ApplicationInfo
 import customfit.ai.kotlinclient.events.EventPropertiesBuilder
 import customfit.ai.kotlinclient.events.EventTracker
+import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.ConfigFetcher
 import customfit.ai.kotlinclient.network.ConnectionInformation
 import customfit.ai.kotlinclient.network.ConnectionManager
@@ -17,6 +18,7 @@ import customfit.ai.kotlinclient.network.ConnectionStatus
 import customfit.ai.kotlinclient.network.ConnectionStatusListener
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.summaries.SummaryManager
+import customfit.ai.kotlinclient.utils.ApplicationInfoDetector
 import java.net.HttpURLConnection
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -25,12 +27,8 @@ import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import mu.KotlinLogging
 import org.json.JSONObject
 import org.joda.time.DateTime
-import customfit.ai.kotlinclient.utils.ApplicationInfoDetector
-
-private val logger = KotlinLogging.logger {}
 
 class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser) {
     private val sessionId: String = UUID.randomUUID().toString()
@@ -79,7 +77,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun <T : Any> addConfigListener(key: String, listener: (T) -> Unit) {
         @Suppress("UNCHECKED_CAST")
         configListeners.getOrPut(key) { mutableListOf() }.add(listener as (Any) -> Unit)
-        logger.debug { "Added listener for key: $key" }
+        Timber.d("Added listener for key: $key")
     }
     
     /**
@@ -90,7 +88,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun <T : Any> removeConfigListener(key: String, listener: (T) -> Unit) {
         @Suppress("UNCHECKED_CAST")
         configListeners[key]?.remove(listener as (Any) -> Unit)
-        logger.debug { "Removed listener for key: $key" }
+        Timber.d("Removed listener for key: $key")
     }
     
     /**
@@ -99,7 +97,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun clearConfigListeners(key: String) {
         configListeners.remove(key)
-        logger.debug { "Cleared all listeners for key: $key" }
+        Timber.d("Cleared all listeners for key: $key")
     }
 
     // Listen for config changes to update components
@@ -108,12 +106,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         if (mutableConfig.offlineMode) {
             configFetcher.setOffline(true)
             connectionManager.setOfflineMode(true)
-            logger.info { "CF client initialized in offline mode" }
+            Timber.i("CF client initialized in offline mode")
         }
         
         // Initialize environment attributes based on config
         if (mutableConfig.autoEnvAttributesEnabled) {
-            logger.debug { "Auto environment attributes enabled, detecting device and application info" }
+            Timber.d("Auto environment attributes enabled, detecting device and application info")
             
             // Initialize device context if it's not already set
             val existingDeviceContext = user.getDeviceContext()
@@ -138,11 +136,11 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 val detectedAppInfo = ApplicationInfoDetector.detectApplicationInfo()
                 if (detectedAppInfo != null) {
                     updateUserWithApplicationInfo(detectedAppInfo)
-                    logger.debug { "Auto-detected application info: $detectedAppInfo" }
+                    Timber.d("Auto-detected application info: $detectedAppInfo")
                 }
             }
         } else {
-            logger.debug { "Auto environment attributes disabled, skipping device and application info detection" }
+            Timber.d("Auto environment attributes disabled, skipping device and application info detection")
         }
         
         // Set up connection status monitoring
@@ -170,7 +168,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 checkSdkSettings()
                 sdkSettingsDeferred.complete(Unit)
             } catch (e: Exception) {
-                logger.error(e) { "Error in initial SDK settings check: ${e.message}" }
+                Timber.e(e) { "Error in initial SDK settings check: ${e.message}" }
                 sdkSettingsDeferred.complete(Unit) // Complete anyway to avoid blocking
             }
         }
@@ -182,14 +180,14 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun setupConnectionStatusMonitoring() {
         connectionManager.addConnectionStatusListener(object : ConnectionStatusListener {
             override fun onConnectionStatusChanged(newStatus: ConnectionStatus, info: ConnectionInformation) {
-                logger.debug { "Connection status changed: $newStatus" }
+                Timber.d("Connection status changed: $newStatus")
                 
                 // Notify all listeners
                 for (listener in connectionStatusListeners) {
                     try {
                         listener.onConnectionStatusChanged(newStatus, info)
                     } catch (e: Exception) {
-                        logger.error(e) { "Error notifying connection status listener: ${e.message}" }
+                        Timber.e(e) { "Error notifying connection status listener: ${e.message}" }
                     }
                 }
                 
@@ -211,7 +209,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun setupBackgroundStateMonitoring() {
         backgroundStateMonitor.addAppStateListener(object : AppStateListener {
             override fun onAppStateChange(state: AppState) {
-                logger.debug { "App state changed: $state" }
+                Timber.d("App state changed: $state")
                 
                 if (state == AppState.BACKGROUND && mutableConfig.disableBackgroundPolling) {
                     // Pause polling in background if configured to do so
@@ -230,7 +228,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         
         backgroundStateMonitor.addBatteryStateListener(object : BatteryStateListener {
             override fun onBatteryStateChange(state: BatteryState) {
-                logger.debug { "Battery state changed: low=${state.isLow}, charging=${state.isCharging}, level=${state.level}" }
+                Timber.d("Battery state changed: low=${state.isLow}, charging=${state.isCharging}, level=${state.level}")
                 
                 if (mutableConfig.useReducedPollingWhenBatteryLow && state.isLow && !state.isCharging) {
                     // Use reduced polling on low battery
@@ -266,13 +264,13 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      * Handle configuration changes and update components as needed
      */
     private fun handleConfigChange(oldConfig: CFConfig, newConfig: CFConfig) {
-        logger.debug { "Config changed: $oldConfig -> $newConfig" }
+        Timber.d("Config changed: $oldConfig -> $newConfig")
         
         // Check for offline mode change
         if (oldConfig.offlineMode != newConfig.offlineMode) {
             configFetcher.setOffline(newConfig.offlineMode)
             connectionManager.setOfflineMode(newConfig.offlineMode)
-            logger.info { "Updated offline mode to: ${newConfig.offlineMode}" }
+            Timber.i("Updated offline mode to: ${newConfig.offlineMode}")
         }
         
         // Check for SDK settings check interval change
@@ -280,7 +278,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             CoroutineScope(Dispatchers.IO).launch {
                 restartPeriodicSdkSettingsCheck()
             }
-            logger.info { "Updated SDK settings check interval to ${newConfig.sdkSettingsCheckIntervalMs} ms" }
+            Timber.i("Updated SDK settings check interval to ${newConfig.sdkSettingsCheckIntervalMs} ms")
         }
         
         // Check for network timeout changes - would require HttpClient to expose update methods
@@ -288,14 +286,14 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             oldConfig.networkReadTimeoutMs != newConfig.networkReadTimeoutMs) {
             httpClient.updateConnectionTimeout(newConfig.networkConnectionTimeoutMs)
             httpClient.updateReadTimeout(newConfig.networkReadTimeoutMs)
-            logger.info { "Updated network timeout settings" }
+            Timber.i("Updated network timeout settings")
         }
         
         // Check for background polling changes
         if (oldConfig.disableBackgroundPolling != newConfig.disableBackgroundPolling ||
             oldConfig.backgroundPollingIntervalMs != newConfig.backgroundPollingIntervalMs ||
             oldConfig.reducedPollingIntervalMs != newConfig.reducedPollingIntervalMs) {
-            logger.info { "Updated background polling settings" }
+            Timber.i("Updated background polling settings")
             
             if (backgroundStateMonitor.getCurrentAppState() == AppState.BACKGROUND && 
                 newConfig.disableBackgroundPolling) {
@@ -317,7 +315,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     private fun pausePolling() {
         if (mutableConfig.disableBackgroundPolling) {
-            logger.debug { "Pausing polling in background" }
+            Timber.d("Pausing polling in background")
             CoroutineScope(Dispatchers.IO).launch {
                 timerMutex.withLock {
                     sdkSettingsTimer?.cancel()
@@ -331,7 +329,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      * Resume polling when returning to foreground
      */
     private fun resumePolling() {
-        logger.debug { "Resuming polling" }
+        Timber.d("Resuming polling")
         CoroutineScope(Dispatchers.IO).launch {
             restartPeriodicSdkSettingsCheck()
         }
@@ -349,7 +347,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                     mutableConfig.backgroundPollingIntervalMs
                 }
                 
-                logger.debug { "Adjusting background polling interval to $interval ms due to battery state" }
+                Timber.d("Adjusting background polling interval to $interval ms due to battery state")
                 
                 restartPeriodicSdkSettingsCheck(interval)
             }
@@ -359,12 +357,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun initializeSdkSettings() {
         runBlocking(Dispatchers.IO) {
             try {
-                logger.info { "Initializing SDK settings" }
+                Timber.i("Initializing SDK settings")
                 checkSdkSettings()
                 sdkSettingsDeferred.complete(Unit)
-                logger.info { "SDK settings initialized successfully" }
+                Timber.i("SDK settings initialized successfully")
             } catch (e: Exception) {
-                logger.error(e) { "Failed to initialize SDK settings: ${e.message}" }
+                Timber.e(e) { "Failed to initialize SDK settings: ${e.message}" }
                 sdkSettingsDeferred.completeExceptionally(e)
             }
         }
@@ -422,7 +420,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     // Add a single property to the user
     fun addUserProperty(key: String, value: Any) {
         user.addProperty(key, value)
-        logger.debug { "Added user property: $key = $value" }
+        Timber.d("Added user property: $key = $value")
     }
     
     // Type-specific property methods
@@ -465,7 +463,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     // Add multiple properties to the user at once
     fun addUserProperties(properties: Map<String, Any>) {
         user.addProperties(properties)
-        logger.debug { "Added ${properties.size} user properties" }
+        Timber.d("Added ${properties.size} user properties")
     }
     
     // Get the current user properties including any updates
@@ -489,7 +487,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         // Direct update for immediate effect
         configFetcher.setOffline(true)
         connectionManager.setOfflineMode(true)
-        logger.info { "CF client is now in offline mode" }
+        Timber.i("CF client is now in offline mode")
     }
     
     /**
@@ -503,7 +501,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         // Direct update for immediate effect
         configFetcher.setOffline(false)
         connectionManager.setOfflineMode(false)
-        logger.info { "CF client is now in online mode" }
+        Timber.i("CF client is now in online mode")
     }
 
     /**
@@ -591,12 +589,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 sdkSettingsTimer = fixedRateTimer("SdkSettingsCheck", daemon = true, 
                         period = intervalMs) {
                     CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                        logger.debug { "Periodic SDK settings check triggered" }
+                        Timber.d("Periodic SDK settings check triggered")
                         checkSdkSettings()
                     }
                 }
                 
-                logger.debug { "Started SDK settings check timer with interval $intervalMs ms" }
+                Timber.d("Started SDK settings check timer with interval $intervalMs ms")
             }
         }
     }
@@ -614,11 +612,11 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             sdkSettingsTimer = fixedRateTimer("SdkSettingsCheck", daemon = true, 
                     period = intervalMs) {
                 CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                    logger.debug { "Periodic SDK settings check triggered" }
+                    Timber.d("Periodic SDK settings check triggered")
                     checkSdkSettings()
                 }
             }
-            logger.debug { "Restarted periodic SDK settings check with interval $intervalMs ms" }
+            Timber.d("Restarted periodic SDK settings check with interval $intervalMs ms")
         }
     }
 
@@ -627,16 +625,16 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             val metadata =
                     configFetcher.fetchMetadata("https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json")
                             ?: run {
-                                logger.warn { "Failed to fetch SDK settings metadata" }
+                                Timber.warn { "Failed to fetch SDK settings metadata" }
                                 return
                             }
             val currentLastModified = metadata["Last-Modified"] ?: return
             
             if (currentLastModified != previousLastModified) {
-                logger.info { "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified" }
+                Timber.i("SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified")
                 val configResult = configFetcher.fetchConfig(currentLastModified)
                 if (configResult == null) {
-                    logger.warn { "Failed to fetch config with last-modified: $currentLastModified" }
+                    Timber.warn { "Failed to fetch config with last-modified: $currentLastModified" }
                     return
                 }
                 
@@ -668,12 +666,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                     }
                 }
                 
-                logger.info { "Configs updated successfully with ${newConfigs.size} entries" }
+                Timber.i("Configs updated successfully with ${newConfigs.size} entries")
             } else {
-                logger.debug { "No change in SDK settings" }
+                Timber.d("No change in SDK settings")
             }
         } catch (e: Exception) {
-            logger.error(e) { "Error checking SDK settings: ${e.message}" }
+            Timber.e(e) { "Error checking SDK settings: ${e.message}" }
         }
     }
 
@@ -686,25 +684,25 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         "https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json"
                 )
                         ?: run {
-                            logger.warn { "Failed to fetch SDK settings JSON" }
+                            Timber.warn { "Failed to fetch SDK settings JSON" }
                             return null
                         }
 
         return try {
             val settings = SdkSettings.fromJson(json)
             if (settings == null) {
-                logger.warn { "SdkSettings.fromJson returned null for JSON: $json" }
+                Timber.warn { "SdkSettings.fromJson returned null for JSON: $json" }
                 return null
             }
             if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
-                logger.debug { "SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}" }
+                Timber.d("SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}")
                 null
             } else {
-                logger.debug { "Fetched SDK settings: $settings" }
+                Timber.d("Fetched SDK settings: $settings")
                 settings
             }
         } catch (e: Exception) {
-            logger.error(e) { "Error parsing SDK settings: ${e.message}" }
+            Timber.e(e) { "Error parsing SDK settings: ${e.message}" }
             null
         }
     }
@@ -720,7 +718,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                             }
                             .toString()
                 } catch (e: Exception) {
-                    logger.error(e) { "Error creating config payload: ${e.message}" }
+                    Timber.e(e) { "Error creating config payload: ${e.message}" }
                     return null
                 }
 
@@ -735,7 +733,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         HttpURLConnection.HTTP_OK ->
                                 JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
                         else -> {
-                            logger.warn { "Config fetch failed with code: ${conn.responseCode}" }
+                            Timber.warn { "Config fetch failed with code: ${conn.responseCode}" }
                             null
                         }
                     }
@@ -745,7 +743,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         val configs =
                 json.optJSONObject("configs")
                         ?: run {
-                            logger.warn { "No 'configs' object in response" }
+                            Timber.warn { "No 'configs' object in response" }
                             return null
                         }
         val newConfigMap = mutableMapOf<String, Any>()
@@ -756,14 +754,14 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 val experience =
                         config.optJSONObject("experience_behaviour_response")
                                 ?: run {
-                                    logger.warn { "Missing 'experience_behaviour_response' for key: $key" }
+                                    Timber.warn { "Missing 'experience_behaviour_response' for key: $key" }
                                     return@forEach
                                 }
 
                 val experienceKey =
                         experience.optString("experience", null)
                                 ?: run {
-                                    logger.warn { "Missing 'experience' field for key: $key" }
+                                    Timber.warn { "Missing 'experience' field for key: $key" }
                                     return@forEach
                                 }
                 val variationDataType = config.optString("variation_data_type", "UNKNOWN")
@@ -776,7 +774,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                                             ?: emptyMap<String, Any>()
                             else ->
                                     config.opt("variation")?.also {
-                                        logger.warn { "Unknown variation type: $variationDataType for $key" }
+                                        Timber.warn { "Unknown variation type: $variationDataType for $key" }
                                     }
                                             ?: ""
                         }
@@ -808,7 +806,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
 
                 newConfigMap[experienceKey] = experienceData
             } catch (e: Exception) {
-                logger.error(e) { "Error processing config key '$key': ${e.message}" }
+                Timber.e(e) { "Error processing config key '$key': ${e.message}" }
             }
         }
 
@@ -819,11 +817,11 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
         val config = configMap[key]
         if (config == null) {
-            logger.warn { "No config found for key '$key'" }
+            Timber.warn { "No config found for key '$key'" }
             return fallbackValue
         }
         if (config !is Map<*, *>) {
-            logger.warn { "Config for '$key' is not a map: $config" }
+            Timber.warn { "Config for '$key' is not a map: $config" }
             return fallbackValue
         }
         val variation = config["variation"]
@@ -832,11 +830,11 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                     try {
                         variation as T
                     } catch (e: ClassCastException) {
-                        logger.warn { "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}" }
+                        Timber.warn { "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}" }
                         fallbackValue
                     }
                 } else {
-                    logger.warn { "No valid variation for '$key': $variation" }
+                    Timber.warn { "No valid variation for '$key': $variation" }
                     fallbackValue
                 }
         summaryManager.pushSummary(config as Map<String, Any>)
@@ -880,7 +878,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 try {
                     listener.onFeatureFlagChange(key, variation)
                 } catch (e: Exception) {
-                    logger.error(e) { "Error notifying feature flag listener: ${e.message}" }
+                    Timber.e(e) { "Error notifying feature flag listener: ${e.message}" }
                 }
             }
         }
@@ -892,7 +890,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 try {
                     listener.onFlagsChange(allFlags)
                 } catch (e: Exception) {
-                    logger.error(e) { "Error notifying all flags listener: ${e.message}" }
+                    Timber.e(e) { "Error notifying all flags listener: ${e.message}" }
                 }
             }
         }
@@ -921,7 +919,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun registerFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
         featureFlagListeners.computeIfAbsent(flagKey) { mutableListOf() }.add(listener)
-        logger.debug { "Registered feature flag listener for key: $flagKey" }
+        Timber.d("Registered feature flag listener for key: $flagKey")
     }
     
     /**
@@ -932,7 +930,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun unregisterFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
         featureFlagListeners[flagKey]?.remove(listener)
-        logger.debug { "Unregistered feature flag listener for key: $flagKey" }
+        Timber.d("Unregistered feature flag listener for key: $flagKey")
     }
     
     /**
@@ -942,7 +940,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun registerAllFlagsListener(listener: AllFlagsListener) {
         allFlagsListeners.add(listener)
-        logger.debug { "Registered all flags listener" }
+        Timber.d("Registered all flags listener")
     }
     
     /**
@@ -952,7 +950,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun unregisterAllFlagsListener(listener: AllFlagsListener) {
         allFlagsListeners.remove(listener)
-        logger.debug { "Unregistered all flags listener" }
+        Timber.d("Unregistered all flags listener")
     }
 
     /**
@@ -992,7 +990,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         this.deviceContext = deviceContext
         // Update user properties with the new device context
         updateUserWithDeviceContext()
-        logger.debug { "Device context updated: $deviceContext" }
+        Timber.d("Device context updated: $deviceContext")
     }
     
     /**
@@ -1008,7 +1006,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             // Also keep the legacy mobile_device_context for backward compatibility
             user.addProperty("mobile_device_context", deviceContextMap)
             
-            logger.debug { "Updated user properties with device context" }
+            Timber.d("Updated user properties with device context")
         }
     }
     
@@ -1020,7 +1018,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         if (appInfoMap.isNotEmpty()) {
             user.setApplicationInfo(appInfo)
             this.applicationInfo = appInfo
-            logger.debug { "Updated user properties with application info" }
+            Timber.d("Updated user properties with application info")
         }
     }
     
@@ -1033,7 +1031,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         contexts[context.type.name.lowercase() + ":" + context.key] = context
         // Also add to user properties
         user.addContext(context)
-        logger.debug { "Added evaluation context: ${context.type}:${context.key}" }
+        Timber.d("Added evaluation context: ${context.type}:${context.key}")
     }
     
     /**
@@ -1054,7 +1052,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         userContexts.forEach { contextsList.add(it.toMap()) }
         user.addProperty("contexts", contextsList)
         
-        logger.debug { "Removed evaluation context: $type:$key" }
+        Timber.d("Removed evaluation context: $type:$key")
     }
     
     /**
@@ -1066,7 +1064,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      * Clean up resources when the client is no longer needed
      */
     fun shutdown() {
-        logger.info { "Shutting down CF client" }
+        Timber.i("Shutting down CF client")
         
         // Cancel timers
         sdkSettingsTimer?.cancel()
@@ -1089,7 +1087,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 eventTracker.flushEvents()
                 summaryManager.flushSummaries()
             } catch (e: Exception) {
-                logger.error(e) { "Error flushing events during shutdown: ${e.message}" }
+                Timber.e(e) { "Error flushing events during shutdown: ${e.message}" }
             }
         }
     }
@@ -1102,7 +1100,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun setApplicationInfo(appInfo: ApplicationInfo) {
         this.applicationInfo = appInfo
         updateUserWithApplicationInfo(appInfo)
-        logger.debug { "Application info updated: $appInfo" }
+        Timber.d("Application info updated: $appInfo")
     }
     
     /**
@@ -1119,7 +1117,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         val currentAppInfo = applicationInfo ?: return
         val updatedAppInfo = currentAppInfo.copy(launchCount = currentAppInfo.launchCount + 1)
         updateUserWithApplicationInfo(updatedAppInfo)
-        logger.debug { "Application launch count incremented to: ${updatedAppInfo.launchCount}" }
+        Timber.d("Application launch count incremented to: ${updatedAppInfo.launchCount}")
     }
     
     /**
@@ -1137,7 +1135,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         CoroutineScope(Dispatchers.IO).launch {
             mutableConfig.setAutoEnvAttributesEnabled(true)
         }
-        logger.debug { "Auto environment attributes collection enabled" }
+        Timber.d("Auto environment attributes collection enabled")
         
         // If not already initialized, detect and set now
         if (deviceContext.toMap().isEmpty() && applicationInfo == null) {
@@ -1149,7 +1147,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             val detectedAppInfo = ApplicationInfoDetector.detectApplicationInfo()
             if (detectedAppInfo != null) {
                 setApplicationInfo(detectedAppInfo)
-                logger.debug { "Auto-detected application info: $detectedAppInfo" }
+                Timber.d("Auto-detected application info: $detectedAppInfo")
             }
         }
     }
@@ -1162,7 +1160,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         CoroutineScope(Dispatchers.IO).launch {
             mutableConfig.setAutoEnvAttributesEnabled(false)
         }
-        logger.debug { "Auto environment attributes collection disabled" }
+        Timber.d("Auto environment attributes collection disabled")
     }
 
     companion object {

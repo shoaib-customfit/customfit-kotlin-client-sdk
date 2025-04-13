@@ -3,9 +3,7 @@ package customfit.ai.kotlinclient.core
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import mu.KotlinLogging
-
-private val logger = KotlinLogging.logger {}
+import customfit.ai.kotlinclient.logging.Timber
 
 /**
  * A wrapper around CFConfig that allows for dynamic updates to configuration values at runtime.
@@ -225,7 +223,7 @@ class MutableCFConfig(initConfig: CFConfig) {
             try {
                 listener.onConfigChanged(oldConfig, newConfig)
             } catch (e: Exception) {
-                logger.error(e) { "Error notifying config change listener: ${e.message}" }
+                Timber.e(e, "Error notifying config change listener: ${e.message}")
             }
         }
     }

@@ -29,6 +29,12 @@ application {
     mainClass.set("customfit.ai.MainKt")
 }
 
+// Custom task to run the Timber test
+tasks.register<JavaExec>("runTimberTest") {
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("customfit.ai.kotlinclient.logging.TestKt")
+}
+
 tasks.withType<Jar> {
     manifest {
         attributes["Main-Class"] = "customfit.ai.MainKt"

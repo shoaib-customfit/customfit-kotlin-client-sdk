@@ -2,10 +2,8 @@
 
     import java.util.*
     import kotlinx.serialization.Serializable
-    import mu.KotlinLogging
+    import customfit.ai.kotlinclient.logging.Timber
     import org.json.JSONObject
-
-    private val logger = KotlinLogging.logger {}
 
     @Serializable
     data class CFConfig(
@@ -65,7 +63,7 @@
                 return try {
                     val parts = token.split(".")
                     if (parts.size != 3) {
-                        logger.warn { "Invalid JWT structure: $token" }
+                        Timber.w("Invalid JWT structure: $token")
                         return null
                     }
                     val payload = parts[1].padEnd((parts[1].length + 3) / 4 * 4, '=')
@@ -73,7 +71,7 @@
                     val decodedString = String(decodedBytes)
                     JSONObject(decodedString).optString("dimension_id", null)
                 } catch (e: Exception) {
-                    logger.error(e) { "JWT decoding error: ${e.javaClass.simpleName} - ${e.message}" }
+                    Timber.e(e, "JWT decoding error: ${e.javaClass.simpleName} - ${e.message}")
                     null
                 }
             }

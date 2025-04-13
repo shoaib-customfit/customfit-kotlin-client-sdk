@@ -1,12 +1,10 @@
 package customfit.ai.kotlinclient.utils
 
 import customfit.ai.kotlinclient.core.ApplicationInfo
-import mu.KotlinLogging
+import customfit.ai.kotlinclient.logging.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-
-private val logger = KotlinLogging.logger {}
 
 /**
  * Utility class to detect application information from the runtime environment
@@ -64,7 +62,7 @@ object ApplicationInfoDetector {
             
             return appInfo
         } catch (e: Exception) {
-            logger.error(e) { "Failed to detect application info: ${e.message}" }
+            Timber.e(e, "Failed to detect application info: ${e.message}")
             return null
         }
     }
