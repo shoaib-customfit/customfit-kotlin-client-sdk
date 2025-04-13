@@ -3,22 +3,27 @@ package customfit.ai.kotlinclient.client
 import customfit.ai.kotlinclient.core.CFConfig
 import customfit.ai.kotlinclient.core.CFUser
 import customfit.ai.kotlinclient.core.SdkSettings
+import customfit.ai.kotlinclient.events.EventPropertiesBuilder
 import customfit.ai.kotlinclient.events.EventTracker
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.summaries.SummaryManager
 import java.net.HttpURLConnection
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import mu.KotlinLogging
 import org.json.JSONObject
-import timber.log.Timber
+import org.joda.time.DateTime
+
+private val logger = KotlinLogging.logger {}
 
 class CFClient private constructor(private val config: CFConfig, private val user: CFUser) {
     private val sessionId: String = UUID.randomUUID().toString()
     private val httpClient = HttpClient()
-    val summaryManager = SummaryManager(sessionId, user, httpClient)
+    val summaryManager = SummaryManager(sessionId, httpClient, user)
     val eventTracker = EventTracker(sessionId, httpClient, user, summaryManager)
 
     @Volatile private var previousLastModified: String? = null
@@ -27,8 +32,42 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private val configMutex = Mutex() // For atomic updates
     private val sdkSettingsDeferred: CompletableDeferred<Unit> = CompletableDeferred()
 
+    // Add listener methods for continuous updates
+    private val configListeners = ConcurrentHashMap<String, MutableList<(Any) -> Unit>>()
+    
+    /**
+     * Register a listener for a specific feature flag
+     * @param key The feature flag key
+     * @param listener Callback function invoked whenever the flag value changes
+     */
+    fun <T : Any> addConfigListener(key: String, listener: (T) -> Unit) {
+        @Suppress("UNCHECKED_CAST")
+        configListeners.getOrPut(key) { mutableListOf() }.add(listener as (Any) -> Unit)
+        logger.debug { "Added listener for key: $key" }
+    }
+    
+    /**
+     * Remove a listener for a specific feature flag
+     * @param key The feature flag key
+     * @param listener The listener to remove
+     */
+    fun <T : Any> removeConfigListener(key: String, listener: (T) -> Unit) {
+        @Suppress("UNCHECKED_CAST")
+        configListeners[key]?.remove(listener as (Any) -> Unit)
+        logger.debug { "Removed listener for key: $key" }
+    }
+    
+    /**
+     * Remove all listeners for a specific feature flag
+     * @param key The feature flag key
+     */
+    fun clearConfigListeners(key: String) {
+        configListeners.remove(key)
+        logger.debug { "Cleared all listeners for key: $key" }
+    }
+
     init {
-        Timber.i("CFClient initialized with config: $config and user: $user")
+        logger.info { "CFClient initialized with config: $config and user: $user" }
         initializeSdkSettings()
         startPeriodicSdkSettingsCheck()
     }
@@ -36,12 +75,12 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private fun initializeSdkSettings() {
         runBlocking(Dispatchers.IO) {
             try {
-                Timber.i("Initializing SDK settings")
+                logger.info { "Initializing SDK settings" }
                 checkSdkSettings()
                 sdkSettingsDeferred.complete(Unit)
-                Timber.i("SDK settings initialized successfully")
+                logger.info { "SDK settings initialized successfully" }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize SDK settings: ${e.message}")
+                logger.error(e) { "Failed to initialize SDK settings: ${e.message}" }
                 sdkSettingsDeferred.completeExceptionally(e)
             }
         }
@@ -51,22 +90,107 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
     fun getString(key: String, fallbackValue: String): String =
             getConfigValue(key, fallbackValue) { it is String }
+            
+    fun getString(key: String, fallbackValue: String, callback: ((String) -> Unit)? = null): String {
+        val value = getString(key, fallbackValue)
+        callback?.invoke(value)
+        return value
+    }
+    
     fun getNumber(key: String, fallbackValue: Number): Number =
             getConfigValue(key, fallbackValue) { it is Number }
+            
+    fun getNumber(key: String, fallbackValue: Number, callback: ((Number) -> Unit)? = null): Number {
+        val value = getNumber(key, fallbackValue)
+        callback?.invoke(value)
+        return value
+    }
+    
     fun getBoolean(key: String, fallbackValue: Boolean): Boolean =
             getConfigValue(key, fallbackValue) { it is Boolean }
+            
+    fun getBoolean(key: String, fallbackValue: Boolean, callback: ((Boolean) -> Unit)? = null): Boolean {
+        val value = getBoolean(key, fallbackValue) 
+        callback?.invoke(value)
+        return value
+    }
+    
     fun getJson(key: String, fallbackValue: Map<String, Any>): Map<String, Any> =
             getConfigValue(key, fallbackValue) {
                 it is Map<*, *> && it.keys.all { k -> k is String }
             }
+            
+    fun getJson(key: String, fallbackValue: Map<String, Any>, callback: ((Map<String, Any>) -> Unit)? = null): Map<String, Any> {
+        val value = getJson(key, fallbackValue)
+        callback?.invoke(value)
+        return value
+    }
 
-    fun trackEvent(eventName: String, properties: Map<String, Any>) =
-            eventTracker.trackEvent(eventName, properties)
+    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
+        eventTracker.trackEvent(eventName, properties)
+    }
+
+    fun trackEvent(eventName: String, propertiesBuilder: EventPropertiesBuilder.() -> Unit) {
+        val properties = EventPropertiesBuilder().apply(propertiesBuilder).build()
+        eventTracker.trackEvent(eventName, properties)
+    }
+
+    // Add a single property to the user
+    fun addUserProperty(key: String, value: Any) {
+        user.addProperty(key, value)
+        logger.debug { "Added user property: $key = $value" }
+    }
+    
+    // Type-specific property methods
+    fun addStringProperty(key: String, value: String) {
+        require(value.isNotBlank()) { "String value for '$key' cannot be blank" }
+        addUserProperty(key, value)
+    }
+    
+    fun addNumberProperty(key: String, value: Number) {
+        addUserProperty(key, value)
+    }
+    
+    fun addBooleanProperty(key: String, value: Boolean) {
+        addUserProperty(key, value)
+    }
+    
+    fun addDateProperty(key: String, value: Date) {
+        addUserProperty(key, value)
+    }
+    
+    fun addGeoPointProperty(key: String, lat: Double, lon: Double) {
+        addUserProperty(key, mapOf("lat" to lat, "lon" to lon))
+    }
+    
+    fun addJsonProperty(key: String, value: Map<String, Any>) {
+        require(value.keys.all { it is String }) { "JSON for '$key' must have String keys" }
+        val jsonCompatible = value.filterValues { isJsonCompatible(it) }
+        addUserProperty(key, jsonCompatible)
+    }
+    
+    private fun isJsonCompatible(value: Any?): Boolean =
+        when (value) {
+            null -> true
+            is String, is Number, is Boolean -> true
+            is Map<*, *> -> value.keys.all { it is String } && value.values.all { isJsonCompatible(it) }
+            is Collection<*> -> value.all { isJsonCompatible(it) }
+            else -> false
+        }
+    
+    // Add multiple properties to the user at once
+    fun addUserProperties(properties: Map<String, Any>) {
+        user.addProperties(properties)
+        logger.debug { "Added ${properties.size} user properties" }
+    }
+    
+    // Get the current user properties including any updates
+    fun getUserProperties(): Map<String, Any> = user.getCurrentProperties()
 
     private fun startPeriodicSdkSettingsCheck() {
         fixedRateTimer("SdkSettingsCheck", daemon = true, period = 300_000) {
             CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                Timber.d("Periodic SDK settings check triggered")
+                logger.debug { "Periodic SDK settings check triggered" }
                 checkSdkSettings()
             }
         }
@@ -77,26 +201,46 @@ class CFClient private constructor(private val config: CFConfig, private val use
             val metadata =
                     fetchSdkSettingsMetadata()
                             ?: run {
-                                Timber.w("Failed to fetch SDK settings metadata")
+                                logger.warn { "Failed to fetch SDK settings metadata" }
                                 return
                             }
             val currentLastModified = metadata["Last-Modified"] ?: return
             if (currentLastModified != previousLastModified) {
-                Timber.i(
-                        "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified"
-                )
+                logger.info { "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified" }
                 val newConfigs = fetchConfigs() ?: emptyMap()
+                
+                // Keep track of updated keys to notify listeners
+                val updatedKeys = mutableSetOf<String>()
+                
                 configMutex.withLock {
+                    // Find keys that have changed
+                    newConfigs.keys.forEach { key ->
+                        if (!configMap.containsKey(key) || configMap[key] != newConfigs[key]) {
+                            updatedKeys.add(key)
+                        }
+                    }
+                    
+                    // Update the config map
                     configMap.clear()
                     configMap.putAll(newConfigs)
                     previousLastModified = currentLastModified
                 }
-                Timber.i("Configs updated successfully with ${newConfigs.size} entries")
+                
+                // Notify listeners for each changed key
+                updatedKeys.forEach { key ->
+                    val config = configMap[key] as? Map<*, *>
+                    val variation = config?.get("variation")
+                    if (variation != null) {
+                        notifyListeners(key, variation)
+                    }
+                }
+                
+                logger.info { "Configs updated successfully with ${newConfigs.size} entries" }
             } else {
-                Timber.d("No change in SDK settings")
+                logger.debug { "No change in SDK settings" }
             }
         } catch (e: Exception) {
-            Timber.e(e, "Error checking SDK settings: ${e.message}")
+            logger.error(e) { "Error checking SDK settings: ${e.message}" }
         }
     }
 
@@ -104,7 +248,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
             httpClient.fetchMetadata(
                             "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
                     )
-                    ?.also { Timber.d("Fetched metadata: $it") }
+                    ?.also { logger.debug { "Fetched metadata: $it" } }
 
     private suspend fun fetchSdkSettings(): SdkSettings? {
         val json =
@@ -112,27 +256,25 @@ class CFClient private constructor(private val config: CFConfig, private val use
                         "https://sdk.customfit.ai/${config.dimensionId}/cf-sdk-settings.json"
                 )
                         ?: run {
-                            Timber.w("Failed to fetch SDK settings JSON")
+                            logger.warn { "Failed to fetch SDK settings JSON" }
                             return null
                         }
 
         return try {
             val settings = SdkSettings.fromJson(json)
             if (settings == null) {
-                Timber.w("SdkSettings.fromJson returned null for JSON: $json")
+                logger.warn { "SdkSettings.fromJson returned null for JSON: $json" }
                 return null
             }
             if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
-                Timber.d(
-                        "SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}"
-                )
+                logger.debug { "SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}" }
                 null
             } else {
-                Timber.d("Fetched SDK settings: $settings")
+                logger.debug { "Fetched SDK settings: $settings" }
                 settings
             }
         } catch (e: Exception) {
-            Timber.e(e, "Error parsing SDK settings: ${e.message}")
+            logger.error(e) { "Error parsing SDK settings: ${e.message}" }
             null
         }
     }
@@ -148,7 +290,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                             }
                             .toString()
                 } catch (e: Exception) {
-                    Timber.e(e, "Error creating config payload: ${e.message}")
+                    logger.error(e) { "Error creating config payload: ${e.message}" }
                     return null
                 }
 
@@ -163,7 +305,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                         HttpURLConnection.HTTP_OK ->
                                 JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
                         else -> {
-                            Timber.w("Config fetch failed with code: ${conn.responseCode}")
+                            logger.warn { "Config fetch failed with code: ${conn.responseCode}" }
                             null
                         }
                     }
@@ -173,7 +315,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
         val configs =
                 json.optJSONObject("configs")
                         ?: run {
-                            Timber.w("No 'configs' object in response")
+                            logger.warn { "No 'configs' object in response" }
                             return null
                         }
         val newConfigMap = mutableMapOf<String, Any>()
@@ -184,16 +326,14 @@ class CFClient private constructor(private val config: CFConfig, private val use
                 val experience =
                         config.optJSONObject("experience_behaviour_response")
                                 ?: run {
-                                    Timber.w(
-                                            "Missing 'experience_behaviour_response' for key: $key"
-                                    )
+                                    logger.warn { "Missing 'experience_behaviour_response' for key: $key" }
                                     return@forEach
                                 }
 
                 val experienceKey =
                         experience.optString("experience", null)
                                 ?: run {
-                                    Timber.w("Missing 'experience' field for key: $key")
+                                    logger.warn { "Missing 'experience' field for key: $key" }
                                     return@forEach
                                 }
                 val variationDataType = config.optString("variation_data_type", "UNKNOWN")
@@ -206,9 +346,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
                                             ?: emptyMap<String, Any>()
                             else ->
                                     config.opt("variation")?.also {
-                                        Timber.w(
-                                                "Unknown variation type: $variationDataType for $key"
-                                        )
+                                        logger.warn { "Unknown variation type: $variationDataType for $key" }
                                     }
                                             ?: ""
                         }
@@ -240,7 +378,7 @@ class CFClient private constructor(private val config: CFConfig, private val use
 
                 newConfigMap[experienceKey] = experienceData
             } catch (e: Exception) {
-                Timber.e(e, "Error processing config key '$key': ${e.message}")
+                logger.error(e) { "Error processing config key '$key': ${e.message}" }
             }
         }
 
@@ -251,11 +389,11 @@ class CFClient private constructor(private val config: CFConfig, private val use
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
         val config = configMap[key]
         if (config == null) {
-            Timber.w("No config found for key '$key'")
+            logger.warn { "No config found for key '$key'" }
             return fallbackValue
         }
         if (config !is Map<*, *>) {
-            Timber.w("Config for '$key' is not a map: $config")
+            logger.warn { "Config for '$key' is not a map: $config" }
             return fallbackValue
         }
         val variation = config["variation"]
@@ -264,13 +402,11 @@ class CFClient private constructor(private val config: CFConfig, private val use
                     try {
                         variation as T
                     } catch (e: ClassCastException) {
-                        Timber.w(
-                                "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}"
-                        )
+                        logger.warn { "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}" }
                         fallbackValue
                     }
                 } else {
-                    Timber.w("No valid variation for '$key': $variation")
+                    logger.warn { "No valid variation for '$key': $variation" }
                     fallbackValue
                 }
         summaryManager.pushSummary(config as Map<String, Any>)
@@ -297,6 +433,15 @@ class CFClient private constructor(private val config: CFConfig, private val use
                             },
                     "properties" to properties
             )
+
+    private fun notifyListeners(key: String, variation: Any) {
+        val listeners = configListeners[key]
+        if (listeners != null) {
+            for (listener in listeners) {
+                listener(variation)
+            }
+        }
+    }
 
     companion object {
         fun init(config: CFConfig, user: CFUser): CFClient = CFClient(config, user)

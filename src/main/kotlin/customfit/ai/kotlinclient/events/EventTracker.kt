@@ -10,10 +10,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import mu.KotlinLogging
 import org.joda.time.DateTime
 import org.json.JSONArray
 import org.json.JSONObject
-import timber.log.Timber
+
+private val logger = KotlinLogging.logger {}
 
 class EventTracker(
         private val sessionId: String,
@@ -36,7 +38,7 @@ class EventTracker(
 
     fun trackEvent(eventName: String, properties: Map<String, Any>) {
         if (eventName.isBlank()) {
-            Timber.w("Event name cannot be blank")
+            logger.warn { "Event name cannot be blank" }
             return
         }
         val validatedProperties =
@@ -52,13 +54,13 @@ class EventTracker(
                         insert_id = UUID.randomUUID().toString()
                 )
         if (!eventQueue.offer(event)) {
-            Timber.w("Event queue full, forcing flush for event: $event")
+            logger.warn { "Event queue full, forcing flush for event: $event" }
             scope.launch { flushEvents() }
             if (!eventQueue.offer(event)) {
-                Timber.e("Failed to queue event after flush: $event")
+                logger.error { "Failed to queue event after flush: $event" }
             }
         } else {
-            Timber.d("Event added to queue: $event")
+            logger.debug { "Event added to queue: $event" }
             if (eventQueue.size >= MAX_QUEUE_SIZE) {
                 scope.launch { flushEvents() }
             }
@@ -84,64 +86,49 @@ class EventTracker(
     suspend fun flushEvents() {
         summaryManager.flushSummaries()
         if (eventQueue.isEmpty()) {
-            Timber.d("No events to flush")
+            logger.debug { "No events to flush" }
             return
         }
         val eventsToFlush = mutableListOf<EventData>()
         eventQueue.drainTo(eventsToFlush)
         if (eventsToFlush.isNotEmpty()) {
             sendTrackEvents(eventsToFlush)
-            Timber.i("Flushed %d events successfully", eventsToFlush.size)
+            logger.info { "Flushed ${eventsToFlush.size} events successfully" }
         }
     }
 
     private suspend fun sendTrackEvents(events: List<EventData>) {
-        val eventsJson =
-                events.map { event ->
-                    mapOf(
-                            "event_customer_id" to event.event_customer_id,
-                            "event_type" to event.event_type.toString(),
-                            "properties" to event.properties,
-                            "event_timestamp" to event.event_timestamp.toString(),
-                            "session_id" to event.session_id,
-                            "insert_id" to event.insert_id
-                    )
-                }
         val jsonPayload =
                 try {
-                    JSONObject()
-                            .apply {
-                                put("user", user)
-                                put("events", JSONArray(eventsJson))
-                                put("cf_client_sdk_version", "1.0.0")
-                            }
+                    JSONArray().apply {
+                        events.forEach { event ->
+                            put(
+                                    JSONObject()
+                                            .apply {
+                                                put("event_customer_id", event.event_customer_id)
+                                                put("event_type", event.event_type.name)
+                                                put("properties", JSONObject(event.properties))
+                                                put("event_timestamp", event.event_timestamp)
+                                                put("session_id", event.session_id)
+                                                put("timeuuid", event.timeuuid)
+                                                put("insert_id", event.insert_id)
+                                            }
+                            )
+                        }
+                    }
                             .toString()
                 } catch (e: Exception) {
-                    Timber.e("Error serializing events: $e")
+                    logger.error(e) { "Error serializing events: ${e.message}" }
                     events.forEach { eventQueue.offer(it) }
                     return
                 }
 
         val success = httpClient.postJson("https://example.com/v1/cfe", jsonPayload)
         if (!success) {
-            Timber.w("Failed to send %d events, re-queuing", events.size)
+            logger.warn { "Failed to send ${events.size} events, re-queuing" }
             events.forEach { eventQueue.offer(it) }
         } else {
-            Timber.i("Successfully sent %d events", events.size)
+            logger.info { "Successfully sent ${events.size} events" }
         }
-    }
-
-    // Helper function to convert Map to JSONObject recursively
-    private fun mapToJsonObject(map: Map<String, Any?>): JSONObject {
-        val jsonObject = JSONObject()
-        map.forEach { (key, value) ->
-            when (value) {
-                is Map<*, *> -> jsonObject.put(key, mapToJsonObject(value as Map<String, Any?>))
-                is List<*> -> jsonObject.put(key, JSONArray(value))
-                null -> jsonObject.put(key, JSONObject.NULL)
-                else -> jsonObject.put(key, value)
-            }
-        }
-        return jsonObject
     }
 }

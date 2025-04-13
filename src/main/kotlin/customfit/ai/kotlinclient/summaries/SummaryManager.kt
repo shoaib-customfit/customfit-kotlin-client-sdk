@@ -11,15 +11,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import mu.KotlinLogging
 import org.joda.time.DateTime
 import org.json.JSONArray
 import org.json.JSONObject
-import timber.log.Timber
+
+private val logger = KotlinLogging.logger {}
 
 class SummaryManager(
         private val sessionId: String,
-        private val user: CFUser,
-        private val httpClient: HttpClient
+        private val httpClient: HttpClient,
+        private val user: CFUser
+
 ) {
     private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue()
     private val summaryTrackMap = Collections.synchronizedMap(mutableMapOf<String, Boolean>())
@@ -36,7 +39,7 @@ class SummaryManager(
 
     fun pushSummary(config: Any) {
         if (config !is Map<*, *>) {
-            Timber.w("Config is not a map: $config")
+            logger.warn { "Config is not a map: $config" }
             return
         }
         val configMap =
@@ -44,21 +47,21 @@ class SummaryManager(
                     @Suppress("UNCHECKED_CAST") it as Map<String, Any>
                 }
                         ?: run {
-                            Timber.w("Config map has non-string keys: $config")
+                            logger.warn { "Config map has non-string keys: $config" }
                             return
                         }
 
         val experienceId =
                 configMap["experience_id"] as? String
                         ?: run {
-                            Timber.w("Missing mandatory 'experience_id' in config: $configMap")
+                            logger.warn { "Missing mandatory 'experience_id' in config: $configMap" }
                             return
                         }
 
         scope.launch {
             trackMutex.withLock {
                 if (summaryTrackMap.containsKey(experienceId)) {
-                    Timber.d("Experience already processed: $experienceId")
+                    logger.debug { "Experience already processed: $experienceId" }
                     return@launch
                 }
                 summaryTrackMap[experienceId] = true
@@ -79,26 +82,26 @@ class SummaryManager(
                     )
 
             if (!summaries.offer(configSummary)) {
-                Timber.w("Summary queue full, forcing flush for: $configSummary")
+                logger.warn { "Summary queue full, forcing flush for: $configSummary" }
                 flushSummaries()
                 if (!summaries.offer(configSummary)) {
-                    Timber.e("Failed to queue summary after flush: $configSummary")
+                    logger.error { "Failed to queue summary after flush: $configSummary" }
                 }
             }
-            Timber.d("Summary added to queue: $configSummary")
+            logger.debug { "Summary added to queue: $configSummary" }
         }
     }
 
     suspend fun flushSummaries() {
         if (summaries.isEmpty()) {
-            Timber.d("No summaries to flush")
+            logger.debug { "No summaries to flush" }
             return
         }
         val summariesToFlush = mutableListOf<CFConfigRequestSummary>()
         summaries.drainTo(summariesToFlush)
         if (summariesToFlush.isNotEmpty()) {
             sendSummaryToServer(summariesToFlush)
-            Timber.i("Flushed %d summaries successfully", summariesToFlush.size)
+            logger.info { "Flushed ${summariesToFlush.size} summaries successfully" }
         }
     }
 
@@ -106,12 +109,18 @@ class SummaryManager(
         val jsonPayload =
                 try {
                     val jsonObject = JSONObject()
-                    jsonObject.put("user", user)
+                    jsonObject.put("user", JSONObject().apply {
+                        put("user_customer_id", user.user_customer_id)
+                        put("anonymous", user.anonymous)
+                        put("private_fields", user.private_fields)
+                        put("session_fields", user.session_fields)
+                        put("properties", JSONObject(user.properties))
+                    })
                     jsonObject.put("summaries", JSONArray(summaries))
                     jsonObject.put("cf_client_sdk_version", "1.0.0")
                     jsonObject.toString()
                 } catch (e: Exception) {
-                    Timber.e("Error serializing summaries: $e")
+                    logger.error(e) { "Error serializing summaries: ${e.message}" }
                     summaries.forEach { this.summaries.offer(it) }
                     return
                 }
@@ -119,10 +128,10 @@ class SummaryManager(
         val success =
                 httpClient.postJson("https://example.com/v1/config/request/summary", jsonPayload)
         if (!success) {
-            Timber.w("Failed to send %d summaries, re-queuing", summaries.size)
+            logger.warn { "Failed to send ${summaries.size} summaries, re-queuing" }
             summaries.forEach { this.summaries.offer(it) }
         } else {
-            Timber.i("Successfully sent %d summaries", summaries.size)
+            logger.info { "Successfully sent ${summaries.size} summaries" }
         }
     }
 

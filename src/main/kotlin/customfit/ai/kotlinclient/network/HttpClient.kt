@@ -4,8 +4,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import mu.KotlinLogging
 import org.json.JSONObject
-import timber.log.Timber
+
+private val logger = KotlinLogging.logger {}
 
 class HttpClient {
     suspend fun <T> performRequest(
@@ -34,7 +36,7 @@ class HttpClient {
                     connection.connect()
                     responseHandler(connection)
                 } catch (e: Exception) {
-                    Timber.e(e, "HTTP request failed for $url: ${e.message}")
+                    logger.error(e) { "HTTP request failed for $url: ${e.message}" }
                     null
                 } finally {
                     connection?.disconnect()
@@ -51,7 +53,7 @@ class HttpClient {
                         )
                     }
                 } else {
-                    Timber.w("Failed to fetch metadata from $url: ${conn.responseCode}")
+                    logger.warn { "Failed to fetch metadata from $url: ${conn.responseCode}" }
                     null
                 }
             }
@@ -61,7 +63,7 @@ class HttpClient {
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     JSONObject(conn.inputStream.bufferedReader().readText())
                 } else {
-                    Timber.w("Failed to fetch JSON from $url: ${conn.responseCode}")
+                    logger.warn { "Failed to fetch JSON from $url: ${conn.responseCode}" }
                     null
                 }
             }

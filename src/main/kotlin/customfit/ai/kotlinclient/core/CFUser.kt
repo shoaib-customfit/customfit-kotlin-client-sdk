@@ -13,6 +13,23 @@ data class CFUser(
         val session_fields: PrivateAttributesRequest?= PrivateAttributesRequest(),
         @Serializable(with = MapSerializer::class) val properties: Map<String, Any>
 ) {
+    // Mutable properties map to allow updates after creation
+    @kotlinx.serialization.Transient
+    private val _properties: MutableMap<String, Any> = properties.toMutableMap()
+    
+    // Update a single property
+    fun addProperty(key: String, value: Any) {
+        _properties[key] = value
+    }
+    
+    // Update multiple properties at once
+    fun addProperties(properties: Map<String, Any>) {
+        _properties.putAll(properties)
+    }
+    
+    // Get the latest properties including any updates
+    fun getCurrentProperties(): Map<String, Any> = _properties.toMap()
+
     companion object {
         @JvmStatic fun builder(user_customer_id: String) = Builder(user_customer_id)
     }
