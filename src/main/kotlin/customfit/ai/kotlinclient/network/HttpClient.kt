@@ -3,6 +3,7 @@ package customfit.ai.kotlinclient.network
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,8 +14,31 @@ import customfit.ai.kotlinclient.core.CFConfig
 private val logger = KotlinLogging.logger {}
 
 class HttpClient(private val cfConfig: CFConfig? = null) {
-    private val networkConnectionTimeout = cfConfig?.networkConnectionTimeoutMs ?: 10_000 // Default 10 seconds
-    private val networkReadTimeout = cfConfig?.networkReadTimeoutMs ?: 10_000 // Default 10 seconds
+    // Use atomics to allow thread-safe updates
+    private val connectionTimeout = AtomicInteger(cfConfig?.networkConnectionTimeoutMs ?: 10_000)
+    private val readTimeout = AtomicInteger(cfConfig?.networkReadTimeoutMs ?: 10_000)
+    
+    /**
+     * Updates the connection timeout setting
+     * 
+     * @param timeoutMs new timeout in milliseconds
+     */
+    fun updateConnectionTimeout(timeoutMs: Int) {
+        require(timeoutMs > 0) { "Timeout must be greater than 0" }
+        connectionTimeout.set(timeoutMs)
+        logger.debug { "Updated connection timeout to $timeoutMs ms" }
+    }
+    
+    /**
+     * Updates the read timeout setting
+     * 
+     * @param timeoutMs new timeout in milliseconds
+     */
+    fun updateReadTimeout(timeoutMs: Int) {
+        require(timeoutMs > 0) { "Timeout must be greater than 0" }
+        readTimeout.set(timeoutMs)
+        logger.debug { "Updated read timeout to $timeoutMs ms" }
+    }
     
     suspend fun <T> performRequest(
             url: String,
@@ -29,8 +53,8 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     logger.debug { "Making $method request to $url" }
                     connection = URL(url).openConnection() as HttpURLConnection
                     connection.requestMethod = method
-                    connection.connectTimeout = networkConnectionTimeout
-                    connection.readTimeout = networkReadTimeout
+                    connection.connectTimeout = connectionTimeout.get()
+                    connection.readTimeout = readTimeout.get()
                     connection.doInput = true
 
                     headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }

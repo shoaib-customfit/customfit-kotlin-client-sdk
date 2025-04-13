@@ -4,7 +4,10 @@ import customfit.ai.kotlinclient.core.CFConfig
 import customfit.ai.kotlinclient.core.CFUser
 import customfit.ai.kotlinclient.network.HttpClient
 import java.util.Collections
+import java.util.Timer
+import java.util.TimerTask
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,19 +28,36 @@ class SummaryManager(
         private val user: CFUser,
         private val cfConfig: CFConfig
 ) {
-    // Use values from config or fallback to defaults
+    // Use atomic values to allow thread-safe updates
     private val summariesQueueSize = cfConfig.summariesQueueSize
     private val summariesFlushTimeSeconds = cfConfig.summariesFlushTimeSeconds
-    private val summariesFlushIntervalMs = cfConfig.summariesFlushIntervalMs
+    private val flushIntervalMs = AtomicLong(cfConfig.summariesFlushIntervalMs)
     
     private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue(summariesQueueSize)
     private val summaryTrackMap = Collections.synchronizedMap(mutableMapOf<String, Boolean>())
     private val trackMutex = Mutex()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    // Timer management
+    private var flushTimer: Timer? = null
+    private val timerMutex = Mutex()
 
     init {
-        logger.info { "SummaryManager initialized with summariesQueueSize=$summariesQueueSize, summariesFlushTimeSeconds=$summariesFlushTimeSeconds, summariesFlushIntervalMs=$summariesFlushIntervalMs" }
+        logger.info { "SummaryManager initialized with summariesQueueSize=$summariesQueueSize, summariesFlushTimeSeconds=$summariesFlushTimeSeconds, flushIntervalMs=${flushIntervalMs.get()}" }
         startPeriodicFlush()
+    }
+
+    /**
+     * Updates the flush interval and restarts the timer
+     * 
+     * @param intervalMs new interval in milliseconds
+     */
+    suspend fun updateFlushInterval(intervalMs: Long) {
+        require(intervalMs > 0) { "Interval must be greater than 0" }
+        
+        flushIntervalMs.set(intervalMs)
+        restartPeriodicFlush()
+        logger.info { "Updated summaries flush interval to $intervalMs ms" }
     }
 
     fun pushSummary(config: Any) {
@@ -208,11 +228,35 @@ class SummaryManager(
     }
 
     private fun startPeriodicFlush() {
-        fixedRateTimer("SummaryFlush", daemon = true, period = summariesFlushIntervalMs) {
-            scope.launch {
-                logger.debug { "Periodic flush triggered for summaries" }
-                flushSummaries()
+        scope.launch {
+            timerMutex.withLock {
+                // Cancel existing timer if any
+                flushTimer?.cancel()
+                
+                // Create a new timer
+                flushTimer = fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
+                    scope.launch {
+                        logger.debug { "Periodic flush triggered for summaries" }
+                        flushSummaries()
+                    }
+                }
             }
+        }
+    }
+    
+    private suspend fun restartPeriodicFlush() {
+        timerMutex.withLock {
+            // Cancel existing timer if any
+            flushTimer?.cancel()
+            
+            // Create a new timer with updated interval
+            flushTimer = fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
+                scope.launch {
+                    logger.debug { "Periodic flush triggered for summaries" }
+                    flushSummaries()
+                }
+            }
+            logger.debug { "Restarted periodic flush with interval ${flushIntervalMs.get()} ms" }
         }
     }
     

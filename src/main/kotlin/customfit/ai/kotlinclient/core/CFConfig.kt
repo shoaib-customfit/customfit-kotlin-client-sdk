@@ -25,7 +25,15 @@
         val networkReadTimeoutMs: Int = 10_000,        // 10 seconds
         // Logging configuration
         val loggingEnabled: Boolean = true,
-        val debugLoggingEnabled: Boolean = false
+        val debugLoggingEnabled: Boolean = false,
+        // Offline mode - when true, no network requests will be made
+        val offlineMode: Boolean = false,
+        // Background operation settings
+        val disableBackgroundPolling: Boolean = false,
+        val backgroundPollingIntervalMs: Long = 3_600_000, // 1 hour by default
+        val useReducedPollingWhenBatteryLow: Boolean = true,
+        val reducedPollingIntervalMs: Long = 7_200_000, // 2 hours when battery low
+        val maxStoredEvents: Int = 100 // Maximum events to store when offline
     ) {
         val dimensionId: String? by lazy { extractDimensionIdFromToken(clientKey) }
 
@@ -84,6 +92,12 @@
             private var networkReadTimeoutMs: Int = 10_000
             private var loggingEnabled: Boolean = true
             private var debugLoggingEnabled: Boolean = false
+            private var offlineMode: Boolean = false
+            private var disableBackgroundPolling: Boolean = false
+            private var backgroundPollingIntervalMs: Long = 3_600_000
+            private var useReducedPollingWhenBatteryLow: Boolean = true
+            private var reducedPollingIntervalMs: Long = 7_200_000
+            private var maxStoredEvents: Int = 100
             
             fun eventsQueueSize(size: Int) = apply { this.eventsQueueSize = size }
             fun eventsFlushTimeSeconds(seconds: Int) = apply { this.eventsFlushTimeSeconds = seconds }
@@ -96,6 +110,23 @@
             fun networkReadTimeoutMs(ms: Int) = apply { this.networkReadTimeoutMs = ms }
             fun loggingEnabled(enabled: Boolean) = apply { this.loggingEnabled = enabled }
             fun debugLoggingEnabled(enabled: Boolean) = apply { this.debugLoggingEnabled = enabled }
+            fun offlineMode(enabled: Boolean) = apply { this.offlineMode = enabled }
+            fun disableBackgroundPolling(disable: Boolean) = apply { this.disableBackgroundPolling = disable }
+            fun backgroundPollingIntervalMs(intervalMs: Long) = apply { 
+                require(intervalMs > 0) { "Interval must be greater than 0" }
+                this.backgroundPollingIntervalMs = intervalMs 
+            }
+            fun useReducedPollingWhenBatteryLow(useReduced: Boolean) = apply { 
+                this.useReducedPollingWhenBatteryLow = useReduced 
+            }
+            fun reducedPollingIntervalMs(intervalMs: Long) = apply { 
+                require(intervalMs > 0) { "Interval must be greater than 0" }
+                this.reducedPollingIntervalMs = intervalMs 
+            }
+            fun maxStoredEvents(maxEvents: Int) = apply { 
+                require(maxEvents > 0) { "Max stored events must be greater than 0" }
+                this.maxStoredEvents = maxEvents 
+            }
             
             fun build(): CFConfig = CFConfig(
                 clientKey = clientKey,
@@ -109,7 +140,13 @@
                 networkConnectionTimeoutMs = networkConnectionTimeoutMs,
                 networkReadTimeoutMs = networkReadTimeoutMs,
                 loggingEnabled = loggingEnabled,
-                debugLoggingEnabled = debugLoggingEnabled
+                debugLoggingEnabled = debugLoggingEnabled,
+                offlineMode = offlineMode,
+                disableBackgroundPolling = disableBackgroundPolling,
+                backgroundPollingIntervalMs = backgroundPollingIntervalMs,
+                useReducedPollingWhenBatteryLow = useReducedPollingWhenBatteryLow,
+                reducedPollingIntervalMs = reducedPollingIntervalMs,
+                maxStoredEvents = maxStoredEvents
             )
         }
     }

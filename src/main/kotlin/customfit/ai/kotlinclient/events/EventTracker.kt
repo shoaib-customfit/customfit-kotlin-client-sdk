@@ -6,11 +6,15 @@ import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.summaries.SummaryManager
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
 import org.joda.time.DateTime
 import org.json.JSONArray
@@ -25,17 +29,46 @@ class EventTracker(
         private val summaryManager: SummaryManager,
         private val cfConfig: CFConfig
 ) {
-    // Use values from config or fallback to defaults
+    // Use atomics to allow thread-safe updates
     private val eventsQueueSize = cfConfig.eventsQueueSize
-    private val eventsFlushTimeSeconds = cfConfig.eventsFlushTimeSeconds
-    private val eventsFlushIntervalMs = cfConfig.eventsFlushIntervalMs
+    private val eventsFlushTimeSeconds = AtomicInteger(cfConfig.eventsFlushTimeSeconds)
+    private val eventsFlushIntervalMs = AtomicLong(cfConfig.eventsFlushIntervalMs)
     
     private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue(eventsQueueSize)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    
+    // Timer management
+    private var flushTimer: Timer? = null
+    private val timerMutex = Mutex()
 
     init {
-        logger.info { "EventTracker initialized with eventsQueueSize=$eventsQueueSize, eventsFlushTimeSeconds=$eventsFlushTimeSeconds, eventsFlushIntervalMs=$eventsFlushIntervalMs" }
+        logger.info { "EventTracker initialized with eventsQueueSize=$eventsQueueSize, eventsFlushTimeSeconds=${eventsFlushTimeSeconds.get()}, eventsFlushIntervalMs=${eventsFlushIntervalMs.get()}" }
         startPeriodicFlush()
+    }
+    
+    /**
+     * Updates the flush interval and restarts the timer
+     * 
+     * @param intervalMs new interval in milliseconds
+     */
+    suspend fun updateFlushInterval(intervalMs: Long) {
+        require(intervalMs > 0) { "Interval must be greater than 0" }
+        
+        eventsFlushIntervalMs.set(intervalMs)
+        restartPeriodicFlush()
+        logger.info { "Updated events flush interval to $intervalMs ms" }
+    }
+    
+    /**
+     * Updates the flush time threshold
+     * 
+     * @param seconds new threshold in seconds
+     */
+    fun updateFlushTimeSeconds(seconds: Int) {
+        require(seconds > 0) { "Seconds must be greater than 0" }
+        
+        eventsFlushTimeSeconds.set(seconds)
+        logger.info { "Updated events flush time threshold to $seconds seconds" }
     }
 
     fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
@@ -77,18 +110,49 @@ class EventTracker(
     }
 
     private fun startPeriodicFlush() {
-        fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs) {
-            scope.launch {
-                val lastEvent = eventQueue.peek()
-                val currentTime = DateTime.now()
-                if (lastEvent != null &&
-                                currentTime
-                                        .minusSeconds(eventsFlushTimeSeconds)
-                                        .isAfter(lastEvent.event_timestamp)
-                ) {
-                    flushEvents()
+        scope.launch {
+            timerMutex.withLock {
+                // Cancel existing timer if any
+                flushTimer?.cancel()
+                
+                // Create a new timer
+                flushTimer = fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs.get()) {
+                    scope.launch {
+                        val lastEvent = eventQueue.peek()
+                        val currentTime = DateTime.now()
+                        if (lastEvent != null &&
+                                    currentTime
+                                            .minusSeconds(eventsFlushTimeSeconds.get())
+                                            .isAfter(lastEvent.event_timestamp)
+                        ) {
+                            flushEvents()
+                        }
+                    }
                 }
             }
+        }
+    }
+    
+    private suspend fun restartPeriodicFlush() {
+        timerMutex.withLock {
+            // Cancel existing timer if any
+            flushTimer?.cancel()
+            
+            // Create a new timer with updated interval
+            flushTimer = fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs.get()) {
+                scope.launch {
+                    val lastEvent = eventQueue.peek()
+                    val currentTime = DateTime.now()
+                    if (lastEvent != null &&
+                                currentTime
+                                        .minusSeconds(eventsFlushTimeSeconds.get())
+                                        .isAfter(lastEvent.event_timestamp)
+                    ) {
+                        flushEvents()
+                    }
+                }
+            }
+            logger.debug { "Restarted periodic event flush check with interval ${eventsFlushIntervalMs.get()} ms" }
         }
     }
 
