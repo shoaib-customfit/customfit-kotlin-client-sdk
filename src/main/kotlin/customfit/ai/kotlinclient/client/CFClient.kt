@@ -632,19 +632,20 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             
             if (currentLastModified != previousLastModified) {
                 Timber.i("SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified")
-                val configResult = configFetcher.fetchConfig(currentLastModified)
-                if (configResult == null) {
+                // Fetch the config map directly (it's nullable)
+                val newConfigs = configFetcher.fetchConfig(currentLastModified)
+                
+                // Check if fetching the config was successful
+                if (newConfigs == null) {
                     Timber.warn { "Failed to fetch config with last-modified: $currentLastModified" }
                     return
                 }
-                
-                val newConfigs = configResult.first
                 
                 // Keep track of updated keys to notify listeners
                 val updatedKeys = mutableSetOf<String>()
                 
                 configMutex.withLock {
-                    // Find keys that have changed
+                    // Find keys that have changed (iterate over the non-null map)
                     for (key in newConfigs.keys) {
                         if (!configMap.containsKey(key) || configMap[key] != newConfigs[key]) {
                             updatedKeys.add(key)
@@ -722,7 +723,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                     return null
                 }
 
-        val json =
+        val response =
                 httpClient.performRequest(
                         url,
                         "POST",
@@ -731,7 +732,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 ) { conn ->
                     when (conn.responseCode) {
                         HttpURLConnection.HTTP_OK ->
-                                JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                                conn.inputStream.bufferedReader().use { it.readText() }
                         else -> {
                             Timber.warn { "Config fetch failed with code: ${conn.responseCode}" }
                             null
@@ -739,78 +740,90 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                     }
                 }
                         ?: return null
-
-        val configs =
+        
+        val json = JSONObject(response)
+                ?: return null
+                
+        // Print the full response for debugging
+        println("Full JSON response: $json")
+        
+        try {
+            val configs =
                 json.optJSONObject("configs")
-                        ?: run {
-                            Timber.warn { "No 'configs' object in response" }
-                            return null
-                        }
-        val newConfigMap = mutableMapOf<String, Any>()
+                    ?: run {
+                        Timber.warn { "No 'configs' object in response" }
+                        return null
+                    }
 
-        configs.keys().forEach { key ->
-            try {
-                val config = configs.getJSONObject(key)
-                val experience =
-                        config.optJSONObject("experience_behaviour_response")
-                                ?: run {
-                                    Timber.warn { "Missing 'experience_behaviour_response' for key: $key" }
-                                    return@forEach
-                                }
+            val newConfigMap = mutableMapOf<String, Any>()
 
-                val experienceKey =
-                        experience.optString("experience", null)
-                                ?: run {
-                                    Timber.warn { "Missing 'experience' field for key: $key" }
-                                    return@forEach
-                                }
-                val variationDataType = config.optString("variation_data_type", "UNKNOWN")
-                val variation: Any =
-                        when (variationDataType.uppercase()) {
-                            "STRING" -> config.optString("variation", "")
-                            "BOOLEAN" -> config.optBoolean("variation", false)
-                            "NUMBER" -> config.optDouble("variation", 0.0)
-                            "JSON" -> config.optJSONObject("variation")?.toMap()
-                                            ?: emptyMap<String, Any>()
-                            else ->
-                                    config.opt("variation")?.also {
-                                        Timber.warn { "Unknown variation type: $variationDataType for $key" }
+            configs.keys().forEach { key ->
+                try {
+                    val config = configs.getJSONObject(key)
+                    val experience =
+                            config.optJSONObject("experience_behaviour_response")
+                                    ?: run {
+                                        Timber.warn { "Missing 'experience_behaviour_response' for key: $key" }
+                                        return@forEach
                                     }
-                                            ?: ""
-                        }
 
-                val experienceData =
-                        mapOf(
-                                "version" to config.optNumber("version"),
-                                "config_id" to config.optString("config_id", null),
-                                "user_id" to json.optString("user_id", null),
-                                "experience_id" to experience.optString("experience_id", null),
-                                "behaviour" to experience.optString("behaviour", null),
-                                "behaviour_id" to experience.optString("behaviour_id", null),
-                                "variation_name" to experience.optString("behaviour", null),
-                                "variation_id" to experience.optString("variation_id", null),
-                                "priority" to experience.optInt("priority", 0),
-                                "experience_created_time" to
-                                        experience.optLong("experience_created_time", 0L),
-                                "rule_id" to experience.optString("rule_id", null),
-                                "experience" to experienceKey,
-                                "audience_name" to experience.optString("audience_name", null),
-                                "ga_measurement_id" to
-                                        experience.optString("ga_measurement_id", null),
-                                "type" to experience.optString("type", null),
-                                "config_modifications" to
-                                        experience.optString("config_modifications", null),
-                                "variation_data_type" to variationDataType,
-                                "variation" to variation
-                        )
+                    val experienceKey =
+                            experience.optString("experience", null)
+                                    ?: run {
+                                        Timber.warn { "Missing 'experience' field for key: $key" }
+                                        return@forEach
+                                    }
+                    val variationDataType = config.optString("variation_data_type", "UNKNOWN")
+                    val variation: Any =
+                            when (variationDataType.uppercase()) {
+                                "STRING" -> config.optString("variation", "")
+                                "BOOLEAN" -> config.optBoolean("variation", false)
+                                "NUMBER" -> config.optDouble("variation", 0.0)
+                                "JSON" -> config.optJSONObject("variation")?.toMap()
+                                                ?: emptyMap<String, Any>()
+                                else ->
+                                        config.opt("variation")?.also {
+                                            Timber.warn { "Unknown variation type: $variationDataType for $key" }
+                                        }
+                                                ?: ""
+                            }
 
-                newConfigMap[experienceKey] = experienceData
-            } catch (e: Exception) {
-                Timber.e(e) { "Error processing config key '$key': ${e.message}" }
+                    val experienceData =
+                            mapOf(
+                                    "version" to config.optNumber("version"),
+                                    "config_id" to config.optString("config_id", null),
+                                    "user_id" to json.optString("user_id", null),
+                                    "experience_id" to experience.optString("experience_id", null),
+                                    "behaviour" to experience.optString("behaviour", null),
+                                    "behaviour_id" to experience.optString("behaviour_id", null),
+                                    "variation_name" to experience.optString("behaviour", null),
+                                    "variation_id" to experience.optString("variation_id", null),
+                                    "priority" to experience.optInt("priority", 0),
+                                    "experience_created_time" to
+                                            experience.optLong("experience_created_time", 0L),
+                                    "rule_id" to experience.optString("rule_id", null),
+                                    "experience" to experienceKey,
+                                    "audience_name" to experience.optString("audience_name", null),
+                                    "ga_measurement_id" to
+                                            experience.optString("ga_measurement_id", null),
+                                    "type" to experience.optString("type", null),
+                                    "config_modifications" to
+                                            experience.optString("config_modifications", null),
+                                    "variation_data_type" to variationDataType,
+                                    "variation" to variation
+                            )
+
+                    newConfigMap[experienceKey] = experienceData
+                } catch (e: Exception) {
+                    Timber.e(e) { "Error processing config key '$key': ${e.message}" }
+                }
             }
-        }
 
-        return newConfigMap
+            return newConfigMap
+        } catch (e: Exception) {
+            Timber.e(e) { "Error processing config fetch: ${e.message}" }
+            return null
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

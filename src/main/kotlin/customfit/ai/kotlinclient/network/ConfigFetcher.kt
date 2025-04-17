@@ -40,9 +40,9 @@ class ConfigFetcher(
      * Fetches configuration from the API
      * 
      * @param lastModified Optional last-modified header value for conditional requests
-     * @return A pair containing the configuration map and metadata map, or null if fetching failed
+     * @return The configuration map, or null if fetching failed
      */
-    suspend fun fetchConfig(lastModified: String? = null): Pair<Map<String, Any>, Map<String, String>>? {
+    suspend fun fetchConfig(lastModified: String? = null): Map<String, Any>? {
         // Don't fetch if in offline mode
         if (isOffline()) {
             logger.debug { "Not fetching config because client is in offline mode" }
@@ -58,36 +58,30 @@ class ConfigFetcher(
                         put("include_only_features_flags", true)
                     }
                     .toString()
+
+                println("payload: $payload")
                     
                 val headers = mutableMapOf<String, String>(
                     "Content-Type" to "application/json"
                 )
-                lastModified?.let { headers["If-Modified-Since"] = it }
+                lastModified?.let { headers["If-Modified-Since"] = it } // Keep If-Modified-Since for request optimization
                 
-                val jsonResult = httpClient.performRequest(url, "POST", headers, payload) { conn ->
+                val responseBody = httpClient.performRequest(url, "POST", headers, payload) { conn ->
                     val responseCode = conn.responseCode
                     if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
-                        val responseBody = conn.inputStream.bufferedReader().readText()
-                        val metadata = mapOf(
-                            "Last-Modified" to (conn.getHeaderField("Last-Modified") ?: ""),
-                            "ETag" to (conn.getHeaderField("ETag") ?: "")
-                        )
-                        Pair(responseBody, metadata)
+                        conn.inputStream.bufferedReader().readText()
                     } else {
                         logger.warn { "Failed to fetch config from $url: $responseCode" }
                         null
                     }
                 }
                 
-                if (jsonResult == null) {
-                    logger.warn { "Failed to fetch configuration" }
+                if (responseBody == null) {
+                    logger.warn { "Failed to fetch configuration body" }
                     return@withLock null
                 }
                 
-                val configMap = processConfigResponse(jsonResult.first)
-                val metadata = jsonResult.second
-                
-                Pair(configMap, metadata)
+                processConfigResponse(responseBody)
             } catch (e: Exception) {
                 logger.error(e) { "Error fetching configuration: ${e.message}" }
                 null
@@ -102,64 +96,15 @@ class ConfigFetcher(
      * @return A map of configurations
      */
     private fun processConfigResponse(jsonResponse: String): Map<String, Any> {
-        val newConfigMap = mutableMapOf<String, Any>()
+        println("Full JSON response: $jsonResponse")
         
-        try {
+        return try {
             val responseJson = JSONObject(jsonResponse)
-            val configsJson = responseJson.optJSONObject("configs") ?: return emptyMap()
-            
-            for (key in configsJson.keys()) {
-                try {
-                    val experienceJson = configsJson.getJSONObject(key)
-                    val experience = experienceJson.optJSONObject("experience") ?: continue
-                    
-                    val experienceKey = experience.optString("key", key)
-                    val variationType = experience.optString("variation_type", "string")
-                    val variationValue = experience.opt("variation") ?: continue
-                    
-                    val variation = when (variationType) {
-                        "number" -> variationValue.toString().toDoubleOrNull() ?: 0.0
-                        "boolean" -> variationValue.toString().toBoolean()
-                        "json" -> try { 
-                            val jsonObj = JSONObject(variationValue.toString())
-                            val result = mutableMapOf<String, Any>()
-                            for (jsonKey in jsonObj.keys()) {
-                                result[jsonKey] = jsonObj.get(jsonKey)
-                            }
-                            result
-                        } catch (e: Exception) {
-                            mapOf<String, Any>()
-                        }
-                        else -> variationValue.toString()
-                    }
-                    
-                    // Create the experience data map
-                    val experienceData = mapOf(
-                        "config_id" to experience.optString("config_id", null),
-                        "variation_id" to experience.optString("variation_id", null),
-                        "priority" to experience.optInt("priority", 0),
-                        "experience_created_time" to experience.optLong("experience_created_time", 0L),
-                        "rule_id" to experience.optString("rule_id", null),
-                        "experience" to experienceKey,
-                        "audience_name" to experience.optString("audience_name", null),
-                        "ga_measurement_id" to experience.optString("ga_measurement_id", null),
-                        "type" to experience.optString("type", null),
-                        "config_modifications" to experience.optString("config_modifications", null),
-                        "variation_data_type" to variationType,
-                        "variation" to variation
-                    )
-                    
-                    newConfigMap[experienceKey] = experienceData
-                } catch (e: Exception) {
-                    logger.error(e) { "Error processing config key '$key': ${e.message}" }
-                }
-            }
+            responseJson.toMap()
         } catch (e: Exception) {
             logger.error(e) { "Error parsing configuration response: ${e.message}" }
-            return emptyMap()
+            emptyMap()
         }
-        
-        return newConfigMap
     }
     
     /**
