@@ -576,10 +576,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     }
 
     private fun startPeriodicSdkSettingsCheck() {
-        startPeriodicSdkSettingsCheck(mutableConfig.sdkSettingsCheckIntervalMs)
+        startPeriodicSdkSettingsCheck(mutableConfig.sdkSettingsCheckIntervalMs, initialCheck = false)
     }
     
-    private fun startPeriodicSdkSettingsCheck(intervalMs: Long) {
+    private fun startPeriodicSdkSettingsCheck(intervalMs: Long, initialCheck: Boolean = true) {
         CoroutineScope(Dispatchers.IO).launch {
             timerMutex.withLock {
                 // Cancel existing timer if any
@@ -587,36 +587,54 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 
                 // Create a new timer
                 sdkSettingsTimer = fixedRateTimer("SdkSettingsCheck", daemon = true, 
+                        initialDelay = intervalMs, 
                         period = intervalMs) {
                     CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                        Timber.d("Periodic SDK settings check triggered")
+                        Timber.d("Periodic SDK settings check triggered by timer")
                         checkSdkSettings()
                     }
                 }
                 
                 Timber.d("Started SDK settings check timer with interval $intervalMs ms")
+                
+                // Perform immediate check only if requested (used by explicit init call)
+                if (initialCheck) {
+                   launch { // Launch in a new coroutine to avoid blocking the timer setup
+                       Timber.d("Performing initial SDK settings check from startPeriodicSdkSettingsCheck")
+                       checkSdkSettings()
+                   } 
+                }
             }
         }
     }
     
     private suspend fun restartPeriodicSdkSettingsCheck() {
-        restartPeriodicSdkSettingsCheck(mutableConfig.sdkSettingsCheckIntervalMs)
+        restartPeriodicSdkSettingsCheck(mutableConfig.sdkSettingsCheckIntervalMs, initialCheck = false)
     }
     
-    private suspend fun restartPeriodicSdkSettingsCheck(intervalMs: Long) {
+    private suspend fun restartPeriodicSdkSettingsCheck(intervalMs: Long, initialCheck: Boolean = true) {
         timerMutex.withLock {
             // Cancel existing timer if any
             sdkSettingsTimer?.cancel()
             
             // Create a new timer with updated interval
             sdkSettingsTimer = fixedRateTimer("SdkSettingsCheck", daemon = true, 
+                    initialDelay = intervalMs, 
                     period = intervalMs) {
                 CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                    Timber.d("Periodic SDK settings check triggered")
+                    Timber.d("Periodic SDK settings check triggered by timer")
                     checkSdkSettings()
                 }
             }
             Timber.d("Restarted periodic SDK settings check with interval $intervalMs ms")
+
+            // Perform immediate check only if requested
+            if (initialCheck) {
+                 CoroutineScope(Dispatchers.IO).launch { // Use CoroutineScope here
+                   Timber.d("Performing immediate SDK settings check from restartPeriodicSdkSettingsCheck")
+                   checkSdkSettings()
+               } 
+            }
         }
     }
 
@@ -745,7 +763,6 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 ?: return null
                 
         // Print the full response for debugging
-        println("Full JSON response: $json")
         
         try {
             val configs =

@@ -82,6 +82,25 @@ class SummaryManager(
                             logger.warn { "Missing mandatory 'experience_id' in config: $configMap" }
                             return
                         }
+                        
+        // Validate mandatory fields before creating the summary
+        val configId = configMap["config_id"] as? String
+        val variationId = configMap["variation_id"] as? String
+        // Keep version as String but ensure it's not null
+        val versionString = configMap["version"]?.toString()
+
+        if (configId == null) {
+            logger.warn { "Missing mandatory 'config_id' for summary: $configMap" }
+            return
+        }
+        if (variationId == null) {
+            logger.warn { "Missing mandatory 'variation_id' for summary: $configMap" }
+            return
+        }
+        if (versionString == null) {
+            logger.warn { "Missing or invalid mandatory 'version' for summary: $configMap" }
+            return
+        }
 
         scope.launch {
             trackMutex.withLock {
@@ -94,11 +113,11 @@ class SummaryManager(
 
             val configSummary =
                     CFConfigRequestSummary(
-                            config_id = configMap["config_id"] as? String,
-                            version = configMap["version"]?.toString(),
+                            config_id = configId,
+                            version = versionString, // Use validated String version
                             user_id = configMap["user_id"] as? String,
-                            requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"),
-                            variation_id = configMap["variation_id"] as? String,
+                            requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"), // Keep as formatted string for now
+                            variation_id = variationId,
                             user_customer_id = user.user_customer_id,
                             session_id = sessionId,
                             behaviour_id = configMap["behaviour_id"] as? String,

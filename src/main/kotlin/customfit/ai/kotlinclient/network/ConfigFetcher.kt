@@ -90,20 +90,53 @@ class ConfigFetcher(
     }
     
     /**
-     * Process the configuration response
+     * Process the configuration response, flattening nested experience data.
      * 
      * @param jsonResponse The JSON response from the API
-     * @return A map of configurations
+     * @return A map containing flattened configurations.
      */
-    private fun processConfigResponse(jsonResponse: String): Map<String, Any> {
-        println("Full JSON response: $jsonResponse")
+    private fun processConfigResponse(jsonResponse: String): Map<String, Any> {        
+        val finalConfigMap = mutableMapOf<String, Any>()
         
-        return try {
+        try {
             val responseJson = JSONObject(jsonResponse)
-            responseJson.toMap()
+            val configsJson = responseJson.optJSONObject("configs")
+            
+            if (configsJson == null) {
+                logger.warn { "No 'configs' object found in the response." }
+                return emptyMap()
+            }
+
+            // Iterate through each config entry (e.g., "shoaib-1")
+            configsJson.keys().forEach { key ->
+                try {
+                    val configObject = configsJson.getJSONObject(key)
+                    val experienceObject = configObject.optJSONObject("experience_behaviour_response")
+
+                    // Start with top-level fields
+                    val flattenedMap = configObject.toMap().toMutableMap()
+                    
+                    // Remove the nested object itself
+                    flattenedMap.remove("experience_behaviour_response") 
+
+                    // Merge fields from the nested object if it exists
+                    experienceObject?.let {
+                        flattenedMap.putAll(it.toMap())
+                    }
+
+                    // Store the flattened map
+                    finalConfigMap[key] = flattenedMap
+                    
+                } catch (e: Exception) {
+                    logger.error(e) { "Error processing individual config key '$key': ${e.message}" }
+                }
+            }
+            
+            return finalConfigMap
+            
         } catch (e: Exception) {
             logger.error(e) { "Error parsing configuration response: ${e.message}" }
-            emptyMap()
+            return emptyMap()
         }
     }
     
