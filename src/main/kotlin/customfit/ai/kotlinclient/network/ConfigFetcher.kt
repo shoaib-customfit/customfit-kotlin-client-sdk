@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
 import org.json.JSONObject
+import org.json.JSONArray
 
 private val logger = KotlinLogging.logger {}
 
@@ -113,15 +114,15 @@ class ConfigFetcher(
                     val configObject = configsJson.getJSONObject(key)
                     val experienceObject = configObject.optJSONObject("experience_behaviour_response")
 
-                    // Start with top-level fields
-                    val flattenedMap = configObject.toMap().toMutableMap()
+                    // Start with top-level fields using the helper function
+                    val flattenedMap = jsonObjectToMap(configObject).toMutableMap()
                     
                     // Remove the nested object itself
                     flattenedMap.remove("experience_behaviour_response") 
 
-                    // Merge fields from the nested object if it exists
+                    // Merge fields from the nested object if it exists, using the helper function
                     experienceObject?.let {
-                        flattenedMap.putAll(it.toMap())
+                        flattenedMap.putAll(jsonObjectToMap(it))
                     }
 
                     // Store the flattened map
@@ -138,6 +139,43 @@ class ConfigFetcher(
             logger.error(e) { "Error parsing configuration response: ${e.message}" }
             return emptyMap()
         }
+    }
+    
+    /**
+     * Manually converts a JSONObject to a Map, as JSONObject.toMap() is not available on Android.
+     */
+    private fun jsonObjectToMap(jsonObject: JSONObject): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        val keys = jsonObject.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            var value = jsonObject.get(key)
+            
+            when (value) {
+                is JSONObject -> value = jsonObjectToMap(value)
+                is JSONArray -> value = jsonArrayToList(value)
+                JSONObject.NULL -> value = null
+            }
+            map[key] = value
+        }
+        return map
+    }
+
+    /**
+     * Manually converts a JSONArray to a List.
+     */
+    private fun jsonArrayToList(jsonArray: JSONArray): List<Any?> {
+        val list = mutableListOf<Any?>()
+        for (i in 0 until jsonArray.length()) {
+            var value = jsonArray.get(i)
+            when (value) {
+                is JSONObject -> value = jsonObjectToMap(value)
+                is JSONArray -> value = jsonArrayToList(value)
+                JSONObject.NULL -> value = null
+            }
+            list.add(value)
+        }
+        return list
     }
     
     /**
