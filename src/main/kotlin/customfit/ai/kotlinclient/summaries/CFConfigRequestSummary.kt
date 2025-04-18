@@ -1,7 +1,9 @@
 package customfit.ai.kotlinclient.summaries
 
 import org.joda.time.DateTime
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class CFConfigRequestSummary(
         val config_id: String?,
         val version: String?,

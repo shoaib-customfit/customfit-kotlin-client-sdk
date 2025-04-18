@@ -3,7 +3,7 @@
     import java.util.*
     import kotlinx.serialization.Serializable
     import customfit.ai.kotlinclient.logging.Timber
-    import org.json.JSONObject
+    import kotlinx.serialization.json.*
 
     @Serializable
     data class CFConfig(
@@ -66,10 +66,20 @@
                         Timber.w("Invalid JWT structure: $token")
                         return null
                     }
-                    val payload = parts[1].padEnd((parts[1].length + 3) / 4 * 4, '=')
+                    val payload = parts[1].let { 
+                        val rem = it.length % 4
+                        if (rem == 0) it else it + "=".repeat(4 - rem)
+                    }
                     val decodedBytes = Base64.getUrlDecoder().decode(payload)
-                    val decodedString = String(decodedBytes)
-                    JSONObject(decodedString).optString("dimension_id", null)
+                    val decodedString = String(decodedBytes, Charsets.UTF_8)
+                    
+                    val jsonElement = Json.parseToJsonElement(decodedString)
+                    if (jsonElement is JsonObject) {
+                        jsonElement["dimension_id"]?.jsonPrimitive?.contentOrNull
+                    } else {
+                        Timber.w("Decoded JWT payload is not a JSON object: $decodedString")
+                        null
+                    }
                 } catch (e: Exception) {
                     Timber.e(e, "JWT decoding error: ${e.javaClass.simpleName} - ${e.message}")
                     null

@@ -17,10 +17,38 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
 import org.joda.time.DateTime
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 
 private val logger = KotlinLogging.logger {}
+
+// --- Copied Helper function to serialize Any --- 
+private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
+    null -> JsonNull
+    is JsonElement -> value // If it's already a JsonElement, return it directly
+    is String -> JsonPrimitive(value)
+    is Number -> JsonPrimitive(value)
+    is Boolean -> JsonPrimitive(value)
+    is Map<*, *> -> buildJsonObject { // Recursively handle maps
+        value.forEach { (k, v) ->
+            if (k is String) {
+                put(k, anyToJsonElement(v)) // Recursive call
+            } else {
+                // Handle non-string keys if necessary, e.g., convert toString or throw error
+                logger.warn { "Skipping non-string key in map during serialization: $k" }
+            }
+        }
+    }
+    is Iterable<*> -> buildJsonArray { // Recursively handle lists/collections
+        value.forEach { 
+            add(anyToJsonElement(it)) // Recursive call
+        }
+    }
+    // Add other specific types if needed (e.g., Date -> JsonPrimitive(date.toString()))
+    else -> throw kotlinx.serialization.SerializationException("Serializer for class '${value::class.simpleName}' is not found. Cannot serialize value of type Any.")
+}
+// --- End Helper function --- 
 
 class EventTracker(
         private val sessionId: String,  // This is the session ID that will be used for all events
@@ -173,52 +201,54 @@ class EventTracker(
     private suspend fun sendTrackEvents(events: List<EventData>) {
         val jsonPayload =
                 try {
-                    val jsonObject = JSONObject()
-                    
-                    // Add events array with properly formatted event objects
-                    val eventsArray = JSONArray()
-                    events.forEach { event ->
-                        val eventObject = JSONObject()
-                        eventObject.put("event_customer_id", event.event_customer_id)
-                        eventObject.put("event_type", event.event_type.name)
-                        eventObject.put("properties", JSONObject(event.properties))
+                    // Use kotlinx.serialization builders
+                    val jsonObject = buildJsonObject {
+                        // Add events array
+                        put("events", buildJsonArray {
+                            events.forEach { event ->
+                                add(buildJsonObject { // Use buildJsonObject for each event
+                                    put("event_customer_id", JsonPrimitive(event.event_customer_id))
+                                    put("event_type", JsonPrimitive(event.event_type.name))
+                                    // Encode properties map using the helper
+                                    put("properties", buildJsonObject { 
+                                        event.properties.forEach { (k, v) ->
+                                            // Use anyToJsonElement for property values
+                                            put(k, anyToJsonElement(v)) 
+                                        }
+                                    })
+                                    
+                                    // Format timestamp to match server expectation: yyyy-MM-dd HH:mm:ss.SSSZ
+                                    event.event_timestamp?.let { 
+                                        put("event_timestamp", JsonPrimitive(it.toString("yyyy-MM-dd HH:mm:ss.SSSZ"))) 
+                                    }
+                                    
+                                    put("session_id", JsonPrimitive(event.session_id))
+                                    put("insert_id", JsonPrimitive(event.insert_id))
+                                })
+                            }
+                        })
                         
-                        // Format timestamp to match server expectation: yyyy-MM-dd HH:mm:ss.SSSZ (no 'T')
-                        event.event_timestamp?.let { 
-                            eventObject.put("event_timestamp", it.toString("yyyy-MM-dd HH:mm:ss.SSSZ")) 
-                        }
+                        // Add user object using user.toUserMap() and the helper
+                        put("user", buildJsonObject { 
+                            // Use helper function for values in user map
+                            user.toUserMap().forEach { (k, v) -> 
+                                put(k, anyToJsonElement(v))
+                            } 
+                        })
                         
-                        eventObject.put("session_id", event.session_id)
-                        eventObject.put("insert_id", event.insert_id)
-                        eventsArray.put(eventObject)
+                        // Add SDK version
+                        put("cf_client_sdk_version", JsonPrimitive("1.1.1")) // Use correct version
                     }
-                    jsonObject.put("events", eventsArray)
                     
-                    // Add user object
-                    jsonObject.put("user", JSONObject().apply {
-                        put("user_customer_id", user.user_customer_id)
-                        put("anonymous", user.anonymous)
-                        // Include private_fields if available
-                        if (user.private_fields != null) {
-                            put("private_fields", JSONObject(user.private_fields))
-                        }
-                        // Include session_fields if available
-                        if (user.session_fields != null) {
-                            put("session_fields", JSONObject(user.session_fields))
-                        }
-                        // Include properties
-                        put("properties", JSONObject(user.properties))
-                        // Include any other available fields from the user
-                      
-                        // dimension_id would be added here if available
-                    })
-                    
-                    // Add SDK version
-                    jsonObject.put("cf_client_sdk_version", "1.0.0")
-                    
-                    jsonObject.toString()
+                    Json.encodeToString(jsonObject)
                 } catch (e: Exception) {
-                    logger.error(e) { "Error serializing events: ${e.message}" }
+                    // Catch specific SerializationException from helper if needed
+                    if (e is kotlinx.serialization.SerializationException) {
+                        logger.error(e) { "Serialization error creating event payload: ${e.message}" }
+                    } else {
+                        logger.error(e) { "Error serializing events: ${e.message}" }
+                    }
+                    // Re-queue events on serialization error
                     events.forEach { eventQueue.offer(it) }
                     return
                 }
@@ -232,7 +262,14 @@ class EventTracker(
         val success = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${events.size} events, re-queuing" }
-            events.forEach { eventQueue.offer(it) }
+            // Re-add events to queue in case of failure
+            // Consider potential for infinite loops if server consistently fails
+             val capacity = eventsQueueSize - this.eventQueue.size
+            if (capacity > 0) {
+                events.take(capacity).forEach { this.eventQueue.offer(it) }
+            } else {
+                 logger.warn { "Event queue is full, couldn't re-queue failed events" }
+            }
         } else {
             logger.info { "Successfully sent ${events.size} events" }
         }

@@ -8,7 +8,8 @@ import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mu.KotlinLogging
-import org.json.JSONObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import customfit.ai.kotlinclient.core.CFConfig
 
 private val logger = KotlinLogging.logger {}
@@ -89,10 +90,23 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                 }
             }
 
-    suspend fun fetchJson(url: String): JSONObject? =
+    suspend fun fetchJson(url: String): JsonObject? =
             performRequest(url, "GET") { conn ->
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                    JSONObject(conn.inputStream.bufferedReader().readText())
+                    try {
+                        val responseText = conn.inputStream.bufferedReader().readText()
+                        // Parse using kotlinx.serialization and cast to JsonObject
+                        val jsonElement = Json.parseToJsonElement(responseText)
+                        if (jsonElement is JsonObject) {
+                             jsonElement
+                        } else {
+                             logger.warn { "Parsed JSON from $url is not an object: $jsonElement" }
+                             null
+                        }
+                    } catch (e: Exception) {
+                        logger.error(e) { "Error parsing JSON response from $url: ${e.message}" }
+                        null
+                    }
                 } else {
                     logger.warn { "Failed to fetch JSON from $url: ${conn.responseCode}" }
                     null

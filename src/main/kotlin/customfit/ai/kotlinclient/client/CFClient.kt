@@ -27,7 +27,8 @@ import kotlin.concurrent.fixedRateTimer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.json.JSONObject
+import kotlinx.serialization.json.*
+import kotlinx.serialization.encodeToString
 import org.joda.time.DateTime
 
 class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser) {
@@ -698,7 +699,8 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             configFetcher.fetchMetadata("https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json")
 
     private suspend fun fetchSdkSettings(): SdkSettings? {
-        val json =
+        // fetchJson now returns kotlinx.serialization.json.JsonObject?
+        val jsonObject =
                 httpClient.fetchJson(
                         "https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json"
                 )
@@ -708,11 +710,16 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         }
 
         return try {
-            val settings = SdkSettings.fromJson(json)
-            if (settings == null) {
-                Timber.warn { "SdkSettings.fromJson returned null for JSON: $json" }
+            // Use Json.decodeFromJsonElement
+            val settings = Json.decodeFromJsonElement<SdkSettings>(jsonObject)
+            // The null check for settings might be redundant now if decodeFromJsonElement throws on failure
+            // but keeping it for safety based on previous logic.
+            /* 
+            if (settings == null) { 
+                Timber.warn { "SdkSettings.fromJson returned null for JSON: $jsonObject" }
                 return null
             }
+            */
             if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
                 Timber.d("SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}")
                 null
@@ -721,6 +728,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 settings
             }
         } catch (e: Exception) {
+            // Catch SerializationException or other potential errors from decoding
             Timber.e(e) { "Error parsing SDK settings: ${e.message}" }
             null
         }
@@ -730,12 +738,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         val url = "https://api.customfit.ai/v1/users/configs?cfenc=${mutableConfig.clientKey}"
         val payload =
                 try {
-                    JSONObject()
-                            .apply {
-                                put("user", JSONObject(user.toMap()))
-                                put("include_only_features_flags", true)
-                            }
-                            .toString()
+                    // Use buildJsonObject and Json.encodeToString for payload creation
+                    val jsonPayload = buildJsonObject {
+                        put("user", Json.encodeToJsonElement(user.toMap()))
+                        put("include_only_features_flags", JsonPrimitive(true))
+                    }
+                    Json.encodeToString(jsonPayload)
                 } catch (e: Exception) {
                     Timber.e(e) { "Error creating config payload: ${e.message}" }
                     return null
@@ -759,76 +767,93 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 }
                         ?: return null
         
-        val json = JSONObject(response)
-                ?: return null
+        // Parse response using kotlinx.serialization
+        val jsonElement = try {
+            Json.parseToJsonElement(response)
+        } catch (e: Exception) {
+             Timber.e(e) { "Error parsing config response JSON: ${e.message}" }
+             return null
+        }
+
+        if (jsonElement !is JsonObject) {
+             Timber.warn { "Config response is not a JSON object" }
+             return null
+        }
                 
         // Print the full response for debugging
         
         try {
             val configs =
-                json.optJSONObject("configs")
+                jsonElement["configs"]?.jsonObject
                     ?: run {
                         Timber.warn { "No 'configs' object in response" }
                         return null
                     }
 
             val newConfigMap = mutableMapOf<String, Any>()
+            val userId = jsonElement["user_id"]?.jsonPrimitive?.contentOrNull
 
-            configs.keys().forEach { key ->
+            configs.entries.forEach { (key, configElement) ->
                 try {
-                    val config = configs.getJSONObject(key)
+                     if (configElement !is JsonObject) {
+                         Timber.warn { "Config entry for '$key' is not a JSON object" }
+                         return@forEach
+                     }
+                    val config = configElement.jsonObject // Use JsonObject directly
+
                     val experience =
-                            config.optJSONObject("experience_behaviour_response")
+                            config["experience_behaviour_response"]?.jsonObject
                                     ?: run {
                                         Timber.warn { "Missing 'experience_behaviour_response' for key: $key" }
                                         return@forEach
                                     }
 
                     val experienceKey =
-                            experience.optString("experience", null)
+                            experience["experience"]?.jsonPrimitive?.contentOrNull
                                     ?: run {
                                         Timber.warn { "Missing 'experience' field for key: $key" }
                                         return@forEach
                                     }
-                    val variationDataType = config.optString("variation_data_type", "UNKNOWN")
+                    val variationDataType = config["variation_data_type"]?.jsonPrimitive?.contentOrNull ?: "UNKNOWN"
+                    
+                    // Extract variation using kotlinx.serialization primitives/elements
+                    val variationJsonElement = config["variation"]
                     val variation: Any =
                             when (variationDataType.uppercase()) {
-                                "STRING" -> config.optString("variation", "")
-                                "BOOLEAN" -> config.optBoolean("variation", false)
-                                "NUMBER" -> config.optDouble("variation", 0.0)
-                                "JSON" -> config.optJSONObject("variation")?.toMap()
-                                                ?: emptyMap<String, Any>()
+                                "STRING" -> variationJsonElement?.jsonPrimitive?.contentOrNull ?: ""
+                                "BOOLEAN" -> variationJsonElement?.jsonPrimitive?.booleanOrNull ?: false
+                                "NUMBER" -> variationJsonElement?.jsonPrimitive?.doubleOrNull ?: 0.0
+                                "JSON" -> variationJsonElement?.jsonObject?.let { this.jsonObjectToMap(it) } ?: emptyMap<String, Any>()
                                 else ->
-                                        config.opt("variation")?.also {
+                                        variationJsonElement?.jsonPrimitive?.contentOrNull?.also {
                                             Timber.warn { "Unknown variation type: $variationDataType for $key" }
                                         }
-                                                ?: ""
+                                                ?: "" // Fallback to string or empty string
                             }
 
                     val experienceData =
-                            mapOf(
-                                    "version" to config.optNumber("version"),
-                                    "config_id" to config.optString("config_id", null),
-                                    "user_id" to json.optString("user_id", null),
-                                    "experience_id" to experience.optString("experience_id", null),
-                                    "behaviour" to experience.optString("behaviour", null),
-                                    "behaviour_id" to experience.optString("behaviour_id", null),
-                                    "variation_name" to experience.optString("behaviour", null),
-                                    "variation_id" to experience.optString("variation_id", null),
-                                    "priority" to experience.optInt("priority", 0),
-                                    "experience_created_time" to
-                                            experience.optLong("experience_created_time", 0L),
-                                    "rule_id" to experience.optString("rule_id", null),
-                                    "experience" to experienceKey,
-                                    "audience_name" to experience.optString("audience_name", null),
-                                    "ga_measurement_id" to
-                                            experience.optString("ga_measurement_id", null),
-                                    "type" to experience.optString("type", null),
-                                    "config_modifications" to
-                                            experience.optString("config_modifications", null),
-                                    "variation_data_type" to variationDataType,
-                                    "variation" to variation
-                            )
+                            // Explicitly define type arguments and use Pair constructor
+                            mapOf<String, Any?>(
+                                    Pair("version", config["version"]?.jsonPrimitive?.longOrNull),
+                                    Pair("config_id", config["config_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("user_id", userId), // Use userId obtained earlier
+                                    Pair("experience_id", experience["experience_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("behaviour", experience["behaviour"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("behaviour_id", experience["behaviour_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("variation_name", experience["behaviour"]?.jsonPrimitive?.contentOrNull), // Assuming variation_name is same as behaviour
+                                    Pair("variation_id", experience["variation_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("priority", experience["priority"]?.jsonPrimitive?.intOrNull ?: 0),
+                                    Pair("experience_created_time", experience["experience_created_time"]?.jsonPrimitive?.longOrNull ?: 0L),
+                                    Pair("rule_id", experience["rule_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("experience", experienceKey),
+                                    Pair("audience_name", experience["audience_name"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("ga_measurement_id", experience["ga_measurement_id"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("type", experience["type"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("config_modifications", experience["config_modifications"]?.jsonPrimitive?.contentOrNull),
+                                    Pair("variation_data_type", variationDataType),
+                                    Pair("variation", variation)
+                            ).filterValues { it != null } as Map<String, Any> // Cast to Map<String, Any> after filtering nulls
+
 
                     newConfigMap[experienceKey] = experienceData
                 } catch (e: Exception) {
@@ -842,6 +867,32 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             return null
         }
     }
+
+    // --- Add Helper functions as private methods of the class --- 
+    private fun jsonElementToValue(element: JsonElement?): Any? {
+        return when (element) {
+            is JsonNull -> null
+            is JsonPrimitive -> when {
+                element.isString -> element.content
+                element.booleanOrNull != null -> element.boolean
+                element.longOrNull != null -> element.long // Prioritize Long
+                element.doubleOrNull != null -> element.double // Then Double
+                else -> element.content // Fallback
+            }
+            is JsonObject -> jsonObjectToMap(element) // Recursive call
+            is JsonArray -> jsonArrayToList(element) // Recursive call
+            null -> null
+        }
+    }
+    
+    private fun jsonObjectToMap(jsonObject: JsonObject): Map<String, Any?> {
+        return jsonObject.mapValues { jsonElementToValue(it.value) }
+    }
+
+    private fun jsonArrayToList(jsonArray: JsonArray): List<Any?> {
+        return jsonArray.map { jsonElementToValue(it) }
+    }
+    // --- End Helper functions --- 
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {

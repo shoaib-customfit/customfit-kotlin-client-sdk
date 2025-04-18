@@ -6,10 +6,39 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
-import org.json.JSONObject
-import org.json.JSONArray
+import kotlinx.serialization.json.*
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.encodeToString
 
 private val logger = KotlinLogging.logger {}
+
+// --- NEW Helper function to serialize Any --- 
+private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
+    null -> JsonNull
+    is JsonElement -> value // If it's already a JsonElement, return it directly
+    is String -> JsonPrimitive(value)
+    is Number -> JsonPrimitive(value)
+    is Boolean -> JsonPrimitive(value)
+    is Map<*, *> -> buildJsonObject { // Recursively handle maps
+        value.forEach { (k, v) ->
+            if (k is String) {
+                put(k, anyToJsonElement(v)) // Recursive call
+            } else {
+                // Handle non-string keys if necessary, e.g., convert toString or throw error
+                logger.warn { "Skipping non-string key in map during serialization: $k" }
+            }
+        }
+    }
+    is Iterable<*> -> buildJsonArray { // Recursively handle lists/collections
+        value.forEach { 
+            add(anyToJsonElement(it)) // Recursive call
+        }
+    }
+    // Add other specific types if needed (e.g., Date -> JsonPrimitive(date.toString()))
+    else -> throw kotlinx.serialization.SerializationException("Serializer for class '${value::class.simpleName}' is not found. Cannot serialize value of type Any.")
+}
+// --- End Helper function --- 
 
 /**
  * Handles fetching configuration from the CustomFit API with support for offline mode
@@ -53,12 +82,16 @@ class ConfigFetcher(
         return fetchMutex.withLock {
             try {
                 val url = "https://api.customfit.ai/v1/users/configs?cfenc=${cfConfig.clientKey}"
-                val payload = JSONObject()
-                    .apply {
-                        put("user", JSONObject(user.toUserMap()))
-                        put("include_only_features_flags", true)
-                    }
-                    .toString()
+                // Build payload using kotlinx.serialization and the new helper
+                val payload = Json.encodeToString(buildJsonObject {
+                    put("user", buildJsonObject { 
+                        // Use helper function for values in user map
+                        user.toUserMap().forEach { (k, v) ->
+                            put(k, anyToJsonElement(v))
+                        }
+                    })
+                    put("include_only_features_flags", JsonPrimitive(true))
+                })
 
                 println("payload: $payload")
                     
@@ -84,24 +117,36 @@ class ConfigFetcher(
                 
                 processConfigResponse(responseBody)
             } catch (e: Exception) {
-                logger.error(e) { "Error fetching configuration: ${e.message}" }
+                // Catch specific SerializationException from helper if needed
+                 if (e is kotlinx.serialization.SerializationException) {
+                    logger.error(e) { "Serialization error creating config payload: ${e.message}" }
+                 } else {
+                    logger.error(e) { "Error fetching configuration: ${e.message}" }
+                 }
                 null
             }
         }
     }
     
     /**
-     * Process the configuration response, flattening nested experience data.
+     * Process the configuration response, flattening nested experience data using kotlinx.serialization.
      * 
-     * @param jsonResponse The JSON response from the API
+     * @param jsonResponse The JSON response string from the API
      * @return A map containing flattened configurations.
      */
-    private fun processConfigResponse(jsonResponse: String): Map<String, Any> {        
+    private fun processConfigResponse(jsonResponse: String): Map<String, Any>? {        
         val finalConfigMap = mutableMapOf<String, Any>()
         
         try {
-            val responseJson = JSONObject(jsonResponse)
-            val configsJson = responseJson.optJSONObject("configs")
+            // Parse the entire response string into a JsonElement
+            val responseElement = Json.parseToJsonElement(jsonResponse)
+            if (responseElement !is JsonObject) {
+                logger.warn { "Response is not a JSON object." }
+                return null
+            }
+            val responseJson = responseElement.jsonObject // Access as JsonObject
+            
+            val configsJson = responseJson["configs"]?.jsonObject
             
             if (configsJson == null) {
                 logger.warn { "No 'configs' object found in the response." }
@@ -109,24 +154,29 @@ class ConfigFetcher(
             }
 
             // Iterate through each config entry (e.g., "shoaib-1")
-            configsJson.keys().forEach { key ->
+            configsJson.entries.forEach { (key, configElement) ->
                 try {
-                    val configObject = configsJson.getJSONObject(key)
-                    val experienceObject = configObject.optJSONObject("experience_behaviour_response")
+                    if (configElement !is JsonObject) {
+                         logger.warn { "Config entry for '$key' is not a JSON object" }
+                         return@forEach
+                    }
+                    val configObject = configElement.jsonObject
+                    val experienceObject = configObject["experience_behaviour_response"]?.jsonObject
 
-                    // Start with top-level fields using the helper function
+                    // Convert the config JsonObject to a mutable map
                     val flattenedMap = jsonObjectToMap(configObject).toMutableMap()
                     
-                    // Remove the nested object itself
+                    // Remove the nested object itself (it will be merged)
                     flattenedMap.remove("experience_behaviour_response") 
 
-                    // Merge fields from the nested object if it exists, using the helper function
+                    // Merge fields from the nested experience object if it exists
                     experienceObject?.let {
                         flattenedMap.putAll(jsonObjectToMap(it))
                     }
 
-                    // Store the flattened map
-                    finalConfigMap[key] = flattenedMap
+                    // Store the flattened map, ensuring Any? values are handled or filtered if needed
+                    // We need Map<String, Any> as the return type, so filter out nulls if they can occur
+                    finalConfigMap[key] = flattenedMap.filterValues { it != null } as Map<String, Any>
                     
                 } catch (e: Exception) {
                     logger.error(e) { "Error processing individual config key '$key': ${e.message}" }
@@ -137,45 +187,43 @@ class ConfigFetcher(
             
         } catch (e: Exception) {
             logger.error(e) { "Error parsing configuration response: ${e.message}" }
-            return emptyMap()
+            return null // Return null on parsing error
         }
     }
     
+    // --- kotlinx.serialization based helpers ---
+    
     /**
-     * Manually converts a JSONObject to a Map, as JSONObject.toMap() is not available on Android.
+     * Converts a JsonObject to a Map<String, Any?>.
      */
-    private fun jsonObjectToMap(jsonObject: JSONObject): Map<String, Any?> {
-        val map = mutableMapOf<String, Any?>()
-        val keys = jsonObject.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            var value = jsonObject.get(key)
-            
-            when (value) {
-                is JSONObject -> value = jsonObjectToMap(value)
-                is JSONArray -> value = jsonArrayToList(value)
-                JSONObject.NULL -> value = null
-            }
-            map[key] = value
-        }
-        return map
+    private fun jsonObjectToMap(jsonObject: JsonObject): Map<String, Any?> {
+        return jsonObject.mapValues { jsonElementToValue(it.value) }
     }
 
     /**
-     * Manually converts a JSONArray to a List.
+     * Converts a JsonArray to a List<Any?>.
      */
-    private fun jsonArrayToList(jsonArray: JSONArray): List<Any?> {
-        val list = mutableListOf<Any?>()
-        for (i in 0 until jsonArray.length()) {
-            var value = jsonArray.get(i)
-            when (value) {
-                is JSONObject -> value = jsonObjectToMap(value)
-                is JSONArray -> value = jsonArrayToList(value)
-                JSONObject.NULL -> value = null
+    private fun jsonArrayToList(jsonArray: JsonArray): List<Any?> {
+        return jsonArray.map { jsonElementToValue(it) }
+    }
+
+    /**
+     * Recursively converts a JsonElement to a Kotlin primitive, Map, or List.
+     */
+     private fun jsonElementToValue(element: JsonElement?): Any? {
+        return when (element) {
+            is JsonNull -> null
+            is JsonPrimitive -> when {
+                element.isString -> element.content
+                element.booleanOrNull != null -> element.boolean
+                element.longOrNull != null -> element.long // Prioritize Long
+                element.doubleOrNull != null -> element.double // Then Double
+                else -> element.content // Fallback
             }
-            list.add(value)
+            is JsonObject -> jsonObjectToMap(element)
+            is JsonArray -> jsonArrayToList(element)
+            null -> null
         }
-        return list
     }
     
     /**
@@ -218,6 +266,7 @@ class ConfigFetcher(
                     "properties" to it.properties,
                 )
             },
-        "properties" to properties
-    )
+        // Include current properties from the user object
+        "properties" to this.getCurrentProperties() 
+    ).filterValues { it != null } // Ensure nulls are filtered if not desired in payload
 } 

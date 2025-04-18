@@ -17,10 +17,38 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
 import org.joda.time.DateTime
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.json.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 
 private val logger = KotlinLogging.logger {}
+
+// --- Copied Helper function to serialize Any --- 
+private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
+    null -> JsonNull
+    is JsonElement -> value // If it's already a JsonElement, return it directly
+    is String -> JsonPrimitive(value)
+    is Number -> JsonPrimitive(value)
+    is Boolean -> JsonPrimitive(value)
+    is Map<*, *> -> buildJsonObject { // Recursively handle maps
+        value.forEach { (k, v) ->
+            if (k is String) {
+                put(k, anyToJsonElement(v)) // Recursive call
+            } else {
+                // Handle non-string keys if necessary, e.g., convert toString or throw error
+                logger.warn { "Skipping non-string key in map during serialization: $k" }
+            }
+        }
+    }
+    is Iterable<*> -> buildJsonArray { // Recursively handle lists/collections
+        value.forEach { 
+            add(anyToJsonElement(it)) // Recursive call
+        }
+    }
+    // Add other specific types if needed (e.g., Date -> JsonPrimitive(date.toString()))
+    else -> throw kotlinx.serialization.SerializationException("Serializer for class '${value::class.simpleName}' is not found. Cannot serialize value of type Any.")
+}
+// --- End Helper function --- 
 
 class SummaryManager(
         private val sessionId: String,
@@ -157,57 +185,45 @@ class SummaryManager(
     private suspend fun sendSummaryToServer(summaries: List<CFConfigRequestSummary>) {
         val jsonPayload =
                 try {
-                    val jsonObject = JSONObject()
-                    
-                    // Add user object
-                    jsonObject.put("user", JSONObject().apply {
-                        put("user_customer_id", user.user_customer_id)
-                        put("anonymous", user.anonymous)
-                        // Include private_fields if available
-                        if (user.private_fields != null) {
-                            put("private_fields", JSONObject(user.private_fields))
-                        }
-                        // Include session_fields if available
-                        if (user.session_fields != null) {
-                            put("session_fields", JSONObject(user.session_fields))
-                        }
-                        // Include properties
-                        put("properties", JSONObject(user.properties))
-                        // Include any other available fields from the user
-                       
-                        // dimension_id would be added here if available
-                    })
-                    
-                    // Add summaries array with properly formatted summary objects
-                    val summariesArray = JSONArray()
-                    summaries.forEach { summary ->
-                        val summaryObject = JSONObject()
-                        // Only add non-null fields
-                        summary.config_id?.let { summaryObject.put("config_id", it) }
-                        summary.version?.let { summaryObject.put("version", it) }
-                        summary.user_id?.let { summaryObject.put("user_id", it) }
+                    // Use kotlinx.serialization builders
+                    val jsonObject = buildJsonObject {
+                        // Use user.toUserMap() and the helper
+                        put("user", buildJsonObject { 
+                            // Use helper function for values in user map
+                            user.toUserMap().forEach { (k, v) -> 
+                                put(k, anyToJsonElement(v))
+                            } 
+                        })
                         
-                        // Always use current time with correct format for requested_time
-                        summaryObject.put("requested_time", DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"))
+                        // Add summaries array
+                        put("summaries", buildJsonArray {
+                            summaries.forEach { summary ->
+                                // Assuming CFConfigRequestSummary is simple enough or @Serializable
+                                // If not, it would need manual construction or its own serializer
+                                add(Json.encodeToJsonElement(summary)) 
+                                /* // Manual construction if needed:
+                                add(buildJsonObject { 
+                                    summary.config_id?.let { put("config_id", JsonPrimitive(it)) }
+                                    summary.version?.let { put("version", JsonPrimitive(it)) }
+                                    // ... other summary fields ...
+                                })
+                                */
+                            }
+                        })
                         
-                        summary.variation_id?.let { summaryObject.put("variation_id", it) }
-                        summary.user_customer_id?.let { summaryObject.put("user_customer_id", it) }
-                        // Always include session ID
-                        summaryObject.put("session_id", sessionId)
-                        summary.behaviour_id?.let { summaryObject.put("behaviour_id", it) }
-                        summary.experience_id?.let { summaryObject.put("experience_id", it) }
-                        summary.rule_id?.let { summaryObject.put("rule_id", it) }
-                        summariesArray.put(summaryObject)
+                        // Add SDK version
+                        put("cf_client_sdk_version", JsonPrimitive("1.1.1")) // Use correct version
                     }
-                    jsonObject.put("summaries", summariesArray)
                     
-                    // Add SDK version
-                    jsonObject.put("cf_client_sdk_version", "1.0.0")
-                    
-                    jsonObject.toString()
+                    Json.encodeToString(jsonObject)
                 } catch (e: Exception) {
-                    logger.error(e) { "Error serializing summaries: ${e.message}" }
-                    summaries.forEach { this.summaries.offer(it) }
+                     // Catch specific SerializationException from helper if needed
+                    if (e is kotlinx.serialization.SerializationException) {
+                        logger.error(e) { "Serialization error creating summary payload: ${e.message}" }
+                    } else {
+                        logger.error(e) { "Error serializing summaries: ${e.message}" }
+                    }
+                    summaries.forEach { this.summaries.offer(it) } // Re-queue on serialization error
                     return
                 }
 
@@ -225,25 +241,10 @@ class SummaryManager(
             val capacity = summariesQueueSize - this.summaries.size
             if (capacity > 0) {
                 summaries.take(capacity).forEach { this.summaries.offer(it) }
-            } else {
-                logger.warn { "Summary queue is full, couldn't re-queue failed summaries" }
             }
         } else {
             logger.info { "Successfully sent ${summaries.size} summaries" }
         }
-    }
-
-    private fun mapToJsonObject(map: Map<String, Any?>): JSONObject {
-        val jsonObject = JSONObject()
-        map.forEach { (key, value) ->
-            when (value) {
-                is Map<*, *> -> jsonObject.put(key, mapToJsonObject(value as Map<String, Any?>))
-                is List<*> -> jsonObject.put(key, JSONArray(value))
-                null -> jsonObject.put(key, JSONObject.NULL)
-                else -> jsonObject.put(key, value)
-            }
-        }
-        return jsonObject
     }
 
     private fun startPeriodicFlush() {
