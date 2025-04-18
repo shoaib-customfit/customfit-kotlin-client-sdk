@@ -29,7 +29,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
-import org.joda.time.DateTime
 
 class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser) {
     private val sessionId: String = UUID.randomUUID().toString()

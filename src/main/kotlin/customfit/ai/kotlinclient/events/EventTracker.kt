@@ -16,7 +16,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
-import org.joda.time.DateTime
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.ZoneOffset
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
@@ -115,9 +117,9 @@ class EventTracker(
                         event_customer_id = eventName,
                         event_type = EventType.TRACK,
                         properties = validatedProperties,
-                        event_timestamp = DateTime.now(),  // Raw DateTime object, formatting applied during serialization
-                        session_id = sessionId,  // Use session ID from initialization
-                        insert_id = UUID.randomUUID().toString()  // Generate unique insert_id for each event
+                        event_timestamp = Instant.now(),
+                        session_id = sessionId,
+                        insert_id = UUID.randomUUID().toString()
                 )
         if (eventQueue.size >= eventsQueueSize) {
             logger.warn { "Event queue is full (size = $eventsQueueSize), dropping oldest event" }
@@ -140,17 +142,14 @@ class EventTracker(
     private fun startPeriodicFlush() {
         scope.launch {
             timerMutex.withLock {
-                // Cancel existing timer if any
                 flushTimer?.cancel()
-                
-                // Create a new timer
                 flushTimer = fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs.get()) {
                     scope.launch {
                         val lastEvent = eventQueue.peek()
-                        val currentTime = DateTime.now()
+                        val currentTime = Instant.now()
                         if (lastEvent != null &&
                                     currentTime
-                                            .minusSeconds(eventsFlushTimeSeconds.get())
+                                            .minusSeconds(eventsFlushTimeSeconds.get().toLong())
                                             .isAfter(lastEvent.event_timestamp)
                         ) {
                             flushEvents()
@@ -163,17 +162,14 @@ class EventTracker(
     
     private suspend fun restartPeriodicFlush() {
         timerMutex.withLock {
-            // Cancel existing timer if any
             flushTimer?.cancel()
-            
-            // Create a new timer with updated interval
             flushTimer = fixedRateTimer("EventFlushCheck", daemon = true, period = eventsFlushIntervalMs.get()) {
                 scope.launch {
                     val lastEvent = eventQueue.peek()
-                    val currentTime = DateTime.now()
+                    val currentTime = Instant.now()
                     if (lastEvent != null &&
                                 currentTime
-                                        .minusSeconds(eventsFlushTimeSeconds.get())
+                                        .minusSeconds(eventsFlushTimeSeconds.get().toLong())
                                         .isAfter(lastEvent.event_timestamp)
                     ) {
                         flushEvents()
@@ -198,29 +194,27 @@ class EventTracker(
         }
     }
 
+    // Define formatter for the specific timestamp format needed by the server
+    private val eventTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX")
+                                                              .withZone(ZoneOffset.UTC) // Or system default ZoneId.systemDefault()
+
     private suspend fun sendTrackEvents(events: List<EventData>) {
         val jsonPayload =
                 try {
-                    // Use kotlinx.serialization builders
                     val jsonObject = buildJsonObject {
-                        // Add events array
                         put("events", buildJsonArray {
                             events.forEach { event ->
-                                add(buildJsonObject { // Use buildJsonObject for each event
+                                add(buildJsonObject { 
                                     put("event_customer_id", JsonPrimitive(event.event_customer_id))
                                     put("event_type", JsonPrimitive(event.event_type.name))
-                                    // Encode properties map using the helper
                                     put("properties", buildJsonObject { 
                                         event.properties.forEach { (k, v) ->
-                                            // Use anyToJsonElement for property values
                                             put(k, anyToJsonElement(v)) 
                                         }
                                     })
                                     
-                                    // Format timestamp to match server expectation: yyyy-MM-dd HH:mm:ss.SSSZ
-                                    event.event_timestamp?.let { 
-                                        put("event_timestamp", JsonPrimitive(it.toString("yyyy-MM-dd HH:mm:ss.SSSZ"))) 
-                                    }
+                                    // Format Instant using DateTimeFormatter
+                                    put("event_timestamp", JsonPrimitive(eventTimestampFormatter.format(event.event_timestamp)))
                                     
                                     put("session_id", JsonPrimitive(event.session_id))
                                     put("insert_id", JsonPrimitive(event.insert_id))
@@ -228,27 +222,22 @@ class EventTracker(
                             }
                         })
                         
-                        // Add user object using user.toUserMap() and the helper
                         put("user", buildJsonObject { 
-                            // Use helper function for values in user map
                             user.toUserMap().forEach { (k, v) -> 
                                 put(k, anyToJsonElement(v))
                             } 
                         })
                         
-                        // Add SDK version
                         put("cf_client_sdk_version", JsonPrimitive("1.1.1")) // Use correct version
                     }
                     
                     Json.encodeToString(jsonObject)
                 } catch (e: Exception) {
-                    // Catch specific SerializationException from helper if needed
                     if (e is kotlinx.serialization.SerializationException) {
                         logger.error(e) { "Serialization error creating event payload: ${e.message}" }
                     } else {
                         logger.error(e) { "Error serializing events: ${e.message}" }
                     }
-                    // Re-queue events on serialization error
                     events.forEach { eventQueue.offer(it) }
                     return
                 }
@@ -262,9 +251,7 @@ class EventTracker(
         val success = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
         if (!success) {
             logger.warn { "Failed to send ${events.size} events, re-queuing" }
-            // Re-add events to queue in case of failure
-            // Consider potential for infinite loops if server consistently fails
-             val capacity = eventsQueueSize - this.eventQueue.size
+            val capacity = eventsQueueSize - this.eventQueue.size
             if (capacity > 0) {
                 events.take(capacity).forEach { this.eventQueue.offer(it) }
             } else {

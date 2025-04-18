@@ -16,12 +16,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
-import org.joda.time.DateTime
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.ZoneOffset
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
 
 private val logger = KotlinLogging.logger {}
+
+// Define formatter for the specific timestamp format needed by the server
+private val summaryTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX")
+                                                            .withZone(ZoneOffset.UTC)
 
 // --- Copied Helper function to serialize Any --- 
 private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
@@ -142,9 +148,10 @@ class SummaryManager(
             val configSummary =
                     CFConfigRequestSummary(
                             config_id = configId,
-                            version = versionString, // Use validated String version
+                            version = versionString,
                             user_id = configMap["user_id"] as? String,
-                            requested_time = DateTime.now().toString("yyyy-MM-dd HH:mm:ss.SSSZ"), // Keep as formatted string for now
+                            // Format Instant using DateTimeFormatter
+                            requested_time = summaryTimestampFormatter.format(Instant.now()), 
                             variation_id = variationId,
                             user_customer_id = user.user_customer_id,
                             session_id = sessionId,
