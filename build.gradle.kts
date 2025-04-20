@@ -53,5 +53,9 @@ tasks.withType<Jar> {
     manifest {
         attributes["Main-Class"] = "customfit.ai.MainKt"
     }
+    
+    // Include all runtime dependencies in the JAR
+    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+    
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
