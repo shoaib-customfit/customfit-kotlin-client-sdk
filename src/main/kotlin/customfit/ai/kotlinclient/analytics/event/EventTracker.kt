@@ -3,6 +3,7 @@ package customfit.ai.kotlinclient.analytics.event
 import customfit.ai.kotlinclient.analytics.summary.SummaryManager
 import customfit.ai.kotlinclient.core.config.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.core.util.RetryUtil.withRetry
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.platform.AppState
 import customfit.ai.kotlinclient.platform.AppStateListener
@@ -211,10 +212,19 @@ class EventTracker(
         }
 
         try {
-            httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
+            withRetry(
+                maxAttempts = cfConfig.maxRetryAttempts,
+                initialDelayMs = cfConfig.retryInitialDelayMs,
+                maxDelayMs = cfConfig.retryMaxDelayMs,
+                backoffMultiplier = cfConfig.retryBackoffMultiplier
+            ) {
+                if (!httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)) {
+                    throw Exception("Failed to send event")
+                }
+            }
         } catch (e: Exception) {
-            Timber.e(e, "Failed to send events: ${e.message}")
-            // Re-queue the events if sending failed
+            Timber.e(e, "Failed to send event after retries: ${e.message}")
+            // Re-queue the event if sending failed after all retries
             events.forEach { event ->
                 if (!eventQueue.offer(event)) {
                     Timber.e("Failed to re-queue event after send failure: $event")

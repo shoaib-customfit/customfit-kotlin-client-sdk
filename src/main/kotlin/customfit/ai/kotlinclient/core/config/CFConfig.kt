@@ -12,6 +12,11 @@ data class CFConfig(
         val eventsQueueSize: Int = 100,
         val eventsFlushTimeSeconds: Int = 60,
         val eventsFlushIntervalMs: Long = 1000L,
+        // Retry configuration
+        val maxRetryAttempts: Int = 3,
+        val retryInitialDelayMs: Long = 1000L,
+        val retryMaxDelayMs: Long = 30000L,
+        val retryBackoffMultiplier: Double = 2.0,
         // Summary manager configuration
         val summariesQueueSize: Int = 100,
         val summariesFlushTimeSeconds: Int = 60,
@@ -95,6 +100,10 @@ data class CFConfig(
         private var eventsQueueSize: Int = 100
         private var eventsFlushTimeSeconds: Int = 60
         private var eventsFlushIntervalMs: Long = 1000L
+        private var maxRetryAttempts: Int = 3
+        private var retryInitialDelayMs: Long = 1000L
+        private var retryMaxDelayMs: Long = 30000L
+        private var retryBackoffMultiplier: Double = 2.0
         private var summariesQueueSize: Int = 100
         private var summariesFlushTimeSeconds: Int = 60
         private var summariesFlushIntervalMs: Long = 60_000L
@@ -114,6 +123,22 @@ data class CFConfig(
         fun eventsQueueSize(size: Int) = apply { this.eventsQueueSize = size }
         fun eventsFlushTimeSeconds(seconds: Int) = apply { this.eventsFlushTimeSeconds = seconds }
         fun eventsFlushIntervalMs(ms: Long) = apply { this.eventsFlushIntervalMs = ms }
+        fun maxRetryAttempts(attempts: Int) = apply { 
+            require(attempts >= 0) { "Max retry attempts must be non-negative" }
+            this.maxRetryAttempts = attempts 
+        }
+        fun retryInitialDelayMs(delayMs: Long) = apply { 
+            require(delayMs > 0) { "Initial delay must be positive" }
+            this.retryInitialDelayMs = delayMs 
+        }
+        fun retryMaxDelayMs(delayMs: Long) = apply { 
+            require(delayMs > 0) { "Max delay must be positive" }
+            this.retryMaxDelayMs = delayMs 
+        }
+        fun retryBackoffMultiplier(multiplier: Double) = apply { 
+            require(multiplier > 1.0) { "Backoff multiplier must be greater than 1.0" }
+            this.retryBackoffMultiplier = multiplier 
+        }
         fun summariesQueueSize(size: Int) = apply { this.summariesQueueSize = size }
         fun summariesFlushTimeSeconds(seconds: Int) = apply {
             this.summariesFlushTimeSeconds = seconds
@@ -158,6 +183,10 @@ data class CFConfig(
                         eventsQueueSize = eventsQueueSize,
                         eventsFlushTimeSeconds = eventsFlushTimeSeconds,
                         eventsFlushIntervalMs = eventsFlushIntervalMs,
+                        maxRetryAttempts = maxRetryAttempts,
+                        retryInitialDelayMs = retryInitialDelayMs,
+                        retryMaxDelayMs = retryMaxDelayMs,
+                        retryBackoffMultiplier = retryBackoffMultiplier,
                         summariesQueueSize = summariesQueueSize,
                         summariesFlushTimeSeconds = summariesFlushTimeSeconds,
                         summariesFlushIntervalMs = summariesFlushIntervalMs,

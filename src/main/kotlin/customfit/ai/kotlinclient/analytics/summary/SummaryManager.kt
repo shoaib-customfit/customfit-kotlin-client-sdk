@@ -2,6 +2,7 @@ package customfit.ai.kotlinclient.analytics.summary
 
 import customfit.ai.kotlinclient.core.config.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.core.util.RetryUtil.withRetry
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.HttpClient
 import java.time.Instant
@@ -195,9 +196,19 @@ class SummaryManager(
         }
 
         val url = "https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}"
-        if (!httpClient.postJson(url, jsonPayload)) {
-            Timber.w("Failed to send ${summaries.size} summaries, re-queuing")
-            // Re-queue summaries if sending failed
+        try {
+            withRetry(
+                maxAttempts = cfConfig.maxRetryAttempts,
+                initialDelayMs = cfConfig.retryInitialDelayMs,
+                maxDelayMs = cfConfig.retryMaxDelayMs,
+                backoffMultiplier = cfConfig.retryBackoffMultiplier
+            ) {
+                if (!httpClient.postJson(url, jsonPayload)) {
+                    throw Exception("Failed to send summaries")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w("Failed to send ${summaries.size} summaries after retries, re-queuing")
             summaries.forEach { summary ->
                 if (!this.summaries.offer(summary)) {
                     Timber.e("Failed to re-queue summary after send failure: $summary")

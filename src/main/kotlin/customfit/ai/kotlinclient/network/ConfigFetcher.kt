@@ -2,7 +2,9 @@ package customfit.ai.kotlinclient.network
 
 import customfit.ai.kotlinclient.core.config.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.core.util.RetryUtil.withRetry
 import customfit.ai.kotlinclient.logging.Timber
+import customfit.ai.kotlinclient.config.CFConfigChangeManager
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +19,9 @@ class ConfigFetcher(
 ) {
     private val offlineMode = AtomicBoolean(false)
     private val fetchMutex = Mutex()
+    private var lastConfigMap: Map<String, Any>? = null
+    private val mutex = Mutex()
+    private var lastFetchTime: Long = 0
 
     /** Returns whether the client is in offline mode */
     fun isOffline(): Boolean = offlineMode.get()
@@ -149,6 +154,12 @@ class ConfigFetcher(
                 }
             }
 
+            // Notify observers of config changes
+            if (finalConfigMap != lastConfigMap) {
+                CFConfigChangeManager.notifyObservers(finalConfigMap, lastConfigMap)
+                lastConfigMap = finalConfigMap
+            }
+            
             return finalConfigMap
         } catch (e: Exception) {
             Timber.e(e, "Error parsing configuration response: ${e.message}")
