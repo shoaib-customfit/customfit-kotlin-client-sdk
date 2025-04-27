@@ -1,46 +1,42 @@
 package customfit.ai.kotlinclient.network
 
-import java.io.File
+import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.logging.Timber
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
-import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import mu.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import customfit.ai.kotlinclient.core.CFConfig
-
-private val logger = KotlinLogging.logger {}
 
 class HttpClient(private val cfConfig: CFConfig? = null) {
     // Use atomics to allow thread-safe updates
     private val connectionTimeout = AtomicInteger(cfConfig?.networkConnectionTimeoutMs ?: 10_000)
     private val readTimeout = AtomicInteger(cfConfig?.networkReadTimeoutMs ?: 10_000)
-    
+
     /**
      * Updates the connection timeout setting
-     * 
+     *
      * @param timeoutMs new timeout in milliseconds
      */
     fun updateConnectionTimeout(timeoutMs: Int) {
         require(timeoutMs > 0) { "Timeout must be greater than 0" }
         connectionTimeout.set(timeoutMs)
-        logger.debug { "Updated connection timeout to $timeoutMs ms" }
+        Timber.d("Updated connection timeout to $timeoutMs ms")
     }
-    
+
     /**
      * Updates the read timeout setting
-     * 
+     *
      * @param timeoutMs new timeout in milliseconds
      */
     fun updateReadTimeout(timeoutMs: Int) {
         require(timeoutMs > 0) { "Timeout must be greater than 0" }
         readTimeout.set(timeoutMs)
-        logger.debug { "Updated read timeout to $timeoutMs ms" }
+        Timber.d("Updated read timeout to $timeoutMs ms")
     }
-    
+
     suspend fun <T> performRequest(
             url: String,
             method: String,
@@ -51,7 +47,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
             withContext(Dispatchers.IO) {
                 var connection: HttpURLConnection? = null
                 try {
-                    logger.debug { "Making $method request to $url" }
+                    Timber.d("Making $method request to $url")
                     connection = URL(url).openConnection() as HttpURLConnection
                     connection.requestMethod = method
                     connection.connectTimeout = connectionTimeout.get()
@@ -69,7 +65,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     connection.disconnect()
                     return@withContext response
                 } catch (e: Exception) {
-                    logger.error(e) { "Error making request to $url: ${e.message}" }
+                    Timber.e(e, "Error making request to $url: ${e.message}")
                     connection?.disconnect()
                     null
                 }
@@ -85,7 +81,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         )
                     }
                 } else {
-                    logger.warn { "Failed to fetch metadata from $url: ${conn.responseCode}" }
+                    Timber.warn { "Failed to fetch metadata from $url: ${conn.responseCode}" }
                     null
                 }
             }
@@ -98,44 +94,50 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         // Parse using kotlinx.serialization and cast to JsonObject
                         val jsonElement = Json.parseToJsonElement(responseText)
                         if (jsonElement is JsonObject) {
-                             jsonElement
+                            jsonElement
                         } else {
-                             logger.warn { "Parsed JSON from $url is not an object: $jsonElement" }
-                             null
+                            Timber.warn { "Parsed JSON from $url is not an object: $jsonElement" }
+                            null
                         }
                     } catch (e: Exception) {
-                        logger.error(e) { "Error parsing JSON response from $url: ${e.message}" }
+                        Timber.e(e, "Error parsing JSON response from $url: ${e.message}")
                         null
                     }
                 } else {
-                    logger.warn { "Failed to fetch JSON from $url: ${conn.responseCode}" }
+                    Timber.warn { "Failed to fetch JSON from $url: ${conn.responseCode}" }
                     null
                 }
             }
 
     suspend fun postJson(url: String, payload: String): Boolean =
-            performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn ->
+            performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn
+                ->
                 val responseCode = conn.responseCode
-                
+
                 // Print API response
-                val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
-                logger.info { "================ API RESPONSE (${url.substringAfterLast("/")}) ================" }
-                logger.info { "Status Code: $responseCode" }
-                
+                val separator = "================ API RESPONSE (${url.substringAfterLast("/")}) ================"
+                Timber.i(separator)
+                Timber.i("Status Code: $responseCode")
+
                 try {
-                    if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED) {
+                    if (responseCode == HttpURLConnection.HTTP_OK ||
+                                    responseCode == HttpURLConnection.HTTP_ACCEPTED
+                    ) {
                         val responseBody = conn.inputStream.bufferedReader().readText()
-                        logger.info { responseBody }
+                        Timber.i(responseBody)
                     } else {
-                        val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
-                        logger.error { "Error: $errorBody" }
+                        val errorBody =
+                                conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
+                        Timber.e("Error: $errorBody")
                     }
                 } catch (e: Exception) {
-                    logger.error { "Failed to read response: ${e.message}" }
+                    Timber.e(e, "Failed to read response: ${e.message}")
                 } finally {
-                    logger.info { "=================================================================" }
+                    Timber.i(separator)
                 }
-                
-                responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_ACCEPTED
-            } ?: false
+
+                responseCode == HttpURLConnection.HTTP_OK ||
+                        responseCode == HttpURLConnection.HTTP_ACCEPTED
+            }
+                    ?: false
 }

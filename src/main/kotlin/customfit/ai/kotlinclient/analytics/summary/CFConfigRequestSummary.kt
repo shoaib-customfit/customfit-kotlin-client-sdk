@@ -1,4 +1,4 @@
-package customfit.ai.kotlinclient.summaries
+package customfit.ai.kotlinclient.analytics.summary
 
 import java.time.Instant
 import java.time.ZoneOffset
@@ -6,8 +6,8 @@ import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
 
 // Define formatter matching SummaryManager
-private val summaryTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX")
-                                                            .withZone(ZoneOffset.UTC)
+private val summaryTimestampFormatter =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX").withZone(ZoneOffset.UTC)
 
 @Serializable
 data class CFConfigRequestSummary(

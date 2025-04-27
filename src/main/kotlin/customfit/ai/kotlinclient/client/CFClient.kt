@@ -1,37 +1,51 @@
 package customfit.ai.kotlinclient.client
 
-import customfit.ai.kotlinclient.core.ApplicationInfo
-import customfit.ai.kotlinclient.core.CFConfig
-import customfit.ai.kotlinclient.core.CFUser
-import customfit.ai.kotlinclient.core.ContextType
-import customfit.ai.kotlinclient.core.DeviceContext
-import customfit.ai.kotlinclient.core.EvaluationContext
-import customfit.ai.kotlinclient.core.MutableCFConfig
-import customfit.ai.kotlinclient.core.SdkSettings
-import customfit.ai.kotlinclient.events.EventPropertiesBuilder
-import customfit.ai.kotlinclient.events.EventTracker
+import customfit.ai.kotlinclient.analytics.event.EventPropertiesBuilder
+import customfit.ai.kotlinclient.analytics.event.EventTracker
+import customfit.ai.kotlinclient.analytics.summary.SummaryManager
+import customfit.ai.kotlinclient.client.listener.AllFlagsListener
+import customfit.ai.kotlinclient.client.listener.FeatureFlagChangeListener
+import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.core.config.MutableCFConfig
+import customfit.ai.kotlinclient.core.model.ApplicationInfo
+import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.core.model.ContextType
+import customfit.ai.kotlinclient.core.model.DeviceContext
+import customfit.ai.kotlinclient.core.model.EvaluationContext
+import customfit.ai.kotlinclient.core.model.SdkSettings
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.ConfigFetcher
-import customfit.ai.kotlinclient.network.ConnectionInformation
-import customfit.ai.kotlinclient.network.ConnectionManager
-import customfit.ai.kotlinclient.network.ConnectionStatus
-import customfit.ai.kotlinclient.network.ConnectionStatusListener
 import customfit.ai.kotlinclient.network.HttpClient
-import customfit.ai.kotlinclient.summaries.SummaryManager
-import customfit.ai.kotlinclient.utils.ApplicationInfoDetector
+import customfit.ai.kotlinclient.network.connection.ConnectionInformation
+import customfit.ai.kotlinclient.network.connection.ConnectionManager
+import customfit.ai.kotlinclient.network.connection.ConnectionStatus
+import customfit.ai.kotlinclient.network.connection.ConnectionStatusListener
+import customfit.ai.kotlinclient.platform.AppState
+import customfit.ai.kotlinclient.platform.AppStateListener
+import customfit.ai.kotlinclient.platform.ApplicationInfoDetector
+import customfit.ai.kotlinclient.platform.BackgroundStateMonitor
+import customfit.ai.kotlinclient.platform.BatteryState
+import customfit.ai.kotlinclient.platform.BatteryStateListener
+import customfit.ai.kotlinclient.platform.DefaultBackgroundStateMonitor
 import customfit.ai.kotlinclient.utils.CoroutineUtils
 import java.net.HttpURLConnection
-import java.util.*
+import java.util.Collections
+import java.util.Date
+import java.util.Timer
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.concurrent.fixedRateTimer
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
-class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser) {
+class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser) {
     private val sessionId: String = UUID.randomUUID().toString()
     private val mutableConfig = MutableCFConfig(cfConfig)
     private val httpClient = HttpClient(cfConfig)
@@ -43,14 +57,18 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private val connectionManager =
             ConnectionManager(cfConfig) {
                 clientScope.launch {
-                    try {
-                        checkSdkSettings()
-                    } catch (e: Exception) {
-                        Timber.e(e) { "Failed to check SDK settings on connection: ${e.message}" }
-                    }
+                    CoroutineUtils.withErrorHandling(
+                                    errorMessage = "Failed to check SDK settings on connection"
+                            ) { checkSdkSettings() }
+                            .onFailure { e ->
+                                Timber.e(
+                                        e,
+                                        "Failed to check SDK settings on connection: ${e.message}"
+                                )
+                            }
                 }
             }
-    private val backgroundStateMonitor = DefaultBackgroundStateMonitor()
+    private val backgroundStateMonitor: BackgroundStateMonitor = DefaultBackgroundStateMonitor()
     private val connectionStatusListeners = CopyOnWriteArrayList<ConnectionStatusListener>()
 
     // Device context for context-aware evaluation
@@ -201,9 +219,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                             try {
                                 listener.onConnectionStatusChanged(newStatus, info)
                             } catch (e: Exception) {
-                                Timber.e(e) {
-                                    "Error notifying connection status listener: ${e.message}"
-                                }
+                                Timber.e(
+                                        e,
+                                        "Error notifying connection status listener: ${e.message}"
+                                )
                             }
                         }
 
@@ -214,13 +233,16 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                                                         info.lastSuccessfulConnectionTimeMs > 60000)
                         ) {
                             clientScope.launch {
-                                try {
-                                    checkSdkSettings()
-                                } catch (e: Exception) {
-                                    Timber.e(e) {
-                                        "Failed to check SDK settings on reconnect: ${e.message}"
-                                    }
-                                }
+                                CoroutineUtils.withErrorHandling(
+                                                errorMessage =
+                                                        "Failed to check SDK settings on reconnect"
+                                        ) { checkSdkSettings() }
+                                        .onFailure { e ->
+                                            Timber.e(
+                                                    e,
+                                                    "Failed to check SDK settings on reconnect: ${e.message}"
+                                            )
+                                        }
                             }
                         }
                     }
@@ -245,13 +267,16 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
 
                             // Check for updates immediately when coming to foreground
                             clientScope.launch {
-                                try {
-                                    checkSdkSettings()
-                                } catch (e: Exception) {
-                                    Timber.e(e) {
-                                        "Failed to check SDK settings on foreground: ${e.message}"
-                                    }
-                                }
+                                CoroutineUtils.withErrorHandling(
+                                                errorMessage =
+                                                        "Failed to check SDK settings on foreground"
+                                        ) { checkSdkSettings() }
+                                        .onFailure { e ->
+                                            Timber.e(
+                                                    e,
+                                                    "Failed to check SDK settings on foreground: ${e.message}"
+                                            )
+                                        }
                             }
                         }
                     }
@@ -292,7 +317,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         contexts["user"] = userContext
 
         // Add user context to user properties
-        user.addContext(userContext)
+        user = user.addContext(userContext)
 
         // Add device context to user properties
         updateUserWithDeviceContext()
@@ -312,11 +337,15 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         // Check for SDK settings check interval change
         if (oldConfig.sdkSettingsCheckIntervalMs != newConfig.sdkSettingsCheckIntervalMs) {
             clientScope.launch {
-                try {
-                    restartPeriodicSdkSettingsCheck()
-                } catch (e: Exception) {
-                    Timber.e(e) { "Failed to restart periodic SDK settings check: ${e.message}" }
-                }
+                CoroutineUtils.withErrorHandling(
+                                errorMessage = "Failed to restart periodic SDK settings check"
+                        ) { restartPeriodicSdkSettingsCheck() }
+                        .onFailure { e ->
+                            Timber.e(
+                                    e,
+                                    "Failed to restart periodic SDK settings check: ${e.message}"
+                            )
+                        }
             }
             Timber.i(
                     "Updated SDK settings check interval to ${newConfig.sdkSettingsCheckIntervalMs} ms"
@@ -364,14 +393,13 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         if (mutableConfig.disableBackgroundPolling) {
             Timber.d("Pausing polling in background")
             clientScope.launch {
-                try {
+                CoroutineUtils.withErrorHandling(errorMessage = "Failed to pause polling") {
                     timerMutex.withLock {
                         sdkSettingsTimer?.cancel()
                         sdkSettingsTimer = null
                     }
-                } catch (e: Exception) {
-                    Timber.e(e) { "Failed to pause polling: ${e.message}" }
                 }
+                        .onFailure { e -> Timber.e(e, "Failed to pause polling: ${e.message}") }
             }
         }
     }
@@ -380,11 +408,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun resumePolling() {
         Timber.d("Resuming polling")
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(errorMessage = "Failed to resume polling") {
                 restartPeriodicSdkSettingsCheck()
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to resume polling: ${e.message}" }
             }
+                    .onFailure { e -> Timber.e(e, "Failed to resume polling: ${e.message}") }
         }
     }
 
@@ -392,7 +419,9 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun adjustPollingForBatteryState(useLowBatteryInterval: Boolean) {
         if (backgroundStateMonitor.getCurrentAppState() == AppState.BACKGROUND) {
             clientScope.launch {
-                try {
+                CoroutineUtils.withErrorHandling(
+                                errorMessage = "Failed to adjust polling for battery state"
+                        ) {
                     val interval =
                             if (useLowBatteryInterval) {
                                 mutableConfig.reducedPollingIntervalMs
@@ -404,9 +433,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                             "Adjusting background polling interval to $interval ms due to battery state"
                     )
                     restartPeriodicSdkSettingsCheck(interval)
-                } catch (e: Exception) {
-                    Timber.e(e) { "Failed to adjust polling for battery state: ${e.message}" }
                 }
+                        .onFailure { e ->
+                            Timber.e(e, "Failed to adjust polling for battery state: ${e.message}")
+                        }
             }
         }
     }
@@ -490,7 +520,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
 
     // Add a single property to the user
     fun addUserProperty(key: String, value: Any) {
-        user.addProperty(key, value)
+        user = user.addProperty(key, value)
         Timber.d("Added user property: $key = $value")
     }
 
@@ -517,7 +547,6 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     }
 
     fun addJsonProperty(key: String, value: Map<String, Any>) {
-        require(value.keys.all { it is String }) { "JSON for '$key' must have String keys" }
         val jsonCompatible = value.filterValues { isJsonCompatible(it) }
         addUserProperty(key, jsonCompatible)
     }
@@ -534,7 +563,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
 
     // Add multiple properties to the user at once
     fun addUserProperties(properties: Map<String, Any>) {
-        user.addProperties(properties)
+        user = user.addProperties(properties)
         Timber.d("Added ${properties.size} user properties")
     }
 
@@ -551,14 +580,13 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     /** Puts the client in offline mode, preventing network requests. This method is thread-safe. */
     fun setOffline() {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(errorMessage = "Failed to set offline mode") {
                 mutableConfig.setOfflineMode(true)
                 configFetcher.setOffline(true)
                 connectionManager.setOfflineMode(true)
                 Timber.i("CF client is now in offline mode")
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to set offline mode: ${e.message}" }
             }
+                    .onFailure { e -> Timber.e(e, "Failed to set offline mode: ${e.message}") }
         }
     }
 
@@ -567,14 +595,13 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun setOnline() {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(errorMessage = "Failed to set online mode") {
                 mutableConfig.setOfflineMode(false)
                 configFetcher.setOffline(false)
                 connectionManager.setOfflineMode(false)
                 Timber.i("CF client is now in online mode")
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to set online mode: ${e.message}" }
             }
+                    .onFailure { e -> Timber.e(e, "Failed to set online mode: ${e.message}") }
         }
     }
 
@@ -586,11 +613,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun updateSdkSettingsCheckInterval(intervalMs: Long) {
         require(intervalMs > 0) { "Interval must be greater than 0" }
         clientScope.launch {
-            try {
-                mutableConfig.setSdkSettingsCheckIntervalMs(intervalMs)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to update SDK settings check interval: ${e.message}" }
-            }
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to update SDK settings check interval"
+                    ) { mutableConfig.setSdkSettingsCheckIntervalMs(intervalMs) }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to update SDK settings check interval: ${e.message}")
+                    }
         }
     }
 
@@ -602,11 +630,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun updateEventsFlushInterval(intervalMs: Long) {
         require(intervalMs > 0) { "Interval must be greater than 0" }
         clientScope.launch {
-            try {
-                mutableConfig.setEventsFlushIntervalMs(intervalMs)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to update events flush interval: ${e.message}" }
-            }
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to update events flush interval"
+                    ) { mutableConfig.setEventsFlushIntervalMs(intervalMs) }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to update events flush interval: ${e.message}")
+                    }
         }
     }
 
@@ -618,11 +647,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun updateSummariesFlushInterval(intervalMs: Long) {
         require(intervalMs > 0) { "Interval must be greater than 0" }
         clientScope.launch {
-            try {
-                mutableConfig.setSummariesFlushIntervalMs(intervalMs)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to update summaries flush interval: ${e.message}" }
-            }
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to update summaries flush interval"
+                    ) { mutableConfig.setSummariesFlushIntervalMs(intervalMs) }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to update summaries flush interval: ${e.message}")
+                    }
         }
     }
 
@@ -634,11 +664,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun updateNetworkConnectionTimeout(timeoutMs: Int) {
         require(timeoutMs > 0) { "Timeout must be greater than 0" }
         clientScope.launch {
-            try {
-                mutableConfig.setNetworkConnectionTimeoutMs(timeoutMs)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to update network connection timeout: ${e.message}" }
-            }
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to update network connection timeout"
+                    ) { mutableConfig.setNetworkConnectionTimeoutMs(timeoutMs) }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to update network connection timeout: ${e.message}")
+                    }
         }
     }
 
@@ -650,11 +681,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun updateNetworkReadTimeout(timeoutMs: Int) {
         require(timeoutMs > 0) { "Timeout must be greater than 0" }
         clientScope.launch {
-            try {
-                mutableConfig.setNetworkReadTimeoutMs(timeoutMs)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to update network read timeout: ${e.message}" }
-            }
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to update network read timeout"
+                    ) { mutableConfig.setNetworkReadTimeoutMs(timeoutMs) }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to update network read timeout: ${e.message}")
+                    }
         }
     }
 
@@ -665,11 +697,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun setDebugLoggingEnabled(enabled: Boolean) {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(errorMessage = "Failed to set debug logging") {
                 mutableConfig.setDebugLoggingEnabled(enabled)
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to set debug logging: ${e.message}" }
             }
+                    .onFailure { e -> Timber.e(e, "Failed to set debug logging: ${e.message}") }
         }
     }
 
@@ -682,7 +713,9 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
 
     private fun startPeriodicSdkSettingsCheck(intervalMs: Long, initialCheck: Boolean = true) {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to start periodic SDK settings check"
+                    ) {
                 timerMutex.withLock {
                     // Cancel existing timer if any
                     sdkSettingsTimer?.cancel()
@@ -696,14 +729,19 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                                     period = intervalMs
                             ) {
                                 clientScope.launch {
-                                    try {
+                                    CoroutineUtils.withErrorHandling(
+                                                    errorMessage =
+                                                            "Periodic SDK settings check failed"
+                                            ) {
                                         Timber.d("Periodic SDK settings check triggered by timer")
                                         checkSdkSettings()
-                                    } catch (e: Exception) {
-                                        Timber.e(e) {
-                                            "Periodic SDK settings check failed: ${e.message}"
-                                        }
                                     }
+                                            .onFailure { e ->
+                                                Timber.e(
+                                                        e,
+                                                        "Periodic SDK settings check failed: ${e.message}"
+                                                )
+                                            }
                                 }
                             }
 
@@ -714,9 +752,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         checkSdkSettings()
                     }
                 }
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to start periodic SDK settings check: ${e.message}" }
             }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to start periodic SDK settings check: ${e.message}")
+                    }
         }
     }
 
@@ -744,12 +783,18 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                             period = intervalMs
                     ) {
                         clientScope.launch {
-                            try {
+                            CoroutineUtils.withErrorHandling(
+                                            errorMessage = "Periodic SDK settings check failed"
+                                    ) {
                                 Timber.d("Periodic SDK settings check triggered by timer")
                                 checkSdkSettings()
-                            } catch (e: Exception) {
-                                Timber.e(e) { "Periodic SDK settings check failed: ${e.message}" }
                             }
+                                    .onFailure { e ->
+                                        Timber.e(
+                                                e,
+                                                "Periodic SDK settings check failed: ${e.message}"
+                                        )
+                                    }
                         }
                     }
             Timber.d("Restarted periodic SDK settings check with interval $intervalMs ms")
@@ -757,14 +802,17 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             // Perform immediate check only if requested
             if (initialCheck) {
                 clientScope.launch {
-                    try {
+                    CoroutineUtils.withErrorHandling(
+                                    errorMessage = "Failed immediate SDK settings check"
+                            ) {
                         Timber.d(
                                 "Performing immediate SDK settings check from restartPeriodicSdkSettingsCheck"
                         )
                         checkSdkSettings()
-                    } catch (e: Exception) {
-                        Timber.e(e) { "Failed immediate SDK settings check: ${e.message}" }
                     }
+                            .onFailure { e ->
+                                Timber.e(e, "Failed immediate SDK settings check: ${e.message}")
+                            }
                 }
             }
         }
@@ -851,7 +899,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 }
             }
                     .getOrElse {
-                        Timber.e(it) { "Error fetching SDK settings metadata" }
+                        Timber.e(it, "Error fetching SDK settings metadata")
                         null
                     }
 
@@ -871,7 +919,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                                 }
 
                 jsonObject?.let {
-                    val settings = Json.decodeFromJsonElement<SdkSettings>(it)
+                    val settings = Json.decodeFromString<SdkSettings>(it.toString())
                     if (!settings.cf_account_enabled || settings.cf_skip_sdk) {
                         Timber.d(
                                 "SDK settings skipped: cf_account_enabled=${settings.cf_account_enabled}, cf_skip_sdk=${settings.cf_skip_sdk}"
@@ -885,7 +933,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
             }
         }
                 .getOrElse {
-                    Timber.e(it) { "Error fetching SDK settings" }
+                    Timber.e(it, "Error fetching SDK settings")
                     null
                 }
     }
@@ -908,12 +956,12 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 val payload =
                         try {
                             val jsonPayload = buildJsonObject {
-                                put("user", Json.encodeToJsonElement(user.toMap()))
+                                put("user", Json.encodeToJsonElement(user.toUserMap()))
                                 put("include_only_features_flags", JsonPrimitive(true))
                             }
-                            Json.encodeToString(jsonPayload)
+                            Json.encodeToString(JsonElement.serializer(), jsonPayload)
                         } catch (e: Exception) {
-                            Timber.e(e) { "Error creating config payload" }
+                            Timber.e(e, "Error creating config payload")
                             return@withRetry null
                         }
 
@@ -941,7 +989,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         try {
                             Json.parseToJsonElement(response)
                         } catch (e: Exception) {
-                            Timber.e(e) { "Error parsing config response JSON" }
+                            Timber.e(e, "Error parsing config response JSON")
                             return@withRetry null
                         }
 
@@ -990,124 +1038,86 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         val variationJsonElement = config["variation"]
                         val variation: Any =
                                 when (variationDataType.uppercase()) {
-                                    "STRING" -> variationJsonElement?.jsonPrimitive?.contentOrNull
-                                                    ?: ""
-                                    "BOOLEAN" -> variationJsonElement?.jsonPrimitive?.booleanOrNull
+                                    "STRING" -> variationJsonElement?.jsonPrimitive?.content ?: ""
+                                    "BOOLEAN" -> variationJsonElement?.jsonPrimitive?.boolean
                                                     ?: false
-                                    "NUMBER" -> variationJsonElement?.jsonPrimitive?.doubleOrNull
-                                                    ?: 0.0
+                                    "NUMBER" -> variationJsonElement?.jsonPrimitive?.double ?: 0.0
                                     "JSON" ->
                                             variationJsonElement?.jsonObject?.let {
                                                 jsonObjectToMap(it)
                                             }
                                                     ?: emptyMap<String, Any>()
                                     else ->
-                                            variationJsonElement?.jsonPrimitive?.contentOrNull
-                                                    ?.also {
-                                                        Timber.warn {
-                                                            "Unknown variation type: $variationDataType for $key"
-                                                        }
-                                                    }
+                                            variationJsonElement?.jsonPrimitive?.content?.also {
+                                                Timber.warn {
+                                                    "Unknown variation type: $variationDataType for $key"
+                                                }
+                                            }
                                                     ?: ""
                                 }
 
                         val experienceData =
                                 mapOf<String, Any?>(
-                                                Pair(
-                                                        "version",
-                                                        config["version"]?.jsonPrimitive?.longOrNull
-                                                ),
-                                                Pair(
-                                                        "config_id",
-                                                        config["config_id"]
-                                                                ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair("user_id", userId),
-                                                Pair(
-                                                        "experience_id",
+                                                "version" to config["version"]?.jsonPrimitive?.long,
+                                                "config_id" to
+                                                        config["config_id"]?.jsonPrimitive?.content,
+                                                "user_id" to userId,
+                                                "experience_id" to
                                                         experience["experience_id"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "behaviour",
+                                                                ?.content,
+                                                "behaviour" to
                                                         experience["behaviour"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "behaviour_id",
+                                                                ?.content,
+                                                "behaviour_id" to
                                                         experience["behaviour_id"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "variation_name",
+                                                                ?.content,
+                                                "variation_name" to
                                                         experience["behaviour"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "variation_id",
+                                                                ?.content,
+                                                "variation_id" to
                                                         experience["variation_id"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "priority",
-                                                        experience["priority"]
+                                                                ?.content,
+                                                "priority" to
+                                                        (experience["priority"]?.jsonPrimitive?.int
+                                                                ?: 0),
+                                                "experience_created_time" to
+                                                        (experience["experience_created_time"]
                                                                 ?.jsonPrimitive
-                                                                ?.intOrNull
-                                                                ?: 0
-                                                ),
-                                                Pair(
-                                                        "experience_created_time",
-                                                        experience["experience_created_time"]
-                                                                ?.jsonPrimitive
-                                                                ?.longOrNull
-                                                                ?: 0L
-                                                ),
-                                                Pair(
-                                                        "rule_id",
+                                                                ?.long
+                                                                ?: 0L),
+                                                "rule_id" to
                                                         experience["rule_id"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair("experience", experienceKey),
-                                                Pair(
-                                                        "audience_name",
+                                                                ?.content,
+                                                "experience" to experienceKey,
+                                                "audience_name" to
                                                         experience["audience_name"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "ga_measurement_id",
+                                                                ?.content,
+                                                "ga_measurement_id" to
                                                         experience["ga_measurement_id"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "type",
-                                                        experience["type"]
-                                                                ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair(
-                                                        "config_modifications",
+                                                                ?.content,
+                                                "type" to
+                                                        experience["type"]?.jsonPrimitive?.content,
+                                                "config_modifications" to
                                                         experience["config_modifications"]
                                                                 ?.jsonPrimitive
-                                                                ?.contentOrNull
-                                                ),
-                                                Pair("variation_data_type", variationDataType),
-                                                Pair("variation", variation)
+                                                                ?.content,
+                                                "variation_data_type" to variationDataType,
+                                                "variation" to variation
                                         )
-                                        .filterValues { it != null } as
-                                        Map<String, Any>
+                                        .filterValues { it != null }
+                                        .mapValues { it.value!! } 
 
                         newConfigMap[experienceKey] = experienceData
                     } catch (e: Exception) {
-                        Timber.e(e) { "Error processing config key '$key'" }
+                        Timber.e(e, "Error processing config key '$key'")
                     }
                 }
                 newConfigMap
@@ -1115,21 +1125,22 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         }
     }
 
-    // --- Add Helper functions as private methods of the class ---
+    // Helper functions as private methods of the class
     private fun jsonElementToValue(element: JsonElement?): Any? {
         return when (element) {
             is JsonNull -> null
             is JsonPrimitive ->
                     when {
                         element.isString -> element.content
-                        element.booleanOrNull != null -> element.boolean
-                        element.longOrNull != null -> element.long // Prioritize Long
-                        element.doubleOrNull != null -> element.double // Then Double
-                        else -> element.content // Fallback
+                        element.content.toBooleanStrictOrNull() != null ->
+                                element.content.toBooleanStrict()
+                        element.content.toLongOrNull() != null -> element.content.toLong()
+                        element.content.toDoubleOrNull() != null -> element.content.toDouble()
+                        else -> element.content
                     }
-            is JsonObject -> jsonObjectToMap(element) // Recursive call
-            is JsonArray -> jsonArrayToList(element) // Recursive call
-            null -> null
+            is JsonObject -> jsonObjectToMap(element)
+            is JsonArray -> jsonArrayToList(element)
+            else -> null
         }
     }
 
@@ -1140,7 +1151,6 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun jsonArrayToList(jsonArray: JsonArray): List<Any?> {
         return jsonArray.map { jsonElementToValue(it) }
     }
-    // --- End Helper functions ---
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
@@ -1172,27 +1182,6 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         return result
     }
 
-    private fun CFUser.toMap(): Map<String, Any?> =
-            mapOf(
-                    "user_customer_id" to user_customer_id,
-                    "anonymous" to anonymous,
-                    "private_fields" to
-                            private_fields?.let {
-                                mapOf(
-                                        "userFields" to it.userFields,
-                                        "properties" to it.properties,
-                                )
-                            },
-                    "session_fields" to
-                            session_fields?.let {
-                                mapOf(
-                                        "userFields" to it.userFields,
-                                        "properties" to it.properties,
-                                )
-                            },
-                    "properties" to properties
-            )
-
     private fun notifyListeners(key: String, variation: Any) {
         // Notify value listeners
         val listeners = configListeners[key]
@@ -1209,7 +1198,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 try {
                     listener.onFeatureFlagChange(key, variation)
                 } catch (e: Exception) {
-                    Timber.e(e) { "Error notifying feature flag listener: ${e.message}" }
+                    Timber.e(e, "Error notifying feature flag listener: ${e.message}")
                 }
             }
         }
@@ -1221,7 +1210,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 try {
                     listener.onFlagsChange(allFlags)
                 } catch (e: Exception) {
-                    Timber.e(e) { "Error notifying all flags listener: ${e.message}" }
+                    Timber.e(e, "Error notifying all flags listener: ${e.message}")
                 }
             }
         }
@@ -1258,7 +1247,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      * @param listener the listener to unregister
      */
     fun unregisterFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
-        featureFlagListeners[flagKey]?.remove(listener)
+        featureFlagListeners[flagKey]?.remove(listener as Any)
         Timber.d("Unregistered feature flag listener for key: $flagKey")
     }
 
@@ -1326,10 +1315,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         // Only add non-empty device context
         if (deviceContextMap.isNotEmpty()) {
             // Update the device context in the properties map
-            user.setDeviceContext(deviceContext)
+            user = user.setDeviceContext(deviceContext)
 
             // Also keep the legacy mobile_device_context for backward compatibility
-            user.addProperty("mobile_device_context", deviceContextMap)
+            user = user.addProperty("mobile_device_context", deviceContextMap)
 
             Timber.d("Updated user properties with device context")
         }
@@ -1339,7 +1328,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     private fun updateUserWithApplicationInfo(appInfo: ApplicationInfo) {
         val appInfoMap = appInfo.toMap()
         if (appInfoMap.isNotEmpty()) {
-            user.setApplicationInfo(appInfo)
+            user = user.setApplicationInfo(appInfo)
             this.applicationInfo = appInfo
             Timber.d("Updated user properties with application info")
         }
@@ -1353,7 +1342,7 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
     fun addContext(context: EvaluationContext) {
         contexts[context.type.name.lowercase() + ":" + context.key] = context
         // Also add to user properties
-        user.addContext(context)
+        user = user.addContext(context)
         Timber.d("Added evaluation context: ${context.type}:${context.key}")
     }
 
@@ -1367,10 +1356,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
         val contextKey = type.name.lowercase() + ":" + key
         contexts.remove(contextKey)
         // Update the contexts in user properties
-        val userContexts = user.getContexts().filter { !(it.type == type && it.key == key) }
+        val userContexts = user.getAllContexts().filter { !(it.type == type && it.key == key) }
         val contextsList = mutableListOf<Map<String, Any?>>()
         userContexts.forEach { contextsList.add(it.toMap()) }
-        user.addProperty("contexts", contextsList)
+        user = user.addProperty("contexts", contextsList)
 
         Timber.d("Removed evaluation context: $type:$key")
     }
@@ -1406,8 +1395,8 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                 eventTracker.flushEvents()
                 summaryManager.flushSummaries()
             }
-                    .onFailure {
-                        Timber.e(it) { "Failed to flush events during shutdown: ${it.message}" }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to flush events during shutdown: ${e.message}")
                     }
         }
     }
@@ -1447,7 +1436,9 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun enableAutoEnvAttributes() {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to enable auto environment attributes"
+                    ) {
                 mutableConfig.setAutoEnvAttributesEnabled(true)
                 Timber.d("Auto environment attributes collection enabled")
 
@@ -1464,9 +1455,10 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
                         Timber.d("Auto-detected application info: $detectedAppInfo")
                     }
                 }
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to enable auto environment attributes: ${e.message}" }
             }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to enable auto environment attributes: ${e.message}")
+                    }
         }
     }
 
@@ -1476,12 +1468,15 @@ class CFClient private constructor(cfConfig: CFConfig, private val user: CFUser)
      */
     fun disableAutoEnvAttributes() {
         clientScope.launch {
-            try {
+            CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed to disable auto environment attributes"
+                    ) {
                 mutableConfig.setAutoEnvAttributesEnabled(false)
                 Timber.d("Auto environment attributes collection disabled")
-            } catch (e: Exception) {
-                Timber.e(e) { "Failed to disable auto environment attributes: ${e.message}" }
             }
+                    .onFailure { e ->
+                        Timber.e(e, "Failed to disable auto environment attributes: ${e.message}")
+                    }
         }
     }
 

@@ -1,15 +1,19 @@
-package customfit.ai.kotlinclient.core
+package customfit.ai.kotlinclient.core.model
 
-// import org.joda.time.DateTime
-import kotlinx.serialization.Serializable
 import customfit.ai.kotlinclient.serialization.MapSerializer
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 
 @Serializable
 data class SdkSettings(
-        @Serializable(with = MapSerializer::class) val cf_configs_json: Map<String, Any>,
-        @Serializable(with = MapSerializer::class) val cf_active_pages: Map<String, Any>,
-        @Serializable(with = MapSerializer::class) val cf_revenue_pages: Map<String, Any>,
-        @Serializable(with = MapSerializer::class) val cf_browser_variables: Map<String, Any>,
+        @Contextual
+        @Serializable(with = MapSerializer::class) val cf_configs_json: Map<String, @Contextual Any>,
+        @Contextual
+        @Serializable(with = MapSerializer::class) val cf_active_pages: Map<String, @Contextual Any>,
+        @Contextual
+        @Serializable(with = MapSerializer::class) val cf_revenue_pages: Map<String, @Contextual Any>,
+        @Contextual
+        @Serializable(with = MapSerializer::class) val cf_browser_variables: Map<String, @Contextual Any>,
         val date: String?,
         val cf_key: String,
         val cf_account_enabled: Boolean,
@@ -59,5 +63,13 @@ data class SdkSettings(
         val cf_last_visited_product_url: Int,
         val blacklisted_page_paths: List<String>,
         val blacklisted_referrers: List<String>,
-        val cf_subdomains: List<String>
+        val cf_subdomains: List<String>,
+        @Contextual
+        @Serializable(with = MapSerializer::class) val defaultConfig: Map<String, @Contextual Any> = emptyMap(),
+        @Contextual
+        @Serializable(with = MapSerializer::class) val defaultExperience: Map<String, @Contextual Any> = emptyMap(),
+        @Contextual
+        @Serializable(with = MapSerializer::class) val defaultBehaviour: Map<String, @Contextual Any> = emptyMap(),
+        @Contextual
+        @Serializable(with = MapSerializer::class) val defaultVariation: Map<String, @Contextual Any> = emptyMap()
 )

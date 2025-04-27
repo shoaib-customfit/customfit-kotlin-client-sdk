@@ -1,10 +1,10 @@
-package customfit.ai.kotlinclient.events
+package customfit.ai.kotlinclient.analytics.event
 
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import customfit.ai.kotlinclient.serialization.CustomDateDeserializer
 import customfit.ai.kotlinclient.serialization.CustomDateSerializer
-import java.util.*
+import customfit.ai.kotlinclient.analytics.event.EventType
 import java.time.Instant
 
 data class EventData(

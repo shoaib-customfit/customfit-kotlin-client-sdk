@@ -1,8 +1,8 @@
-package customfit.ai.kotlinclient.client
+package customfit.ai.kotlinclient.client.listener
 
 /**
- * An interface for objects that will be notified when any feature flag changes.
- * Register instances of this with [CFClient.registerAllFlagsListener].
+ * An interface for objects that will be notified when any feature flag changes. Register instances
+ * of this with [CFClient.registerAllFlagsListener].
  */
 interface AllFlagsListener {
     /**
@@ -11,4 +11,4 @@ interface AllFlagsListener {
      * @param flagMap a map of all current feature flags
      */
     fun onFlagsChange(flagMap: Map<String, Any>)
-} 
+}

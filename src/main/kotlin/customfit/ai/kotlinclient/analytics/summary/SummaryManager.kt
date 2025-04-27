@@ -1,11 +1,14 @@
-package customfit.ai.kotlinclient.summaries
+package customfit.ai.kotlinclient.analytics.summary
 
-import customfit.ai.kotlinclient.core.CFConfig
-import customfit.ai.kotlinclient.core.CFUser
+import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.HttpClient
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Collections
 import java.util.Timer
-import java.util.TimerTask
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.fixedRateTimer
@@ -15,159 +18,136 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import mu.KotlinLogging
-import java.time.Instant
-import java.time.format.DateTimeFormatter
-import java.time.ZoneOffset
-import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.Serializable
-
-private val logger = KotlinLogging.logger {}
+import kotlinx.serialization.json.*
 
 // Define formatter for the specific timestamp format needed by the server
-private val summaryTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX")
-                                                            .withZone(ZoneOffset.UTC)
+private val summaryTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX").withZone(ZoneOffset.UTC)
 
-// --- Copied Helper function to serialize Any --- 
+// Helper function to serialize Any
 private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
     null -> JsonNull
-    is JsonElement -> value // If it's already a JsonElement, return it directly
     is String -> JsonPrimitive(value)
     is Number -> JsonPrimitive(value)
     is Boolean -> JsonPrimitive(value)
-    is Map<*, *> -> buildJsonObject { // Recursively handle maps
+    is Map<*, *> -> buildJsonObject {
         value.forEach { (k, v) ->
             if (k is String) {
-                put(k, anyToJsonElement(v)) // Recursive call
-            } else {
-                // Handle non-string keys if necessary, e.g., convert toString or throw error
-                logger.warn { "Skipping non-string key in map during serialization: $k" }
+                put(k, anyToJsonElement(v))
             }
         }
     }
-    is Iterable<*> -> buildJsonArray { // Recursively handle lists/collections
-        value.forEach { 
-            add(anyToJsonElement(it)) // Recursive call
+    is List<*> -> buildJsonArray {
+        value.forEach { item ->
+            add(anyToJsonElement(item))
         }
     }
-    // Add other specific types if needed (e.g., Date -> JsonPrimitive(date.toString()))
-    else -> throw kotlinx.serialization.SerializationException("Serializer for class '${value::class.simpleName}' is not found. Cannot serialize value of type Any.")
+    else -> JsonPrimitive(value.toString())
 }
-// --- End Helper function --- 
 
 class SummaryManager(
-        private val sessionId: String,
-        private val httpClient: HttpClient,
-        private val user: CFUser,
-        private val cfConfig: CFConfig
+    private val sessionId: String,
+    private val httpClient: HttpClient,
+    private val user: CFUser,
+    private val cfConfig: CFConfig
 ) {
     // Use atomic values to allow thread-safe updates
     private val summariesQueueSize = cfConfig.summariesQueueSize
     private val summariesFlushTimeSeconds = cfConfig.summariesFlushTimeSeconds
     private val flushIntervalMs = AtomicLong(cfConfig.summariesFlushIntervalMs)
-    
+
     private val summaries: LinkedBlockingQueue<CFConfigRequestSummary> = LinkedBlockingQueue(summariesQueueSize)
     private val summaryTrackMap = Collections.synchronizedMap(mutableMapOf<String, Boolean>())
     private val trackMutex = Mutex()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
+
     // Timer management
     private var flushTimer: Timer? = null
     private val timerMutex = Mutex()
 
     init {
-        logger.info { "SummaryManager initialized with summariesQueueSize=$summariesQueueSize, summariesFlushTimeSeconds=$summariesFlushTimeSeconds, flushIntervalMs=${flushIntervalMs.get()}" }
+        Timber.i("SummaryManager initialized with summariesQueueSize=$summariesQueueSize, summariesFlushTimeSeconds=$summariesFlushTimeSeconds, flushIntervalMs=${flushIntervalMs.get()}")
         startPeriodicFlush()
     }
 
     /**
      * Updates the flush interval and restarts the timer
-     * 
+     *
      * @param intervalMs new interval in milliseconds
      */
     suspend fun updateFlushInterval(intervalMs: Long) {
         require(intervalMs > 0) { "Interval must be greater than 0" }
-        
+
         flushIntervalMs.set(intervalMs)
         restartPeriodicFlush()
-        logger.info { "Updated summaries flush interval to $intervalMs ms" }
+        Timber.i("Updated summaries flush interval to $intervalMs ms")
     }
 
     fun pushSummary(config: Any) {
         if (config !is Map<*, *>) {
-            logger.warn { "Config is not a map: $config" }
+            Timber.w("Config is not a map: $config")
             return
         }
-        val configMap =
-                config.takeIf { it.keys.all { k -> k is String } }?.let {
-                    @Suppress("UNCHECKED_CAST")
-                    (it as Map<String, Any>).also { 
-                    }
-                }
-                        ?: run {
-                            logger.warn { "Config map has non-string keys: $config" }
-                            return
-                        }
+        val configMap = config.takeIf { it.keys.all { k -> k is String } }?.let {
+            @Suppress("UNCHECKED_CAST") (it as Map<String, Any>).also {}
+        } ?: run {
+            Timber.w("Config map has non-string keys: $config")
+            return
+        }
 
-        val experienceId =
-                configMap["experience_id"] as? String
-                        ?: run {
-                            logger.warn { "Missing mandatory 'experience_id' in config: $configMap" }
-                            return
-                        }
-                        
+        val experienceId = configMap["experience_id"] as? String ?: run {
+            Timber.w("Missing mandatory 'experience_id' in config: $configMap")
+            return
+        }
+
         // Validate mandatory fields before creating the summary
         val configId = configMap["config_id"] as? String
         val variationId = configMap["variation_id"] as? String
-        // Keep version as String but ensure it's not null
         val versionString = configMap["version"]?.toString()
 
         if (configId == null) {
-            logger.warn { "Missing mandatory 'config_id' for summary: $configMap" }
+            Timber.w("Missing mandatory 'config_id' for summary: $configMap")
             return
         }
         if (variationId == null) {
-            logger.warn { "Missing mandatory 'variation_id' for summary: $configMap" }
+            Timber.w("Missing mandatory 'variation_id' for summary: $configMap")
             return
         }
         if (versionString == null) {
-            logger.warn { "Missing or invalid mandatory 'version' for summary: $configMap" }
+            Timber.w("Missing or invalid mandatory 'version' for summary: $configMap")
             return
         }
 
         scope.launch {
             trackMutex.withLock {
                 if (summaryTrackMap.containsKey(experienceId)) {
-                    logger.debug { "Experience already processed: $experienceId" }
+                    Timber.d("Experience already processed: $experienceId")
                     return@launch
                 }
                 summaryTrackMap[experienceId] = true
             }
 
-            val configSummary =
-                    CFConfigRequestSummary(
-                            config_id = configId,
-                            version = versionString,
-                            user_id = configMap["user_id"] as? String,
-                            // Format Instant using DateTimeFormatter
-                            requested_time = summaryTimestampFormatter.format(Instant.now()), 
-                            variation_id = variationId,
-                            user_customer_id = user.user_customer_id,
-                            session_id = sessionId,
-                            behaviour_id = configMap["behaviour_id"] as? String,
-                            experience_id = experienceId,
-                            rule_id = configMap["rule_id"] as? String
-                    )
+            val configSummary = CFConfigRequestSummary(
+                config_id = configId,
+                version = versionString,
+                user_id = configMap["user_id"] as? String,
+                requested_time = summaryTimestampFormatter.format(Instant.now()),
+                variation_id = variationId,
+                user_customer_id = user.user_customer_id,
+                session_id = sessionId,
+                behaviour_id = configMap["behaviour_id"] as? String,
+                experience_id = experienceId,
+                rule_id = configMap["rule_id"] as? String
+            )
 
             if (!summaries.offer(configSummary)) {
-                logger.warn { "Summary queue full, forcing flush for: $configSummary" }
+                Timber.w("Summary queue full, forcing flush for: $configSummary")
                 flushSummaries()
                 if (!summaries.offer(configSummary)) {
-                    logger.error { "Failed to queue summary after flush: $configSummary" }
+                    Timber.e("Failed to queue summary after flush: $configSummary")
                 }
             } else {
-                logger.debug { "Summary added to queue: $configSummary" }
+                Timber.d("Summary added to queue: $configSummary")
                 // Check if queue size threshold is reached
                 if (summaries.size >= summariesQueueSize) {
                     flushSummaries()
@@ -178,79 +158,51 @@ class SummaryManager(
 
     suspend fun flushSummaries() {
         if (summaries.isEmpty()) {
-            logger.debug { "No summaries to flush" }
+            Timber.d("No summaries to flush")
             return
         }
         val summariesToFlush = mutableListOf<CFConfigRequestSummary>()
         summaries.drainTo(summariesToFlush)
         if (summariesToFlush.isNotEmpty()) {
             sendSummaryToServer(summariesToFlush)
-            logger.info { "Flushed ${summariesToFlush.size} summaries successfully" }
+            Timber.i("Flushed ${summariesToFlush.size} summaries successfully")
         }
     }
 
     private suspend fun sendSummaryToServer(summaries: List<CFConfigRequestSummary>) {
-        val jsonPayload =
-                try {
-                    // Use kotlinx.serialization builders
-                    val jsonObject = buildJsonObject {
-                        // Use user.toUserMap() and the helper
-                        put("user", buildJsonObject { 
-                            // Use helper function for values in user map
-                            user.toUserMap().forEach { (k, v) -> 
-                                put(k, anyToJsonElement(v))
-                            } 
-                        })
-                        
-                        // Add summaries array
-                        put("summaries", buildJsonArray {
-                            summaries.forEach { summary ->
-                                // Assuming CFConfigRequestSummary is simple enough or @Serializable
-                                // If not, it would need manual construction or its own serializer
-                                add(Json.encodeToJsonElement(summary)) 
-                                /* // Manual construction if needed:
-                                add(buildJsonObject { 
-                                    summary.config_id?.let { put("config_id", JsonPrimitive(it)) }
-                                    summary.version?.let { put("version", JsonPrimitive(it)) }
-                                    // ... other summary fields ...
-                                })
-                                */
-                            }
-                        })
-                        
-                        // Add SDK version
-                        put("cf_client_sdk_version", JsonPrimitive("1.1.1")) // Use correct version
+        val jsonPayload = try {
+            val jsonObject = buildJsonObject {
+                put("user", buildJsonObject {
+                    user.toUserMap().forEach { (k, v) ->
+                        put(k, anyToJsonElement(v))
                     }
-                    
-                    Json.encodeToString(jsonObject)
-                } catch (e: Exception) {
-                     // Catch specific SerializationException from helper if needed
-                    if (e is kotlinx.serialization.SerializationException) {
-                        logger.error(e) { "Serialization error creating summary payload: ${e.message}" }
-                    } else {
-                        logger.error(e) { "Error serializing summaries: ${e.message}" }
+                })
+                put("summaries", buildJsonArray {
+                    summaries.forEach { summary ->
+                        add(Json.encodeToJsonElement(summary))
                     }
-                    summaries.forEach { this.summaries.offer(it) } // Re-queue on serialization error
-                    return
-                }
-
-        // Print the API payload for debugging
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS").format(java.util.Date())
-        logger.debug { "================ SUMMARY API PAYLOAD ================" }
-        logger.debug { jsonPayload }
-        logger.debug { "====================================================" }
-
-        val success =
-                httpClient.postJson("https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}", jsonPayload)
-        if (!success) {
-            logger.warn { "Failed to send ${summaries.size} summaries, re-queuing" }
-            // Re-add summaries to queue in case of failure, but avoid infinite growth
-            val capacity = summariesQueueSize - this.summaries.size
-            if (capacity > 0) {
-                summaries.take(capacity).forEach { this.summaries.offer(it) }
+                })
+                put("cf_client_sdk_version", JsonPrimitive("1.1.1"))
             }
-        } else {
-            logger.info { "Successfully sent ${summaries.size} summaries" }
+            Json.encodeToString(jsonObject)
+        } catch (e: Exception) {
+            if (e is kotlinx.serialization.SerializationException) {
+                Timber.e(e, "Serialization error creating summary payload: ${e.message}")
+            }
+            // Re-queue summaries on serialization error
+            summaries.forEach { this.summaries.offer(it) }
+            return
+        }
+
+        val url = "https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}"
+        if (!httpClient.postJson(url, jsonPayload)) {
+            Timber.w("Failed to send ${summaries.size} summaries, re-queuing")
+            // Re-queue summaries if sending failed
+            summaries.forEach { summary ->
+                if (!this.summaries.offer(summary)) {
+                    Timber.e("Failed to re-queue summary after send failure: $summary")
+                }
+            }
         }
     }
 
@@ -259,34 +211,40 @@ class SummaryManager(
             timerMutex.withLock {
                 // Cancel existing timer if any
                 flushTimer?.cancel()
-                
+
                 // Create a new timer
-                flushTimer = fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
-                    scope.launch {
-                        logger.debug { "Periodic flush triggered for summaries" }
-                        flushSummaries()
-                    }
-                }
+                flushTimer =
+                        fixedRateTimer(
+                                "SummaryFlush",
+                                daemon = true,
+                                period = flushIntervalMs.get()
+                        ) {
+                            scope.launch {
+                                Timber.d("Periodic flush triggered for summaries")
+                                flushSummaries()
+                            }
+                        }
             }
         }
     }
-    
+
     private suspend fun restartPeriodicFlush() {
         timerMutex.withLock {
             // Cancel existing timer if any
             flushTimer?.cancel()
-            
+
             // Create a new timer with updated interval
-            flushTimer = fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
-                scope.launch {
-                    logger.debug { "Periodic flush triggered for summaries" }
-                    flushSummaries()
-                }
-            }
-            logger.debug { "Restarted periodic flush with interval ${flushIntervalMs.get()} ms" }
+            flushTimer =
+                    fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
+                        scope.launch {
+                            Timber.d("Periodic flush triggered for summaries")
+                            flushSummaries()
+                        }
+                    }
+            Timber.d("Restarted periodic flush with interval ${flushIntervalMs.get()} ms")
         }
     }
-    
+
     // Method to retrieve all active summaries for other components
     fun getSummaries(): Map<String, Boolean> = summaryTrackMap.toMap()
 }

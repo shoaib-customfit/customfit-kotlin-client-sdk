@@ -1,5 +1,5 @@
-package customfit.ai.kotlinclient.events
+package customfit.ai.kotlinclient.analytics.event
 
-import customfit.ai.kotlinclient.core.PropertiesBuilder
+import customfit.ai.kotlinclient.core.util.PropertiesBuilder
 
-class EventPropertiesBuilder : PropertiesBuilder() 
+class EventPropertiesBuilder : PropertiesBuilder()

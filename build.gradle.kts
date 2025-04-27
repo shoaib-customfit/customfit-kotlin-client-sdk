@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm") version "2.1.10"
-    kotlin("plugin.serialization") version "2.1.10" 
+    kotlin("jvm") version "1.9.22"
+    kotlin("plugin.serialization") version "1.9.22"
     application
 }
 
@@ -11,9 +11,14 @@ repositories {
     mavenCentral()
 }
 
-// Set Java compatibility version
 kotlin {
     jvmToolchain(17)
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
@@ -35,27 +40,24 @@ dependencies {
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
     implementation("org.slf4j:slf4j-api:2.0.9")
     implementation("ch.qos.logback:logback-classic:1.4.11")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.5.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     implementation(kotlin("reflect"))
+    testImplementation(kotlin("test"))
 }
 
 application {
     mainClass.set("customfit.ai.MainKt")
 }
 
-// Custom task to run the Timber test
-tasks.register<JavaExec>("runTimberTest") {
+tasks.register<JavaExec>("runLoggingTest") {
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("customfit.ai.kotlinclient.logging.TestKt")
+    mainClass.set("customfit.ai.kotlinclient.logging.LoggingTestKt")
 }
 
 tasks.withType<Jar> {
     manifest {
         attributes["Main-Class"] = "customfit.ai.MainKt"
     }
-    
-    // Include all runtime dependencies in the JAR
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
-    
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

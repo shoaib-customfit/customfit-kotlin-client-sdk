@@ -1,6 +1,6 @@
-package customfit.ai.kotlinclient.events
+package customfit.ai.kotlinclient.analytics.event
 
-import customfit.ai.kotlinclient.core.CFUser
+import customfit.ai.kotlinclient.core.model.CFUser
 
 data class RegisterEvent(
         val events: List<EventData>,
