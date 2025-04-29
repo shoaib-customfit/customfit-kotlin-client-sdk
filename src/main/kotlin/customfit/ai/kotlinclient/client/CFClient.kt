@@ -1,18 +1,24 @@
 package customfit.ai.kotlinclient.client
 
+import customfit.ai.kotlinclient.analytics.event.EventData
 import customfit.ai.kotlinclient.analytics.event.EventPropertiesBuilder
 import customfit.ai.kotlinclient.analytics.event.EventTracker
 import customfit.ai.kotlinclient.analytics.summary.SummaryManager
 import customfit.ai.kotlinclient.client.listener.AllFlagsListener
 import customfit.ai.kotlinclient.client.listener.FeatureFlagChangeListener
-import customfit.ai.kotlinclient.core.config.CFConfig
-import customfit.ai.kotlinclient.core.config.MutableCFConfig
+import customfit.ai.kotlinclient.constants.CFConstants
+import customfit.ai.kotlinclient.config.core.CFConfig
+import customfit.ai.kotlinclient.config.core.MutableCFConfig
+import customfit.ai.kotlinclient.core.error.CFResult
+import customfit.ai.kotlinclient.core.error.ErrorHandler
 import customfit.ai.kotlinclient.core.model.ApplicationInfo
 import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.core.model.ContextType
 import customfit.ai.kotlinclient.core.model.DeviceContext
 import customfit.ai.kotlinclient.core.model.EvaluationContext
 import customfit.ai.kotlinclient.core.model.SdkSettings
+import customfit.ai.kotlinclient.logging.LogLevelUpdater
+import customfit.ai.kotlinclient.logging.LoggingConfig
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.ConfigFetcher
 import customfit.ai.kotlinclient.network.HttpClient
@@ -66,7 +72,7 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
                                         "Failed to check SDK settings on connection: ${e.message}"
                                 )
                             }
-                }
+                    }
             }
     private val backgroundStateMonitor: BackgroundStateMonitor = DefaultBackgroundStateMonitor()
     private val connectionStatusListeners = CopyOnWriteArrayList<ConnectionStatusListener>()
@@ -129,6 +135,9 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
 
     // Listen for config changes to update components
     init {
+        // Configure logger with the log level from config
+        LogLevelUpdater.updateLogLevel(mutableConfig.config)
+        
         // Set initial offline mode from the config
         if (mutableConfig.offlineMode) {
             configFetcher.setOffline(true)
@@ -509,14 +518,70 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
         return value
     }
 
-    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
-        eventTracker.trackEvent(eventName, properties)
+    /**
+     * Tracks an event with improved error handling
+     * 
+     * @param eventName The name of the event
+     * @param properties Map of event properties
+     * @return CFResult containing EventData on success or error details on failure
+     */
+    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()): CFResult<EventData> {
+        try {
+            // Validate event name
+            if (eventName.isBlank()) {
+                val message = "Event name cannot be blank"
+                ErrorHandler.handleError(
+                    message,
+                    SOURCE,
+                    ErrorHandler.ErrorCategory.VALIDATION,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
+                return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
+            }
+            
+            // Use the event tracker's updated method that returns CFResult
+            return eventTracker.trackEvent(eventName, properties)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Unexpected error tracking event: $eventName",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            return CFResult.error(
+                "Failed to track event",
+                e,
+                category = ErrorHandler.ErrorCategory.INTERNAL
+            )
+        }
     }
 
-    fun trackEvent(eventName: String, propertiesBuilder: EventPropertiesBuilder.() -> Unit) {
-        val properties = EventPropertiesBuilder().apply(propertiesBuilder).build()
-        eventTracker.trackEvent(eventName, properties)
+    /**
+     * Tracks an event using a property builder with improved error handling
+     * 
+     * @param eventName The name of the event
+     * @param propertiesBuilder Builder function for event properties
+     * @return CFResult containing EventData on success or error details on failure
+     */
+    fun trackEvent(eventName: String, propertiesBuilder: EventPropertiesBuilder.() -> Unit): CFResult<EventData> {
+        try {
+            val properties = EventPropertiesBuilder().apply(propertiesBuilder).build()
+            return trackEvent(eventName, properties)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Error building properties for event: $eventName",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(
+                "Failed to build event properties",
+                e,
+                category = ErrorHandler.ErrorCategory.VALIDATION
+            )
+        }
     }
+    
 
     // Add a single property to the user
     fun addUserProperty(key: String, value: Any) {
@@ -649,7 +714,15 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
         clientScope.launch {
             CoroutineUtils.withErrorHandling(
                             errorMessage = "Failed to update summaries flush interval"
-                    ) { mutableConfig.setSummariesFlushIntervalMs(intervalMs) }
+                    ) { 
+                        mutableConfig.setSummariesFlushIntervalMs(intervalMs)
+                        
+                        // Also update the SummaryManager directly
+                        summaryManager.updateFlushInterval(intervalMs)
+                            .onError { error ->
+                                Timber.w("Failed to update SummaryManager flush interval: ${error.error}")
+                            }
+                    }
                     .onFailure { e ->
                         Timber.e(e, "Failed to update summaries flush interval: ${e.message}")
                     }
@@ -826,35 +899,40 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
                 fallback = Unit
         ) {
             CoroutineUtils.withTiming("checkSdkSettings") {
-                CoroutineUtils.withTimeoutOrNull(10_000) {
+                CoroutineUtils.withTimeoutOrNull(CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
                     CoroutineUtils.withRetry(
                             maxAttempts = 3,
                             initialDelayMs = 100,
                             maxDelayMs = 1000,
                             retryOn = { it !is CancellationException }
                     ) {
-                        val metadata =
+                        val metadataResult =
                                 configFetcher.fetchMetadata(
-                                        "https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json"
+                                        "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${String.format(CFConstants.Api.SDK_SETTINGS_PATH_PATTERN, mutableConfig.dimensionId)}"
                                 )
-                                        ?: run {
-                                            Timber.warn { "Failed to fetch SDK settings metadata" }
-                                            return@withRetry Unit
-                                        }
+                        
+                        if (metadataResult !is CFResult.Success) {
+                            Timber.warn { "Failed to fetch SDK settings metadata" }
+                            return@withRetry Unit
+                        }
+                        
+                        val metadata = metadataResult.data
                         val currentLastModified = metadata["Last-Modified"] ?: return@withRetry Unit
 
                         if (currentLastModified != previousLastModified) {
                             Timber.i(
                                     "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified"
                             )
-                            val newConfigs =
-                                    configFetcher.fetchConfig(currentLastModified)
-                                            ?: run {
-                                                Timber.warn {
-                                                    "Failed to fetch config with last-modified: $currentLastModified"
-                                                }
-                                                return@withRetry Unit
-                                            }
+                            val configResult = configFetcher.fetchConfig(currentLastModified)
+                            
+                            if (configResult !is CFResult.Success) {
+                                Timber.warn {
+                                    "Failed to fetch config with last-modified: $currentLastModified"
+                                }
+                                return@withRetry Unit
+                            }
+                            
+                            val newConfigs = configResult.data
 
                             val updatedKeys = mutableSetOf<String>()
                             configMutex.withLock {
@@ -892,10 +970,16 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
             CoroutineUtils.withErrorHandling(
                             errorMessage = "Failed to fetch SDK settings metadata"
                     ) {
-                CoroutineUtils.withTimeoutOrNull(5_000) {
-                    configFetcher.fetchMetadata(
-                            "https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json"
+                CoroutineUtils.withTimeoutOrNull(CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
+                    val metadataResult = configFetcher.fetchMetadata(
+                            "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${String.format(CFConstants.Api.SDK_SETTINGS_PATH_PATTERN, mutableConfig.dimensionId)}"
                     )
+                    
+                    // Unwrap the CFResult
+                    when (metadataResult) {
+                        is CFResult.Success -> metadataResult.data
+                        is CFResult.Error -> null
+                    }
                 }
             }
                     .getOrElse {
@@ -908,10 +992,10 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
                         context = Dispatchers.IO,
                         errorMessage = "Failed to fetch SDK settings"
                 ) {
-            CoroutineUtils.withTimeoutOrNull(5_000) {
+            CoroutineUtils.withTimeoutOrNull(CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
                 val jsonObject =
                         httpClient.fetchJson(
-                                "https://sdk.customfit.ai/${mutableConfig.dimensionId}/cf-sdk-settings.json"
+                                "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${String.format(CFConstants.Api.SDK_SETTINGS_PATH_PATTERN, mutableConfig.dimensionId)}"
                         )
                                 ?: run {
                                     Timber.warn { "Failed to fetch SDK settings JSON" }
@@ -1179,6 +1263,9 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
                     fallbackValue
                 }
         summaryManager.pushSummary(config as Map<String, Any>)
+                .onError { error ->
+                    Timber.w("Failed to push summary for key '$key': ${error.error}")
+                }
         return result
     }
 
@@ -1394,6 +1481,9 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
             CoroutineUtils.withErrorHandling(errorMessage = "Error flushing during shutdown") {
                 eventTracker.flushEvents()
                 summaryManager.flushSummaries()
+                    .onError { error ->
+                        Timber.w("Failed to flush summaries during shutdown: ${error.error}")
+                    }
             }
                     .onFailure { e ->
                         Timber.e(e, "Failed to flush events during shutdown: ${e.message}")
@@ -1480,7 +1570,15 @@ class CFClient private constructor(cfConfig: CFConfig, private var user: CFUser)
         }
     }
 
+    /**
+     * Gets the mutable configuration
+     * This allows runtime updates to configuration parameters
+     */
+    fun getMutableConfig(): MutableCFConfig = mutableConfig
+
     companion object {
+        private const val SOURCE = "CFClient"
+        
         fun init(cfConfig: CFConfig, user: CFUser): CFClient = CFClient(cfConfig, user)
     }
 }

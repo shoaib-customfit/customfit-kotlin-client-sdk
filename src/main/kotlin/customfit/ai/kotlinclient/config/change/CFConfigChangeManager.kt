@@ -1,4 +1,4 @@
-package customfit.ai.kotlinclient.config
+package customfit.ai.kotlinclient.config.change
 
 import customfit.ai.kotlinclient.logging.Timber
 import java.util.concurrent.ConcurrentHashMap

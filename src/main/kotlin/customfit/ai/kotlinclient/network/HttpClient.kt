@@ -1,6 +1,9 @@
 package customfit.ai.kotlinclient.network
 
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.constants.CFConstants
+import customfit.ai.kotlinclient.config.core.CFConfig
+import customfit.ai.kotlinclient.core.error.CFResult
+import customfit.ai.kotlinclient.core.error.ErrorHandler
 import customfit.ai.kotlinclient.logging.Timber
 import java.net.HttpURLConnection
 import java.net.URL
@@ -11,9 +14,15 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
 class HttpClient(private val cfConfig: CFConfig? = null) {
+    companion object {
+        private const val SOURCE = "HttpClient"
+    }
+    
     // Use atomics to allow thread-safe updates
-    private val connectionTimeout = AtomicInteger(cfConfig?.networkConnectionTimeoutMs ?: 10_000)
-    private val readTimeout = AtomicInteger(cfConfig?.networkReadTimeoutMs ?: 10_000)
+    private val connectionTimeout = AtomicInteger(cfConfig?.networkConnectionTimeoutMs ?: 
+                                                 CFConstants.Network.CONNECTION_TIMEOUT_MS)
+    private val readTimeout = AtomicInteger(cfConfig?.networkReadTimeoutMs ?: 
+                                           CFConstants.Network.READ_TIMEOUT_MS)
 
     /**
      * Updates the connection timeout setting
@@ -37,6 +46,9 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
         Timber.d("Updated read timeout to $timeoutMs ms")
     }
 
+    /**
+     * Performs an HTTP request with robust error handling
+     */
     suspend fun <T> performRequest(
             url: String,
             method: String,
@@ -65,28 +77,47 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     connection.disconnect()
                     return@withContext response
                 } catch (e: Exception) {
-                    Timber.e(e, "Error making request to $url: ${e.message}")
+                    // Use our robust error handling system
+                    val category = ErrorHandler.handleException(
+                        e, 
+                        "Error making $method request to $url", 
+                        SOURCE,
+                        ErrorHandler.ErrorSeverity.HIGH
+                    )
+                    
                     connection?.disconnect()
                     null
                 }
             }
 
-    suspend fun fetchMetadata(url: String): Map<String, String>? =
+    /**
+     * Fetches metadata from a URL with improved error handling
+     */
+    suspend fun fetchMetadata(url: String): CFResult<Map<String, String>> =
             performRequest(url, "HEAD") { conn ->
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                    conn.headerFields.let { headers ->
+                    val metadata = conn.headerFields.let { headers ->
                         mapOf(
-                                "Last-Modified" to (headers["Last-Modified"]?.firstOrNull() ?: ""),
-                                "ETag" to (headers["ETag"]?.firstOrNull() ?: "")
+                                CFConstants.Http.HEADER_LAST_MODIFIED to (headers["Last-Modified"]?.firstOrNull() ?: ""),
+                                CFConstants.Http.HEADER_ETAG to (headers["ETag"]?.firstOrNull() ?: "")
                         )
                     }
+                    CFResult.success(metadata)
                 } else {
-                    Timber.warn { "Failed to fetch metadata from $url: ${conn.responseCode}" }
-                    null
+                    val message = "Failed to fetch metadata from $url: ${conn.responseCode}"
+                    ErrorHandler.handleError(
+                        message, 
+                        SOURCE, 
+                        ErrorHandler.ErrorCategory.NETWORK
+                    )
+                    CFResult.error(message, code = conn.responseCode, category = ErrorHandler.ErrorCategory.NETWORK)
                 }
-            }
+            } ?: CFResult.error("Network error fetching metadata from $url", category = ErrorHandler.ErrorCategory.NETWORK)
 
-    suspend fun fetchJson(url: String): JsonObject? =
+    /**
+     * Fetches JSON from a URL with improved error handling
+     */
+    suspend fun fetchJson(url: String): CFResult<JsonObject> =
             performRequest(url, "GET") { conn ->
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     try {
@@ -94,27 +125,44 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         // Parse using kotlinx.serialization and cast to JsonObject
                         val jsonElement = Json.parseToJsonElement(responseText)
                         if (jsonElement is JsonObject) {
-                            jsonElement
+                            CFResult.success(jsonElement)
                         } else {
-                            Timber.warn { "Parsed JSON from $url is not an object: $jsonElement" }
-                            null
+                            val message = "Parsed JSON from $url is not an object"
+                            ErrorHandler.handleError(
+                                message, 
+                                SOURCE, 
+                                ErrorHandler.ErrorCategory.SERIALIZATION
+                            )
+                            CFResult.error(message, category = ErrorHandler.ErrorCategory.SERIALIZATION)
                         }
                     } catch (e: Exception) {
-                        Timber.e(e, "Error parsing JSON response from $url: ${e.message}")
-                        null
+                        ErrorHandler.handleException(
+                            e, 
+                            "Error parsing JSON response from $url", 
+                            SOURCE,
+                            ErrorHandler.ErrorSeverity.HIGH
+                        )
+                        CFResult.error("Error parsing JSON response", e, category = ErrorHandler.ErrorCategory.SERIALIZATION)
                     }
                 } else {
-                    Timber.warn { "Failed to fetch JSON from $url: ${conn.responseCode}" }
-                    null
+                    val message = "Failed to fetch JSON from $url: ${conn.responseCode}"
+                    ErrorHandler.handleError(
+                        message, 
+                        SOURCE, 
+                        ErrorHandler.ErrorCategory.NETWORK
+                    )
+                    CFResult.error(message, code = conn.responseCode, category = ErrorHandler.ErrorCategory.NETWORK)
                 }
-            }
+            } ?: CFResult.error("Network error fetching JSON from $url", category = ErrorHandler.ErrorCategory.NETWORK)
 
-    suspend fun postJson(url: String, payload: String): Boolean =
-            performRequest(url, "POST", mapOf("Content-Type" to "application/json"), payload) { conn
-                ->
+    /**
+     * Posts JSON to a URL with improved error handling and detailed logging
+     */
+    suspend fun postJson(url: String, payload: String): CFResult<Boolean> =
+            performRequest(url, "POST", mapOf(CFConstants.Http.HEADER_CONTENT_TYPE to CFConstants.Http.CONTENT_TYPE_JSON), payload) { conn ->
                 val responseCode = conn.responseCode
 
-                // Print API response
+                // Detailed logging with common format
                 val separator = "================ API RESPONSE (${url.substringAfterLast("/")}) ================"
                 Timber.i(separator)
                 Timber.i("Status Code: $responseCode")
@@ -125,19 +173,34 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     ) {
                         val responseBody = conn.inputStream.bufferedReader().readText()
                         Timber.i(responseBody)
+                        CFResult.success(true)
                     } else {
-                        val errorBody =
-                                conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
+                        val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
+                        
+                        // Use our error handling system
+                        val message = "API error response: ${conn.responseCode}"
+                        ErrorHandler.handleError(
+                            "$message - $errorBody", 
+                            SOURCE, 
+                            ErrorHandler.ErrorCategory.NETWORK, 
+                            ErrorHandler.ErrorSeverity.HIGH
+                        )
+                        
                         Timber.e("Error: $errorBody")
+                        CFResult.error(message, code = conn.responseCode, category = ErrorHandler.ErrorCategory.NETWORK)
                     }
                 } catch (e: Exception) {
-                    Timber.e(e, "Failed to read response: ${e.message}")
+                    ErrorHandler.handleException(
+                        e, 
+                        "Failed to read API response", 
+                        SOURCE,
+                        ErrorHandler.ErrorSeverity.HIGH
+                    )
+                    CFResult.error("Failed to read API response", e, category = ErrorHandler.ErrorCategory.NETWORK)
                 } finally {
                     Timber.i(separator)
                 }
+            } ?: CFResult.error("Network error posting JSON to $url", category = ErrorHandler.ErrorCategory.NETWORK)
 
-                responseCode == HttpURLConnection.HTTP_OK ||
-                        responseCode == HttpURLConnection.HTTP_ACCEPTED
-            }
-                    ?: false
+
 }

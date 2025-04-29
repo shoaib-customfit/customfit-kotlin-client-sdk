@@ -1,6 +1,8 @@
 package customfit.ai.kotlinclient.analytics.summary
 
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.config.core.CFConfig
+import customfit.ai.kotlinclient.core.error.CFResult
+import customfit.ai.kotlinclient.core.error.ErrorHandler
 import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.core.util.RetryUtil.withRetry
 import customfit.ai.kotlinclient.logging.Timber
@@ -19,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
@@ -52,6 +55,10 @@ class SummaryManager(
     private val user: CFUser,
     private val cfConfig: CFConfig
 ) {
+    companion object {
+        private const val SOURCE = "SummaryManager"
+    }
+    
     // Use atomic values to allow thread-safe updates
     private val summariesQueueSize = cfConfig.summariesQueueSize
     private val summariesFlushTimeSeconds = cfConfig.summariesFlushTimeSeconds
@@ -72,105 +79,206 @@ class SummaryManager(
     }
 
     /**
-     * Updates the flush interval and restarts the timer
+     * Updates the flush interval and restarts the timer with improved error handling
      *
      * @param intervalMs new interval in milliseconds
+     * @return CFResult containing the updated interval or error details
      */
-    suspend fun updateFlushInterval(intervalMs: Long) {
-        require(intervalMs > 0) { "Interval must be greater than 0" }
+    suspend fun updateFlushInterval(intervalMs: Long): CFResult<Long> {
+        try {
+            require(intervalMs > 0) { "Interval must be greater than 0" }
 
-        flushIntervalMs.set(intervalMs)
-        restartPeriodicFlush()
-        Timber.i("Updated summaries flush interval to $intervalMs ms")
+            flushIntervalMs.set(intervalMs)
+            restartPeriodicFlush()
+            Timber.i("Updated summaries flush interval to $intervalMs ms")
+            return CFResult.success(intervalMs)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Failed to update flush interval to $intervalMs",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(
+                "Failed to update summaries flush interval", 
+                e, 
+                category = ErrorHandler.ErrorCategory.VALIDATION
+            )
+        }
     }
 
-    fun pushSummary(config: Any) {
+    /**
+     * Adds a configuration summary to the queue with improved validation and error handling
+     * 
+     * @param config The configuration to summarize
+     * @return CFResult indicating success or describing the error
+     */
+    fun pushSummary(config: Any): CFResult<Boolean> {
+        // Validate input is a map
         if (config !is Map<*, *>) {
-            Timber.w("Config is not a map: $config")
-            return
+            val message = "Config is not a map: $config"
+            ErrorHandler.handleError(
+                message,
+                SOURCE,
+                ErrorHandler.ErrorCategory.VALIDATION,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
+        
+        // Validate keys are strings
         val configMap = config.takeIf { it.keys.all { k -> k is String } }?.let {
             @Suppress("UNCHECKED_CAST") (it as Map<String, Any>).also {}
         } ?: run {
-            Timber.w("Config map has non-string keys: $config")
-            return
+            val message = "Config map has non-string keys: $config"
+            ErrorHandler.handleError(
+                message,
+                SOURCE,
+                ErrorHandler.ErrorCategory.VALIDATION,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
+        // Validate required fields are present
         val experienceId = configMap["experience_id"] as? String ?: run {
-            Timber.w("Missing mandatory 'experience_id' in config: $configMap")
-            return
+            val message = "Missing mandatory 'experience_id' in config"
+            ErrorHandler.handleError(
+                message,
+                SOURCE,
+                ErrorHandler.ErrorCategory.VALIDATION,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
-        // Validate mandatory fields before creating the summary
+        // Validate other mandatory fields before creating the summary
         val configId = configMap["config_id"] as? String
         val variationId = configMap["variation_id"] as? String
         val versionString = configMap["version"]?.toString()
 
-        if (configId == null) {
-            Timber.w("Missing mandatory 'config_id' for summary: $configMap")
-            return
-        }
-        if (variationId == null) {
-            Timber.w("Missing mandatory 'variation_id' for summary: $configMap")
-            return
-        }
-        if (versionString == null) {
-            Timber.w("Missing or invalid mandatory 'version' for summary: $configMap")
-            return
+        val missingFields = mutableListOf<String>()
+        if (configId == null) missingFields.add("config_id")
+        if (variationId == null) missingFields.add("variation_id")
+        if (versionString == null) missingFields.add("version")
+
+        if (missingFields.isNotEmpty()) {
+            val message = "Missing mandatory fields for summary: ${missingFields.joinToString(", ")}"
+            ErrorHandler.handleError(
+                message,
+                SOURCE,
+                ErrorHandler.ErrorCategory.VALIDATION,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
         scope.launch {
-            trackMutex.withLock {
-                if (summaryTrackMap.containsKey(experienceId)) {
-                    Timber.d("Experience already processed: $experienceId")
-                    return@launch
+            try {
+                trackMutex.withLock {
+                    if (summaryTrackMap.containsKey(experienceId)) {
+                        Timber.d("Experience already processed: $experienceId")
+                        return@launch
+                    }
+                    summaryTrackMap[experienceId] = true
                 }
-                summaryTrackMap[experienceId] = true
-            }
 
-            val configSummary = CFConfigRequestSummary(
-                config_id = configId,
-                version = versionString,
-                user_id = configMap["user_id"] as? String,
-                requested_time = summaryTimestampFormatter.format(Instant.now()),
-                variation_id = variationId,
-                user_customer_id = user.user_customer_id,
-                session_id = sessionId,
-                behaviour_id = configMap["behaviour_id"] as? String,
-                experience_id = experienceId,
-                rule_id = configMap["rule_id"] as? String
-            )
+                val configSummary = CFConfigRequestSummary(
+                    config_id = configId,
+                    version = versionString,
+                    user_id = configMap["user_id"] as? String,
+                    requested_time = summaryTimestampFormatter.format(Instant.now()),
+                    variation_id = variationId,
+                    user_customer_id = user.user_customer_id,
+                    session_id = sessionId,
+                    behaviour_id = configMap["behaviour_id"] as? String,
+                    experience_id = experienceId,
+                    rule_id = configMap["rule_id"] as? String
+                )
 
-            if (!summaries.offer(configSummary)) {
-                Timber.w("Summary queue full, forcing flush for: $configSummary")
-                flushSummaries()
                 if (!summaries.offer(configSummary)) {
-                    Timber.e("Failed to queue summary after flush: $configSummary")
-                }
-            } else {
-                Timber.d("Summary added to queue: $configSummary")
-                // Check if queue size threshold is reached
-                if (summaries.size >= summariesQueueSize) {
+                    ErrorHandler.handleError(
+                        "Summary queue full, forcing flush for new entry",
+                        SOURCE,
+                        ErrorHandler.ErrorCategory.INTERNAL,
+                        ErrorHandler.ErrorSeverity.MEDIUM
+                    )
                     flushSummaries()
+                    if (!summaries.offer(configSummary)) {
+                        ErrorHandler.handleError(
+                            "Failed to queue summary after flush",
+                            SOURCE,
+                            ErrorHandler.ErrorCategory.INTERNAL,
+                            ErrorHandler.ErrorSeverity.HIGH
+                        )
+                    }
+                } else {
+                    Timber.d("Summary added to queue: $configSummary")
+                    // Check if queue size threshold is reached
+                    if (summaries.size >= summariesQueueSize) {
+                        flushSummaries()
+                    }
                 }
+            } catch (e: Exception) {
+                ErrorHandler.handleException(
+                    e,
+                    "Error processing summary for experience: $experienceId",
+                    SOURCE,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
             }
         }
+        
+        return CFResult.success(true)
     }
 
-    suspend fun flushSummaries() {
+    /**
+     * Flushes collected summaries to the server with improved error handling
+     * 
+     * @return CFResult indicating success or describing the error
+     */
+    suspend fun flushSummaries(): CFResult<Int> {
         if (summaries.isEmpty()) {
             Timber.d("No summaries to flush")
-            return
+            return CFResult.success(0)
         }
+        
         val summariesToFlush = mutableListOf<CFConfigRequestSummary>()
         summaries.drainTo(summariesToFlush)
-        if (summariesToFlush.isNotEmpty()) {
-            sendSummaryToServer(summariesToFlush)
-            Timber.i("Flushed ${summariesToFlush.size} summaries successfully")
+        
+        if (summariesToFlush.isEmpty()) {
+            return CFResult.success(0)
+        }
+        
+        return try {
+            val result = sendSummaryToServer(summariesToFlush)
+            result.onSuccess {
+                Timber.i("Flushed ${summariesToFlush.size} summaries successfully")
+            }
+            result.map { summariesToFlush.size }
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Unexpected error during summary flush",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            CFResult.error(
+                "Failed to flush summaries", 
+                e, 
+                category = ErrorHandler.ErrorCategory.INTERNAL
+            )
         }
     }
 
-    private suspend fun sendSummaryToServer(summaries: List<CFConfigRequestSummary>) {
+    /**
+     * Sends summary data to the server with improved error handling
+     * 
+     * @param summaries The list of summaries to send
+     * @return CFResult indicating success or describing the error
+     */
+    private suspend fun sendSummaryToServer(summaries: List<CFConfigRequestSummary>): CFResult<Boolean> {
+        // Create the JSON payload
         val jsonPayload = try {
             val jsonObject = buildJsonObject {
                 put("user", buildJsonObject {
@@ -187,75 +295,190 @@ class SummaryManager(
             }
             Json.encodeToString(jsonObject)
         } catch (e: Exception) {
-            if (e is kotlinx.serialization.SerializationException) {
-                Timber.e(e, "Serialization error creating summary payload: ${e.message}")
-            }
+            val category = if (e is SerializationException) 
+                ErrorHandler.ErrorCategory.SERIALIZATION 
+            else 
+                ErrorHandler.ErrorCategory.INTERNAL
+                
+            ErrorHandler.handleException(
+                e,
+                "Error creating summary payload",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            
             // Re-queue summaries on serialization error
-            summaries.forEach { this.summaries.offer(it) }
-            return
+            summaries.forEach { 
+                if (!this.summaries.offer(it)) {
+                    ErrorHandler.handleError(
+                        "Failed to re-queue summary after serialization error",
+                        SOURCE,
+                        ErrorHandler.ErrorCategory.INTERNAL,
+                        ErrorHandler.ErrorSeverity.HIGH
+                    )
+                }
+            }
+            
+            return CFResult.error(
+                "Error creating summary payload: ${e.message}", 
+                e, 
+                category = category
+            )
         }
 
         val url = "https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}"
-        try {
+        return try {
+            var success = false
             withRetry(
                 maxAttempts = cfConfig.maxRetryAttempts,
                 initialDelayMs = cfConfig.retryInitialDelayMs,
                 maxDelayMs = cfConfig.retryMaxDelayMs,
                 backoffMultiplier = cfConfig.retryBackoffMultiplier
             ) {
-                if (!httpClient.postJson(url, jsonPayload)) {
-                    throw Exception("Failed to send summaries")
+                val result = httpClient.postJson(url, jsonPayload)
+                if (result !is CFResult.Success) {
+                    throw Exception("Failed to send summaries - server returned error")
                 }
+                success = true
+            }
+            
+            if (success) {
+                CFResult.success(true)
+            } else {
+                handleSendFailure(summaries)
+                CFResult.error(
+                    "Failed to send summaries after ${cfConfig.maxRetryAttempts} attempts",
+                    category = ErrorHandler.ErrorCategory.NETWORK
+                )
             }
         } catch (e: Exception) {
-            Timber.w("Failed to send ${summaries.size} summaries after retries, re-queuing")
-            summaries.forEach { summary ->
-                if (!this.summaries.offer(summary)) {
-                    Timber.e("Failed to re-queue summary after send failure: $summary")
+            ErrorHandler.handleException(
+                e,
+                "Error sending summaries to server",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            handleSendFailure(summaries)
+            CFResult.error(
+                "Error sending summaries to server: ${e.message}", 
+                e, 
+                category = ErrorHandler.ErrorCategory.NETWORK
+            )
+        }
+    }
+    
+    /**
+     * Helper method to handle failed summary send by re-queuing items
+     */
+    private fun handleSendFailure(summaries: List<CFConfigRequestSummary>) {
+        Timber.w("Failed to send ${summaries.size} summaries after retries, re-queuing")
+        var requeueFailCount = 0
+        
+        summaries.forEach { summary ->
+            if (!this.summaries.offer(summary)) {
+                requeueFailCount++
+            }
+        }
+        
+        if (requeueFailCount > 0) {
+            ErrorHandler.handleError(
+                "Failed to re-queue $requeueFailCount summaries after send failure",
+                SOURCE,
+                ErrorHandler.ErrorCategory.INTERNAL,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+        }
+    }
+
+    /**
+     * Starts the periodic flush timer
+     */
+    private fun startPeriodicFlush() {
+        scope.launch {
+            try {
+                timerMutex.withLock {
+                    // Cancel existing timer if any
+                    flushTimer?.cancel()
+
+                    // Create a new timer
+                    flushTimer = fixedRateTimer(
+                        "SummaryFlush",
+                        daemon = true,
+                        period = flushIntervalMs.get()
+                    ) {
+                        scope.launch {
+                            try {
+                                Timber.d("Periodic flush triggered for summaries")
+                                flushSummaries()
+                            } catch (e: Exception) {
+                                ErrorHandler.handleException(
+                                    e,
+                                    "Error during periodic summary flush",
+                                    SOURCE,
+                                    ErrorHandler.ErrorSeverity.MEDIUM
+                                )
+                            }
+                        }
+                    }
+                    Timber.d("Started periodic summary flush with interval ${flushIntervalMs.get()} ms")
                 }
+            } catch (e: Exception) {
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to start periodic summary flush",
+                    SOURCE,
+                    ErrorHandler.ErrorSeverity.HIGH
+                )
             }
         }
     }
 
-    private fun startPeriodicFlush() {
-        scope.launch {
+    /**
+     * Restarts the periodic flush timer with the current interval
+     */
+    private suspend fun restartPeriodicFlush() {
+        try {
             timerMutex.withLock {
                 // Cancel existing timer if any
                 flushTimer?.cancel()
 
-                // Create a new timer
-                flushTimer =
-                        fixedRateTimer(
-                                "SummaryFlush",
-                                daemon = true,
-                                period = flushIntervalMs.get()
-                        ) {
-                            scope.launch {
-                                Timber.d("Periodic flush triggered for summaries")
-                                flushSummaries()
-                            }
-                        }
-            }
-        }
-    }
-
-    private suspend fun restartPeriodicFlush() {
-        timerMutex.withLock {
-            // Cancel existing timer if any
-            flushTimer?.cancel()
-
-            // Create a new timer with updated interval
-            flushTimer =
-                    fixedRateTimer("SummaryFlush", daemon = true, period = flushIntervalMs.get()) {
-                        scope.launch {
+                // Create a new timer with updated interval
+                flushTimer = fixedRateTimer(
+                    "SummaryFlush", 
+                    daemon = true, 
+                    period = flushIntervalMs.get()
+                ) {
+                    scope.launch {
+                        try {
                             Timber.d("Periodic flush triggered for summaries")
                             flushSummaries()
+                        } catch (e: Exception) {
+                            ErrorHandler.handleException(
+                                e,
+                                "Error during periodic summary flush",
+                                SOURCE,
+                                ErrorHandler.ErrorSeverity.MEDIUM
+                            )
                         }
                     }
-            Timber.d("Restarted periodic flush with interval ${flushIntervalMs.get()} ms")
+                }
+                Timber.d("Restarted periodic flush with interval ${flushIntervalMs.get()} ms")
+            }
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Failed to restart periodic summary flush",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
         }
     }
 
-    // Method to retrieve all active summaries for other components
+    /**
+     * Returns all tracked summaries for other components
+     * 
+     * @return Map of experience IDs to tracking status
+     */
     fun getSummaries(): Map<String, Boolean> = summaryTrackMap.toMap()
 }
+

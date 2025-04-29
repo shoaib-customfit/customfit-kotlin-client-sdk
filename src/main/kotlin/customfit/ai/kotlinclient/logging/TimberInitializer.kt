@@ -1,5 +1,6 @@
 package customfit.ai.kotlinclient.logging
 
+import customfit.ai.kotlinclient.constants.CFConstants
 import org.slf4j.LoggerFactory
 
 /**
@@ -7,7 +8,7 @@ import org.slf4j.LoggerFactory
  * This allows us to maintain the Timber-style API while using standard logging.
  */
 object Timber {
-    private val logger = LoggerFactory.getLogger("CustomFitSDK")
+    private val logger = LoggerFactory.getLogger(CFConstants.General.LOGGER_NAME)
     
     /**
      * Log a debug message

@@ -1,7 +1,9 @@
 package customfit.ai.kotlinclient.analytics.event
 
 import customfit.ai.kotlinclient.analytics.summary.SummaryManager
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.config.core.CFConfig
+import customfit.ai.kotlinclient.core.error.CFResult
+import customfit.ai.kotlinclient.core.error.ErrorHandler
 import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.core.util.RetryUtil.withRetry
 import customfit.ai.kotlinclient.network.HttpClient
@@ -35,6 +37,10 @@ class EventTracker(
         private val summaryManager: SummaryManager,
         private val cfConfig: CFConfig
 ) {
+    companion object {
+        private const val SOURCE = "EventTracker"
+    }
+    
     // Use atomics to allow thread-safe updates
     private val eventsQueueSize = cfConfig.eventsQueueSize
     private val eventsFlushTimeSeconds = AtomicInteger(cfConfig.eventsFlushTimeSeconds)
@@ -57,12 +63,23 @@ class EventTracker(
      *
      * @param intervalMs new interval in milliseconds
      */
-    suspend fun updateFlushInterval(intervalMs: Long) {
-        require(intervalMs > 0) { "Interval must be greater than 0" }
+    suspend fun updateFlushInterval(intervalMs: Long): CFResult<Long> {
+        try {
+            require(intervalMs > 0) { "Interval must be greater than 0" }
 
-        eventsFlushIntervalMs.set(intervalMs)
-        restartPeriodicFlush()
-        Timber.i("Updated events flush interval to $intervalMs ms")
+            eventsFlushIntervalMs.set(intervalMs)
+            restartPeriodicFlush()
+            Timber.i("Updated events flush interval to $intervalMs ms")
+            return CFResult.success(intervalMs)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Failed to update flush interval to $intervalMs",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error("Failed to update flush interval", e, category = ErrorHandler.ErrorCategory.VALIDATION)
+        }
     }
 
     /**
@@ -70,51 +87,143 @@ class EventTracker(
      *
      * @param seconds new threshold in seconds
      */
-    fun updateFlushTimeSeconds(seconds: Int) {
-        require(seconds > 0) { "Seconds must be greater than 0" }
+    fun updateFlushTimeSeconds(seconds: Int): CFResult<Int> {
+        try {
+            require(seconds > 0) { "Seconds must be greater than 0" }
 
-        eventsFlushTimeSeconds.set(seconds)
-        Timber.i("Updated events flush time threshold to $seconds seconds")
+            eventsFlushTimeSeconds.set(seconds)
+            Timber.i("Updated events flush time threshold to $seconds seconds")
+            return CFResult.success(seconds)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Failed to update flush time seconds to $seconds",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error("Failed to update flush time seconds", e, category = ErrorHandler.ErrorCategory.VALIDATION)
+        }
     }
 
-    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()) {
-        if (eventName.isBlank()) {
-            Timber.w("Event name cannot be blank")
-            return
-        }
-        val validatedProperties = properties
+    /**
+     * Tracks an event with improved error handling
+     */
+    fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()): CFResult<EventData> {
+        try {
+            if (eventName.isBlank()) {
+                val message = "Event name cannot be blank"
+                ErrorHandler.handleError(
+                    message,
+                    SOURCE,
+                    ErrorHandler.ErrorCategory.VALIDATION,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
+                return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
+            }
 
-        // Create event with:
-        // - session_id from the tracker initialization (consistent across events)
-        // - insert_id that's unique for each event (UUID)
-        val event = EventData(
-            event_customer_id = eventName,
-            event_type = EventType.TRACK,
-            properties = validatedProperties,
-            event_timestamp = Instant.now(),
-            session_id = sessionId,
-            insert_id = UUID.randomUUID().toString()
-        )
-        if (eventQueue.size >= eventsQueueSize) {
-            Timber.w("Event queue is full (size = $eventsQueueSize), dropping oldest event")
-            eventQueue.poll() // Remove the oldest event
-        }
-        if (!eventQueue.offer(event)) {
-            Timber.w("Event queue full, forcing flush for event: $event")
-            scope.launch { flushEvents() }
-            if (!eventQueue.offer(event)) {
-                Timber.e("Failed to queue event after flush: $event")
-            }
-        } else {
-            Timber.d("Event added to queue: $event")
+            // Create event using our factory method with validation
+            val event = EventData.create(
+                eventCustomerId = eventName,
+                eventType = EventType.TRACK,
+                properties = properties,
+                timestamp = Instant.now(),
+                sessionId = sessionId,
+                insertId = UUID.randomUUID().toString()
+            )
+
+            // Handle queue management with proper error tracking
             if (eventQueue.size >= eventsQueueSize) {
-                scope.launch { flushEvents() }
+                ErrorHandler.handleError(
+                    "Event queue is full (size = $eventsQueueSize), dropping oldest event",
+                    SOURCE,
+                    ErrorHandler.ErrorCategory.INTERNAL,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
+                eventQueue.poll() // Remove the oldest event
             }
+
+            if (!eventQueue.offer(event)) {
+                ErrorHandler.handleError(
+                    "Event queue full, forcing flush for event: $event",
+                    SOURCE,
+                    ErrorHandler.ErrorCategory.INTERNAL,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
+                scope.launch { flushEvents() }
+                
+                if (!eventQueue.offer(event)) {
+                    val message = "Failed to queue event after flush"
+                    ErrorHandler.handleError(
+                        "$message: $event",
+                        SOURCE,
+                        ErrorHandler.ErrorCategory.INTERNAL,
+                        ErrorHandler.ErrorSeverity.HIGH
+                    )
+                    return CFResult.error(message, category = ErrorHandler.ErrorCategory.INTERNAL)
+                }
+            } else {
+                Timber.d("Event added to queue: $event")
+                if (eventQueue.size >= eventsQueueSize) {
+                    scope.launch { flushEvents() }
+                }
+            }
+            
+            return CFResult.success(event)
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Unexpected error tracking event: $eventName",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            return CFResult.error("Failed to track event", e, category = ErrorHandler.ErrorCategory.INTERNAL)
         }
     }
 
     private fun startPeriodicFlush() {
         scope.launch {
+            try {
+                timerMutex.withLock {
+                    flushTimer?.cancel()
+                    flushTimer = fixedRateTimer(
+                        "EventFlushCheck",
+                        daemon = true,
+                        period = eventsFlushIntervalMs.get()
+                    ) {
+                        scope.launch {
+                            try {
+                                val lastEvent = eventQueue.peek()
+                                val currentTime = Instant.now()
+                                if (lastEvent != null &&
+                                    currentTime.minusSeconds(eventsFlushTimeSeconds.get().toLong())
+                                        .isAfter(lastEvent.event_timestamp)
+                                ) {
+                                    flushEvents()
+                                }
+                            } catch (e: Exception) {
+                                ErrorHandler.handleException(
+                                    e,
+                                    "Error in periodic flush timer",
+                                    SOURCE,
+                                    ErrorHandler.ErrorSeverity.MEDIUM
+                                )
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to start periodic flush timer",
+                    SOURCE,
+                    ErrorHandler.ErrorSeverity.HIGH
+                )
+            }
+        }
+    }
+
+    private suspend fun restartPeriodicFlush() {
+        try {
             timerMutex.withLock {
                 flushTimer?.cancel()
                 flushTimer = fixedRateTimer(
@@ -123,61 +232,102 @@ class EventTracker(
                     period = eventsFlushIntervalMs.get()
                 ) {
                     scope.launch {
-                        val lastEvent = eventQueue.peek()
-                        val currentTime = Instant.now()
-                        if (lastEvent != null &&
-                            currentTime.minusSeconds(eventsFlushTimeSeconds.get().toLong())
-                                .isAfter(lastEvent.event_timestamp)
-                        ) {
-                            flushEvents()
+                        try {
+                            val lastEvent = eventQueue.peek()
+                            val currentTime = Instant.now()
+                            if (lastEvent != null &&
+                                currentTime.minusSeconds(eventsFlushTimeSeconds.get().toLong())
+                                    .isAfter(lastEvent.event_timestamp)
+                            ) {
+                                flushEvents()
+                            }
+                        } catch (e: Exception) {
+                            ErrorHandler.handleException(
+                                e,
+                                "Error in restarted periodic flush timer",
+                                SOURCE,
+                                ErrorHandler.ErrorSeverity.MEDIUM
+                            )
                         }
                     }
                 }
+                Timber.d("Restarted periodic event flush check with interval ${eventsFlushIntervalMs.get()} ms")
             }
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Failed to restart periodic flush timer",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
         }
     }
 
-    private suspend fun restartPeriodicFlush() {
-        timerMutex.withLock {
-            flushTimer?.cancel()
-            flushTimer = fixedRateTimer(
-                "EventFlushCheck",
-                daemon = true,
-                period = eventsFlushIntervalMs.get()
-            ) {
-                scope.launch {
-                    val lastEvent = eventQueue.peek()
-                    val currentTime = Instant.now()
-                    if (lastEvent != null &&
-                        currentTime.minusSeconds(eventsFlushTimeSeconds.get().toLong())
-                            .isAfter(lastEvent.event_timestamp)
-                    ) {
-                        flushEvents()
-                    }
+    /**
+     * Flushes events to the server with improved error handling
+     */
+    suspend fun flushEvents(): CFResult<Int> {
+        try {
+            // First flush summaries
+            summaryManager.flushSummaries()
+                .onError { error ->
+                    ErrorHandler.handleError(
+                        "Failed to flush summaries before flushing events: ${error.error}",
+                        SOURCE,
+                        error.category,
+                        ErrorHandler.ErrorSeverity.MEDIUM
+                    )
                 }
+            
+            // Check if queue is empty
+            if (eventQueue.isEmpty()) {
+                Timber.d("No events to flush")
+                return CFResult.success(0)
             }
-            Timber.d("Restarted periodic event flush check with interval ${eventsFlushIntervalMs.get()} ms")
-        }
-    }
-
-    suspend fun flushEvents() {
-        summaryManager.flushSummaries()
-        if (eventQueue.isEmpty()) {
-            Timber.d("No events to flush")
-            return
-        }
-        val eventsToFlush = mutableListOf<EventData>()
-        eventQueue.drainTo(eventsToFlush)
-        if (eventsToFlush.isNotEmpty()) {
-            sendTrackEvents(eventsToFlush)
-            Timber.i("Flushed ${eventsToFlush.size} events successfully")
+            
+            // Drain the queue
+            val eventsToFlush = mutableListOf<EventData>()
+            eventQueue.drainTo(eventsToFlush)
+            
+            if (eventsToFlush.isNotEmpty()) {
+                val result = sendTrackEvents(eventsToFlush)
+                
+                return result.fold(
+                    onSuccess = {
+                        Timber.i("Flushed ${eventsToFlush.size} events successfully")
+                        CFResult.success(eventsToFlush.size)
+                    },
+                    onError = { error ->
+                        CFResult.error(
+                            "Failed to flush events: ${error.error}",
+                            error.exception,
+                            error.code,
+                            error.category
+                        )
+                    }
+                )
+            } else {
+                return CFResult.success(0)
+            }
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Unexpected error flushing events",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            return CFResult.error("Failed to flush events", e, category = ErrorHandler.ErrorCategory.INTERNAL)
         }
     }
 
     // Define formatter for the specific timestamp format needed by the server
     private val eventTimestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX").withZone(ZoneOffset.UTC)
 
-    private suspend fun sendTrackEvents(events: List<EventData>) {
+    /**
+     * Sends tracked events to the server with improved error handling
+     */
+    private suspend fun sendTrackEvents(events: List<EventData>): CFResult<Boolean> {
+        // First create the JSON payload
         val jsonPayload = try {
             val jsonObject = buildJsonObject {
                 put("events", buildJsonArray {
@@ -205,35 +355,70 @@ class EventTracker(
             }
             Json.encodeToString(jsonObject)
         } catch (e: Exception) {
-            if (e is kotlinx.serialization.SerializationException) {
-                Timber.e(e, "Serialization error creating event payload: ${e.message}")
-            }
-            throw e
+            ErrorHandler.handleException(
+                e,
+                "Failed to serialize event payload",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            return CFResult.error(
+                "Failed to serialize event payload",
+                e,
+                category = ErrorHandler.ErrorCategory.SERIALIZATION
+            )
         }
 
+        // Then send the events with retry
         try {
-            withRetry(
+            return withRetry(
                 maxAttempts = cfConfig.maxRetryAttempts,
                 initialDelayMs = cfConfig.retryInitialDelayMs,
                 maxDelayMs = cfConfig.retryMaxDelayMs,
                 backoffMultiplier = cfConfig.retryBackoffMultiplier
             ) {
-                if (!httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)) {
-                    throw Exception("Failed to send event")
-                }
+                val result = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
+                
+                result.fold(
+                    onSuccess = { CFResult.success(true) },
+                    onError = { error ->
+                        throw Exception("Failed to send event: ${error.error}", error.exception)
+                    }
+                )
             }
         } catch (e: Exception) {
-            Timber.e(e, "Failed to send event after retries: ${e.message}")
-            // Re-queue the event if sending failed after all retries
+            ErrorHandler.handleException(
+                e,
+                "Failed to send events after retries",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            
+            // Re-queue the events if sending failed after all retries
+            var requeueFailed = false
             events.forEach { event ->
                 if (!eventQueue.offer(event)) {
-                    Timber.e("Failed to re-queue event after send failure: $event")
+                    requeueFailed = true
+                    ErrorHandler.handleError(
+                        "Failed to re-queue event after send failure: $event",
+                        SOURCE,
+                        ErrorHandler.ErrorCategory.INTERNAL,
+                        ErrorHandler.ErrorSeverity.HIGH
+                    )
                 }
             }
-            throw e
+            
+            return CFResult.error(
+                if (requeueFailed) "Failed to send events and some could not be requeued" 
+                else "Failed to send events but all were requeued",
+                e,
+                category = ErrorHandler.ErrorCategory.NETWORK
+            )
         }
     }
 
+    /**
+     * Converts any value to a JsonElement
+     */
     private fun anyToJsonElement(value: Any?): JsonElement = when (value) {
         null -> JsonNull
         is String -> JsonPrimitive(value)

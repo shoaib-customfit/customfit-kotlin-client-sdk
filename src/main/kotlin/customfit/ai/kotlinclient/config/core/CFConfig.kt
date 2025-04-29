@@ -1,5 +1,6 @@
-package customfit.ai.kotlinclient.core.config
+package customfit.ai.kotlinclient.config.core
 
+import customfit.ai.kotlinclient.constants.CFConstants
 import customfit.ai.kotlinclient.logging.Timber
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
@@ -9,34 +10,35 @@ import java.util.Base64
 data class CFConfig(
         val clientKey: String,
         // Event tracker configuration
-        val eventsQueueSize: Int = 100,
-        val eventsFlushTimeSeconds: Int = 60,
-        val eventsFlushIntervalMs: Long = 1000L,
+        val eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
+        val eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
+        val eventsFlushIntervalMs: Long = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
         // Retry configuration
-        val maxRetryAttempts: Int = 3,
-        val retryInitialDelayMs: Long = 1000L,
-        val retryMaxDelayMs: Long = 30000L,
-        val retryBackoffMultiplier: Double = 2.0,
+        val maxRetryAttempts: Int = CFConstants.RetryConfig.MAX_RETRY_ATTEMPTS,
+        val retryInitialDelayMs: Long = CFConstants.RetryConfig.INITIAL_DELAY_MS,
+        val retryMaxDelayMs: Long = CFConstants.RetryConfig.MAX_DELAY_MS,
+        val retryBackoffMultiplier: Double = CFConstants.RetryConfig.BACKOFF_MULTIPLIER,
         // Summary manager configuration
-        val summariesQueueSize: Int = 100,
-        val summariesFlushTimeSeconds: Int = 60,
-        val summariesFlushIntervalMs: Long = 60_000L,
+        val summariesQueueSize: Int = CFConstants.SummaryDefaults.QUEUE_SIZE,
+        val summariesFlushTimeSeconds: Int = CFConstants.SummaryDefaults.FLUSH_TIME_SECONDS,
+        val summariesFlushIntervalMs: Long = CFConstants.SummaryDefaults.FLUSH_INTERVAL_MS,
         // SDK settings check configuration
-        val sdkSettingsCheckIntervalMs: Long = 300_000, // 5 minutes
+        val sdkSettingsCheckIntervalMs: Long = CFConstants.BackgroundPolling.SDK_SETTINGS_CHECK_INTERVAL_MS,
         // Network configuration
-        val networkConnectionTimeoutMs: Int = 10_000, // 10 seconds
-        val networkReadTimeoutMs: Int = 10_000, // 10 seconds
+        val networkConnectionTimeoutMs: Int = CFConstants.Network.CONNECTION_TIMEOUT_MS,
+        val networkReadTimeoutMs: Int = CFConstants.Network.READ_TIMEOUT_MS,
         // Logging configuration
         val loggingEnabled: Boolean = true,
         val debugLoggingEnabled: Boolean = false,
+        val logLevel: String = CFConstants.Logging.DEFAULT_LOG_LEVEL,
         // Offline mode - when true, no network requests will be made
         val offlineMode: Boolean = false,
         // Background operation settings
         val disableBackgroundPolling: Boolean = false,
-        val backgroundPollingIntervalMs: Long = 3_600_000, // 1 hour by default
+        val backgroundPollingIntervalMs: Long = CFConstants.BackgroundPolling.BACKGROUND_POLLING_INTERVAL_MS,
         val useReducedPollingWhenBatteryLow: Boolean = true,
-        val reducedPollingIntervalMs: Long = 7_200_000, // 2 hours when battery low
-        val maxStoredEvents: Int = 100, // Maximum events to store when offline
+        val reducedPollingIntervalMs: Long = CFConstants.BackgroundPolling.REDUCED_POLLING_INTERVAL_MS,
+        val maxStoredEvents: Int = CFConstants.EventDefaults.MAX_STORED_EVENTS,
         // Auto environment attributes enabled - when true, automatically collect device and app
         // info
         val autoEnvAttributesEnabled: Boolean = false
@@ -49,12 +51,12 @@ data class CFConfig(
         // For backward compatibility with less verbose configuration
         fun fromClientKey(
                 clientKey: String,
-                eventsQueueSize: Int = 100,
-                eventsFlushTimeSeconds: Int = 60,
-                eventsFlushIntervalMs: Long = 1000L,
-                summariesQueueSize: Int = 100,
-                summariesFlushTimeSeconds: Int = 60,
-                summariesFlushIntervalMs: Long = 60_000L
+                eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
+                eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
+                eventsFlushIntervalMs: Long = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
+                summariesQueueSize: Int = CFConstants.SummaryDefaults.QUEUE_SIZE,
+                summariesFlushTimeSeconds: Int = CFConstants.SummaryDefaults.FLUSH_TIME_SECONDS,
+                summariesFlushIntervalMs: Long = CFConstants.SummaryDefaults.FLUSH_INTERVAL_MS
         ): CFConfig =
                 CFConfig(
                         clientKey = clientKey,
@@ -97,27 +99,28 @@ data class CFConfig(
 
     /** Creates a builder for configuring CFConfig instances */
     class Builder(private val clientKey: String) {
-        private var eventsQueueSize: Int = 100
-        private var eventsFlushTimeSeconds: Int = 60
-        private var eventsFlushIntervalMs: Long = 1000L
-        private var maxRetryAttempts: Int = 3
-        private var retryInitialDelayMs: Long = 1000L
-        private var retryMaxDelayMs: Long = 30000L
-        private var retryBackoffMultiplier: Double = 2.0
-        private var summariesQueueSize: Int = 100
-        private var summariesFlushTimeSeconds: Int = 60
-        private var summariesFlushIntervalMs: Long = 60_000L
-        private var sdkSettingsCheckIntervalMs: Long = 300_000
-        private var networkConnectionTimeoutMs: Int = 10_000
-        private var networkReadTimeoutMs: Int = 10_000
+        private var eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE
+        private var eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS
+        private var eventsFlushIntervalMs: Long = CFConstants.EventDefaults.FLUSH_INTERVAL_MS
+        private var maxRetryAttempts: Int = CFConstants.RetryConfig.MAX_RETRY_ATTEMPTS
+        private var retryInitialDelayMs: Long = CFConstants.RetryConfig.INITIAL_DELAY_MS
+        private var retryMaxDelayMs: Long = CFConstants.RetryConfig.MAX_DELAY_MS
+        private var retryBackoffMultiplier: Double = CFConstants.RetryConfig.BACKOFF_MULTIPLIER
+        private var summariesQueueSize: Int = CFConstants.SummaryDefaults.QUEUE_SIZE
+        private var summariesFlushTimeSeconds: Int = CFConstants.SummaryDefaults.FLUSH_TIME_SECONDS
+        private var summariesFlushIntervalMs: Long = CFConstants.SummaryDefaults.FLUSH_INTERVAL_MS
+        private var sdkSettingsCheckIntervalMs: Long = CFConstants.BackgroundPolling.SDK_SETTINGS_CHECK_INTERVAL_MS
+        private var networkConnectionTimeoutMs: Int = CFConstants.Network.CONNECTION_TIMEOUT_MS
+        private var networkReadTimeoutMs: Int = CFConstants.Network.READ_TIMEOUT_MS
         private var loggingEnabled: Boolean = true
         private var debugLoggingEnabled: Boolean = false
+        private var logLevel: String = CFConstants.Logging.DEFAULT_LOG_LEVEL
         private var offlineMode: Boolean = false
         private var disableBackgroundPolling: Boolean = false
-        private var backgroundPollingIntervalMs: Long = 3_600_000
+        private var backgroundPollingIntervalMs: Long = CFConstants.BackgroundPolling.BACKGROUND_POLLING_INTERVAL_MS
         private var useReducedPollingWhenBatteryLow: Boolean = true
-        private var reducedPollingIntervalMs: Long = 7_200_000
-        private var maxStoredEvents: Int = 100
+        private var reducedPollingIntervalMs: Long = CFConstants.BackgroundPolling.REDUCED_POLLING_INTERVAL_MS
+        private var maxStoredEvents: Int = CFConstants.EventDefaults.MAX_STORED_EVENTS
         private var autoEnvAttributesEnabled: Boolean = false
 
         fun eventsQueueSize(size: Int) = apply { this.eventsQueueSize = size }
@@ -149,6 +152,19 @@ data class CFConfig(
         fun networkReadTimeoutMs(ms: Int) = apply { this.networkReadTimeoutMs = ms }
         fun loggingEnabled(enabled: Boolean) = apply { this.loggingEnabled = enabled }
         fun debugLoggingEnabled(enabled: Boolean) = apply { this.debugLoggingEnabled = enabled }
+        
+        /**
+         * Set the log level for the SDK.
+         * Valid values: ERROR, WARN, INFO, DEBUG, TRACE
+         * Default: DEBUG
+         */
+        fun logLevel(level: String) = apply { 
+            require(level in CFConstants.Logging.VALID_LOG_LEVELS) { 
+                "Log level must be one of: ${CFConstants.Logging.VALID_LOG_LEVELS.joinToString()}" 
+            }
+            this.logLevel = level 
+        }
+        
         fun offlineMode(enabled: Boolean) = apply { this.offlineMode = enabled }
         fun disableBackgroundPolling(disable: Boolean) = apply {
             this.disableBackgroundPolling = disable
@@ -195,6 +211,7 @@ data class CFConfig(
                         networkReadTimeoutMs = networkReadTimeoutMs,
                         loggingEnabled = loggingEnabled,
                         debugLoggingEnabled = debugLoggingEnabled,
+                        logLevel = logLevel,
                         offlineMode = offlineMode,
                         disableBackgroundPolling = disableBackgroundPolling,
                         backgroundPollingIntervalMs = backgroundPollingIntervalMs,
@@ -204,4 +221,4 @@ data class CFConfig(
                         autoEnvAttributesEnabled = autoEnvAttributesEnabled
                 )
     }
-}
+} 

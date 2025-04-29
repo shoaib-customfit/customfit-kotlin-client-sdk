@@ -1,7 +1,7 @@
-package customfit.ai.kotlinclient.core.config
+package customfit.ai.kotlinclient.config.core
 
 import customfit.ai.kotlinclient.logging.Timber
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.logging.LogLevelUpdater
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -48,6 +48,8 @@ class MutableCFConfig(initConfig: CFConfig) {
         get() = _config.loggingEnabled
     val debugLoggingEnabled: Boolean
         get() = _config.debugLoggingEnabled
+    val logLevel: String
+        get() = _config.logLevel
     val autoEnvAttributesEnabled: Boolean
         get() = _config.autoEnvAttributesEnabled
 
@@ -141,6 +143,18 @@ class MutableCFConfig(initConfig: CFConfig) {
     }
 
     /**
+     * Updates the log level setting
+     * 
+     * @param level the new log level (ERROR, WARN, INFO, DEBUG, TRACE)
+     */
+    suspend fun setLogLevel(level: String) = updateConfig {
+        require(level in listOf("ERROR", "WARN", "INFO", "DEBUG", "TRACE")) { 
+            "Log level must be one of: ERROR, WARN, INFO, DEBUG, TRACE" 
+        }
+        _config.copy(logLevel = level)
+    }
+
+    /**
      * Updates the background polling enabled setting
      *
      * @param disable true to disable background polling, false to enable
@@ -208,6 +222,11 @@ class MutableCFConfig(initConfig: CFConfig) {
             val newConfig = updateFn()
             _config = newConfig
 
+            // Update log level if changed
+            if (oldConfig.logLevel != newConfig.logLevel || oldConfig.loggingEnabled != newConfig.loggingEnabled) {
+                LogLevelUpdater.updateLogLevel(newConfig)
+            }
+
             // Notify listeners
             notifyListeners(oldConfig, newConfig)
         }
@@ -232,29 +251,31 @@ class MutableCFConfig(initConfig: CFConfig) {
     }
 
     /**
-     * Notify all listeners of a config change
+     * Notify all listeners of a configuration change
      *
-     * @param oldConfig the previous config
-     * @param newConfig the new config
+     * @param oldConfig the old configuration
+     * @param newConfig the new configuration
      */
     private fun notifyListeners(oldConfig: CFConfig, newConfig: CFConfig) {
-        for (listener in configChangeListeners) {
+        configChangeListeners.forEach { listener ->
             try {
                 listener.onConfigChanged(oldConfig, newConfig)
             } catch (e: Exception) {
-                Timber.e(e, "Error notifying config change listener: ${e.message}")
+                Timber.e(e, "Error in config change listener: ${e.message}")
             }
         }
     }
 
-    /** Interface for objects that will be notified when config values change */
+    /**
+     * Interface for config change listeners
+     */
     interface ConfigChangeListener {
         /**
-         * Called when a configuration value changes
+         * Called when the configuration has changed
          *
-         * @param oldConfig the previous config
-         * @param newConfig the new config
+         * @param oldConfig the old configuration
+         * @param newConfig the new configuration
          */
         fun onConfigChanged(oldConfig: CFConfig, newConfig: CFConfig)
     }
-}
+} 

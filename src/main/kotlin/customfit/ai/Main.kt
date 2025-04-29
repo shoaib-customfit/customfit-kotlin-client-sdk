@@ -1,7 +1,7 @@
 package customfit.ai
 
 import customfit.ai.kotlinclient.client.CFClient
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.config.core.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
 import java.text.SimpleDateFormat
 import java.util.Date

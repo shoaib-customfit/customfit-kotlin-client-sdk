@@ -1,6 +1,6 @@
 package customfit.ai.kotlinclient.network.connection
 
-import customfit.ai.kotlinclient.core.config.CFConfig
+import customfit.ai.kotlinclient.config.core.CFConfig
 import customfit.ai.kotlinclient.logging.Timber
 import java.util.Timer
 import java.util.TimerTask
