@@ -59,18 +59,24 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
             withContext(Dispatchers.IO) {
                 var connection: HttpURLConnection? = null
                 try {
-                    Timber.d("Making $method request to $url")
+                    Timber.d("Making $method request to $url with timeouts: connect=${connectionTimeout.get()}ms, read=${readTimeout.get()}ms")
                     connection = URL(url).openConnection() as HttpURLConnection
                     connection.requestMethod = method
                     connection.connectTimeout = connectionTimeout.get()
                     connection.readTimeout = readTimeout.get()
                     connection.doInput = true
+                    connection.instanceFollowRedirects = true
+                    connection.setRequestProperty("User-Agent", "CustomFit-SDK/1.0 Kotlin")
 
-                    headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+                    headers.forEach { (key, value) -> 
+                        connection.setRequestProperty(key, value)
+                        Timber.d("Request header: $key = $value") 
+                    }
 
                     if (body != null) {
                         connection.doOutput = true
                         connection.outputStream.use { it.write(body.toByteArray()) }
+                        Timber.d("Request body: ${if (body.length > 500) body.substring(0, 500) + "..." else body}")
                     }
 
                     val response = responseHandler(connection)
@@ -78,6 +84,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     return@withContext response
                 } catch (e: Exception) {
                     // Use our robust error handling system
+                    Timber.e("Network error: ${e.javaClass.simpleName} - ${e.message}")
                     val category = ErrorHandler.handleException(
                         e, 
                         "Error making $method request to $url", 
@@ -94,7 +101,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
      * Fetches metadata from a URL with improved error handling
      */
     suspend fun fetchMetadata(url: String): CFResult<Map<String, String>> =
-            performRequest(url, "HEAD") { conn ->
+            performRequest(url, "GET") { conn ->
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     val metadata = conn.headerFields.let { headers ->
                         mapOf(
@@ -102,6 +109,8 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                                 CFConstants.Http.HEADER_ETAG to (headers["ETag"]?.firstOrNull() ?: "")
                         )
                     }
+                    // Since we're using GET instead of HEAD, we need to read the response to ensure the connection is released
+                    conn.inputStream.bufferedReader().readText()
                     CFResult.success(metadata)
                 } else {
                     val message = "Failed to fetch metadata from $url: ${conn.responseCode}"

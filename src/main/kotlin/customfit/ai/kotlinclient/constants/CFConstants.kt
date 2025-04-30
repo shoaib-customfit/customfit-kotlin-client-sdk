@@ -75,10 +75,10 @@ object CFConstants {
         const val READ_TIMEOUT_MS = 10_000
         
         /** SDK settings request timeout in milliseconds */
-        const val SDK_SETTINGS_TIMEOUT_MS: Long = 5_000L
+        const val SDK_SETTINGS_TIMEOUT_MS: Long = 15_000L
         
         /** SDK settings check timeout in milliseconds */
-        const val SDK_SETTINGS_CHECK_TIMEOUT_MS: Long = 10_000L
+        const val SDK_SETTINGS_CHECK_TIMEOUT_MS: Long = 20_000L
     }
     
     /**
