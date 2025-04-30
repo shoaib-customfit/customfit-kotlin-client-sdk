@@ -1,0 +1,36 @@
+name: customfit_flutter_client
+description: CustomFit Flutter Client SDK
+version: 0.0.1
+homepage: https://github.com/customfit/flutter-sdk
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=2.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
+  device_info_plus: ^9.0.0
+  package_info_plus: ^4.0.0
+  connectivity_plus: ^4.0.0
+  battery_plus: ^4.0.0
+  
+  # HTTP Client
+  dio: ^5.0.0
+  
+  # Utilities
+  uuid: ^3.0.0
+  json_annotation: ^4.8.0
+  intl: ^0.20.2
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  build_runner: ^2.3.0
+  json_serializable: ^6.6.0
+
+flutter:
+  uses-material-design: true
