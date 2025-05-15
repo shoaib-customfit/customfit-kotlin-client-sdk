@@ -123,7 +123,7 @@
     },
     {
       "name": "connectivity_plus",
-      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/connectivity_plus-4.0.2",
+      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/connectivity_plus-5.0.2",
       "packageUri": "lib/",
       "languageVersion": "2.18"
     },
@@ -267,9 +267,9 @@
     },
     {
       "name": "intl",
-      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/intl-0.20.2",
+      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/intl-0.18.1",
       "packageUri": "lib/",
-      "languageVersion": "3.3"
+      "languageVersion": "2.12"
     },
     {
       "name": "io",
@@ -512,6 +512,12 @@
       "languageVersion": "3.1"
     },
     {
+      "name": "sprintf",
+      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/sprintf-7.0.0",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
       "name": "stack_trace",
       "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/stack_trace-1.12.1",
       "packageUri": "lib/",
@@ -567,9 +573,9 @@
     },
     {
       "name": "uuid",
-      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/uuid-3.0.7",
+      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/uuid-4.5.1",
       "packageUri": "lib/",
-      "languageVersion": "2.12"
+      "languageVersion": "3.0"
     },
     {
       "name": "vector_math",
@@ -638,13 +644,13 @@
       "languageVersion": "3.4"
     },
     {
-      "name": "customfit_flutter_client",
+      "name": "customfit_flutter_client_sdk",
       "rootUri": "../",
       "packageUri": "lib/",
-      "languageVersion": "3.0"
+      "languageVersion": "3.2"
     }
   ],
-  "generated": "2025-04-30T06:30:54.650943Z",
+  "generated": "2025-05-15T22:18:12.391380Z",
   "generator": "pub",
   "generatorVersion": "3.7.2",
   "flutterRoot": "file:///Users/shoaibmohammed/Desktop/work/setup/flutter",

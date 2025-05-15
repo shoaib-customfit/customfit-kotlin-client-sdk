@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'package:customfit_flutter_client/src/config/core/cf_config.dart';
-import 'package:customfit_flutter_client/src/core/error/cf_result.dart';
+import 'package:customfit_flutter_client_sdk/src/config/core/cf_config.dart';
+import 'package:customfit_flutter_client_sdk/src/core/error/cf_result.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/error/error_category.dart';

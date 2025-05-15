@@ -25,7 +25,6 @@ import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.core.model.ContextType
 import customfit.ai.kotlinclient.core.model.DeviceContext
 import customfit.ai.kotlinclient.core.model.EvaluationContext
-import customfit.ai.kotlinclient.logging.LogLevelUpdater
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.ConfigFetcher
 import customfit.ai.kotlinclient.network.HttpClient
@@ -85,7 +84,6 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
 
     init {
         // Configure logger with the log level from config
-        LogLevelUpdater.updateLogLevel(mutableConfig.config)
         
         // Set initial offline mode from the config
         if (mutableConfig.offlineMode) {

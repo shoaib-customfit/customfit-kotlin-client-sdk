@@ -1,7 +1,6 @@
 package customfit.ai.kotlinclient.config.core
 
 import customfit.ai.kotlinclient.logging.Timber
-import customfit.ai.kotlinclient.logging.LogLevelUpdater
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -222,10 +221,7 @@ class MutableCFConfig(initConfig: CFConfig) {
             val newConfig = updateFn()
             _config = newConfig
 
-            // Update log level if changed
-            if (oldConfig.logLevel != newConfig.logLevel || oldConfig.loggingEnabled != newConfig.loggingEnabled) {
-                LogLevelUpdater.updateLogLevel(newConfig)
-            }
+           
 
             // Notify listeners
             notifyListeners(oldConfig, newConfig)

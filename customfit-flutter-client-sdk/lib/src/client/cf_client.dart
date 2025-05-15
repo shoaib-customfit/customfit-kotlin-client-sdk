@@ -31,10 +31,16 @@ import '../platform/app_state.dart';
 import '../platform/app_state_listener.dart';
 import '../platform/background_state_monitor.dart';
 import '../platform/default_background_state_monitor.dart';
+import '../core/model/sdk_settings.dart';
 
 /// Main SDK client orchestrating analytics, config, and environment.
 class CFClient {
   static const _SOURCE = 'CFClient';
+
+  /// Factory method to create a new CFClient instance
+  static CFClient create(CFConfig config, CFUser user) {
+    return CFClient._(config, user);
+  }
 
   final String _sessionId;
   final MutableCFConfig _mutableConfig;
@@ -45,7 +51,7 @@ class CFClient {
   final SummaryManager summaryManager;
   final EventTracker eventTracker;
   final ConfigFetcher configFetcher;
-  
+
   /// Core managers
   final ConfigManager configManager;
   final UserManager userManager;
@@ -63,8 +69,7 @@ class CFClient {
   // but will be used in future versions for feature flag listeners
   @pragma('vm:entry-point')
   // ignore: unused_field, will be used in future implementations
-  final Map<String, List<FeatureFlagChangeListener>>
-      _featureFlagListeners = {};
+  final Map<String, List<FeatureFlagChangeListener>> _featureFlagListeners = {};
   // ignore: unused_field
   final Set<AllFlagsListener> _allFlagsListeners = {};
 
@@ -104,10 +109,11 @@ class CFClient {
         userManager = UserManagerImpl(user),
         // Create a new ConfigFetcher instance for ConfigManager to avoid instance member access in initializer
         configManager = ConfigManagerImpl(
-            config: config, 
-            configFetcher: ConfigFetcher(HttpClient(config), _convertToSdkSettings(config), user)),
+            config: config,
+            configFetcher: ConfigFetcher(
+                HttpClient(config), _convertToSdkSettings(config), user)),
         environmentManager = EnvironmentManagerImpl(
-            backgroundStateMonitor: DefaultBackgroundStateMonitor(), 
+            backgroundStateMonitor: DefaultBackgroundStateMonitor(),
             userManager: UserManagerImpl(user)),
         listenerManager = ListenerManagerImpl() {
     // Configure logging
@@ -331,26 +337,63 @@ class CFClient {
     connectionManager.shutdown();
     backgroundStateMonitor.shutdown();
     environmentManager.shutdown();
-    
+
     // Flush any pending events
     try {
       await eventTracker.flush();
       // SummaryManager doesn't have flush method yet
     } catch (e) {
-      ErrorHandler.handleException(
-        e,
-        'Error flushing events during shutdown',
-        source: _SOURCE,
-        severity: ErrorSeverity.medium
-      );
+      ErrorHandler.handleException(e, 'Error flushing events during shutdown',
+          source: _SOURCE, severity: ErrorSeverity.medium);
     }
   }
 
   // Helper method to convert CFConfig to SdkSettings
-  static dynamic _convertToSdkSettings(CFConfig config) {
-    // This is a simplified adapter - in a real implementation,
-    // you would map the appropriate fields
-    return config;
+  static SdkSettings _convertToSdkSettings(CFConfig config) {
+    return SdkSettings(
+      cfConfigsJson: {},
+      cfActivePages: {},
+      cfRevenuePages: {},
+      cfBrowserVariables: {},
+      cfKey: config.clientKey,
+      cfAccountEnabled: true,
+      cfIntelligentCodeEnabled: false,
+      cfPersonalizePostSdkTimeout: false,
+      isInbound: false,
+      isOutbound: false,
+      cfspa: false,
+      cfspaAutoDetectPageUrlChange: false,
+      isAutoFormCapture: false,
+      isAutoEmailCapture: false,
+      cfIsPageUpdateEnabled: false,
+      cfRetainTextValue: false,
+      cfIsWhitelabelAccount: false,
+      cfSkipSdk: false,
+      enableEventAnalyzer: false,
+      cfSkipDfs: false,
+      cfIsMsClarityEnabled: false,
+      cfIsHotjarEnabled: false,
+      cfIsShopifyIntegrated: false,
+      cfIsGaEnabled: false,
+      cfIsSegmentEnabled: false,
+      cfIsMixpanelEnabled: false,
+      cfIsMoengageEnabled: false,
+      cfIsClevertapEnabled: false,
+      cfIsWebengageEnabled: false,
+      cfIsNetcoreEnabled: false,
+      cfIsAmplitudeEnabled: false,
+      cfIsHeapEnabled: false,
+      cfIsGokwikEnabled: false,
+      cfIsShopfloEnabled: false,
+      cfSendErrorReport: false,
+      personalizedUsersLimitExceeded: false,
+      cfSdkTimeoutInSeconds: 30,
+      cfInitialDelayInMs: 0,
+      cfLastVisitedProductUrl: 0,
+      blacklistedPagePaths: [],
+      blacklistedReferrers: [],
+      cfSubdomains: [],
+    );
   }
 }
 
