@@ -2,13 +2,16 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../core/model/device_context.dart';
 
 /// Utility class for detecting device information.
 class DeviceInfoDetector {
-  // Device info plugin
+  // Plugins for device, package and connectivity info
   static final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
+  static final Connectivity _connectivity = Connectivity();
 
   // Constants
   // ignore: unused_field
@@ -36,6 +39,19 @@ class DeviceInfoDetector {
   /// Get Android device context
   static Future<DeviceContext> _getAndroidDeviceContext() async {
     final androidInfo = await _deviceInfoPlugin.androidInfo;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final connectivityResult = await _connectivity.checkConnectivity();
+    
+    String networkType = "unknown";
+    if (connectivityResult == ConnectivityResult.mobile) {
+      networkType = "cellular";
+    } else if (connectivityResult == ConnectivityResult.wifi) {
+      networkType = "wifi";
+    } else if (connectivityResult == ConnectivityResult.ethernet) {
+      networkType = "ethernet";
+    } else if (connectivityResult == ConnectivityResult.bluetooth) {
+      networkType = "bluetooth";
+    }
 
     return DeviceContext(
       manufacturer: androidInfo.manufacturer,
@@ -43,14 +59,14 @@ class DeviceInfoDetector {
       osName: "Android",
       osVersion: androidInfo.version.release,
       sdkVersion: androidInfo.version.sdkInt.toString(),
-      appId: "com.customfit.app", // Should be retrieved from package info
-      appVersion: "1.0.0", // Should be retrieved from package info
+      appId: packageInfo.packageName,
+      appVersion: packageInfo.version,
       locale: Platform.localeName,
       timezone: DateTime.now().timeZoneName,
       screenWidth: _getScreenWidth(),
       screenHeight: _getScreenHeight(),
       screenDensity: _getScreenDensity(),
-      networkType: "unknown", // Can be implemented with connectivity package
+      networkType: networkType,
       networkCarrier: "unknown", // Requires platform-specific code
     );
   }
@@ -58,6 +74,15 @@ class DeviceInfoDetector {
   /// Get iOS device context
   static Future<DeviceContext> _getIosDeviceContext() async {
     final iosInfo = await _deviceInfoPlugin.iosInfo;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final connectivityResult = await _connectivity.checkConnectivity();
+    
+    String networkType = "unknown";
+    if (connectivityResult == ConnectivityResult.mobile) {
+      networkType = "cellular";
+    } else if (connectivityResult == ConnectivityResult.wifi) {
+      networkType = "wifi";
+    }
 
     return DeviceContext(
       manufacturer: "Apple",
@@ -65,14 +90,14 @@ class DeviceInfoDetector {
       osName: "iOS",
       osVersion: iosInfo.systemVersion,
       sdkVersion: iosInfo.systemVersion,
-      appId: "com.customfit.app", // Should be retrieved from package info
-      appVersion: "1.0.0", // Should be retrieved from package info
+      appId: packageInfo.packageName,
+      appVersion: packageInfo.version,
       locale: Platform.localeName,
       timezone: DateTime.now().timeZoneName,
       screenWidth: _getScreenWidth(),
       screenHeight: _getScreenHeight(),
       screenDensity: _getScreenDensity(),
-      networkType: "unknown", // Can be implemented with connectivity package
+      networkType: networkType,
       networkCarrier: "unknown", // Requires platform-specific code
     );
   }
@@ -80,6 +105,15 @@ class DeviceInfoDetector {
   /// Get web device context
   static Future<DeviceContext> _getWebDeviceContext() async {
     final webInfo = await _deviceInfoPlugin.webBrowserInfo;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final connectivityResult = await _connectivity.checkConnectivity();
+    
+    String networkType = "unknown";
+    if (connectivityResult == ConnectivityResult.ethernet) {
+      networkType = "ethernet";
+    } else if (connectivityResult == ConnectivityResult.wifi) {
+      networkType = "wifi";
+    }
 
     return DeviceContext(
       manufacturer: webInfo.vendor ?? "unknown",
@@ -87,14 +121,14 @@ class DeviceInfoDetector {
       osName: webInfo.platform ?? "web",
       osVersion: webInfo.appVersion ?? "unknown",
       sdkVersion: webInfo.appVersion ?? "unknown",
-      appId: "com.customfit.web", // Should be retrieved from package info
-      appVersion: "1.0.0", // Should be retrieved from package info
+      appId: packageInfo.packageName,
+      appVersion: packageInfo.version,
       locale: webInfo.language ?? "unknown",
       timezone: DateTime.now().timeZoneName,
       screenWidth: _getScreenWidth(),
       screenHeight: _getScreenHeight(),
       screenDensity: _getScreenDensity(),
-      networkType: "unknown", // Can be implemented with connectivity package
+      networkType: networkType,
       networkCarrier: "unknown", // Not available on web
     );
   }

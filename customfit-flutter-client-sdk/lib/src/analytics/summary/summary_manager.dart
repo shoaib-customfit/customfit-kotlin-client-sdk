@@ -73,7 +73,7 @@ class SummaryManager {
   CFResult<bool> pushSummary(Map<String, dynamic> config) {
     // Validate map keys
     if (config.keys.any((k) => k.runtimeType != String)) {
-      final msg = 'Config map has non-string keys: \$config';
+      const msg = 'Config map has non-string keys: \$config';
       ErrorHandler.handleError(
         msg,
         source: _SOURCE,
@@ -86,7 +86,7 @@ class SummaryManager {
     // Mandatory fields
     final experienceId = config['experience_id'] as String?;
     if (experienceId == null) {
-      final msg = 'Missing mandatory experience_id in config';
+      const msg = 'Missing mandatory experience_id in config';
       ErrorHandler.handleError(
         msg,
         source: _SOURCE,
@@ -177,7 +177,9 @@ class SummaryManager {
     }
 
     final batch = <CFConfigRequestSummary>[];
-    while (_queue.isNotEmpty) batch.add(_queue.removeFirst());
+    while (_queue.isNotEmpty) {
+      batch.add(_queue.removeFirst());
+    }
 
     try {
       final result = await _sendSummariesToServer(batch);

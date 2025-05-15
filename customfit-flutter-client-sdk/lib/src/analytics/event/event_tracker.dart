@@ -170,7 +170,7 @@ class EventTracker implements ConnectionStatusListener {
       final payload = jsonEncode(eventsJson);
 
       // Send events to server
-      final url = 'https://api.customfit.ai/v2/events';
+      const url = 'https://api.customfit.ai/v2/events';
       final result = await _httpClient.post(
         url,
         data: payload,
@@ -187,7 +187,7 @@ class EventTracker implements ConnectionStatusListener {
 
         return CFResult.success(true);
       } else {
-        final errorMessage = 'Failed to send events to server';
+        const errorMessage = 'Failed to send events to server';
         debugPrint(errorMessage);
 
         // Put events back in queue
@@ -245,7 +245,7 @@ class EventTracker implements ConnectionStatusListener {
     _stopFlushTimer();
     if (_autoFlushEnabled) {
       _flushTimer = Timer.periodic(
-        Duration(milliseconds: 30000), // 30 seconds default
+        const Duration(milliseconds: 30000), // 30 seconds default
         (_) => _maybeFlushEvents(),
       );
     }

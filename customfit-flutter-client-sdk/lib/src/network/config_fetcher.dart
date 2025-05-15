@@ -156,7 +156,7 @@ class ConfigFetcher {
       final configsJson = responseMap['configs'] as Map<String, dynamic>?;
 
       if (configsJson == null) {
-        final message = "No 'configs' object found in the response";
+        const message = "No 'configs' object found in the response";
         ErrorHandler.handleError(
           message,
           source: _source,

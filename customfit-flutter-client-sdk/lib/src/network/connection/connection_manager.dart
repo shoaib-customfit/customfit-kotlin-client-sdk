@@ -65,10 +65,13 @@ class ConnectionManagerImpl implements ConnectionManager {
     _startHeartbeat();
   }
 
+  @override
   bool isOffline() => _offlineMode;
 
+  @override
   ConnectionStatus getConnectionStatus() => _currentStatus;
 
+  @override
   ConnectionInformation getConnectionInformation() => ConnectionInformation(
         status: _currentStatus,
         isOfflineMode: _offlineMode,
@@ -78,6 +81,7 @@ class ConnectionManagerImpl implements ConnectionManager {
         nextReconnectTimeMs: _nextReconnectMs,
       );
 
+  @override
   void addConnectionStatusListener(ConnectionStatusListener l) {
     _listeners.add(l);
     // immediate callback
@@ -85,10 +89,12 @@ class ConnectionManagerImpl implements ConnectionManager {
         _currentStatus, getConnectionInformation()));
   }
 
+  @override
   void removeConnectionStatusListener(ConnectionStatusListener l) {
     _listeners.remove(l);
   }
 
+  @override
   void setOfflineMode(bool offline) {
     _offlineMode = offline;
     _cancelReconnect();
@@ -97,6 +103,7 @@ class ConnectionManagerImpl implements ConnectionManager {
     if (!offline) _scheduleReconnect(Duration.zero);
   }
 
+  @override
   void recordConnectionSuccess() {
     _failureCount = 0;
     _lastError = null;
@@ -104,6 +111,7 @@ class ConnectionManagerImpl implements ConnectionManager {
     _updateStatus(ConnectionStatus.connected);
   }
 
+  @override
   void recordConnectionFailure(String error) {
     _failureCount++;
     _lastError = error;
@@ -114,6 +122,7 @@ class ConnectionManagerImpl implements ConnectionManager {
     }
   }
 
+  @override
   void checkConnection() {
     if (_offlineMode) return;
     if (_currentStatus == ConnectionStatus.connected) {
@@ -164,6 +173,7 @@ class ConnectionManagerImpl implements ConnectionManager {
     });
   }
 
+  @override
   void shutdown() {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();

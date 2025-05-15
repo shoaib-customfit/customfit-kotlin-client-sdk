@@ -6,6 +6,10 @@ import '../analytics/event/event_tracker.dart';
 import '../analytics/summary/summary_manager.dart';
 import '../client/listener/all_flags_listener.dart';
 import '../client/listener/feature_flag_change_listener.dart';
+import '../client/managers/config_manager.dart';
+import '../client/managers/environment_manager.dart';
+import '../client/managers/listener_manager.dart';
+import '../client/managers/user_manager.dart';
 import '../config/core/cf_config.dart';
 import '../config/core/mutable_cf_config.dart';
 import '../core/error/cf_result.dart';
@@ -41,6 +45,12 @@ class CFClient {
   final SummaryManager summaryManager;
   final EventTracker eventTracker;
   final ConfigFetcher configFetcher;
+  
+  /// Core managers
+  final ConfigManager configManager;
+  final UserManager userManager;
+  final EnvironmentManager environmentManager;
+  final ListenerManager listenerManager;
 
   /// Connectivity and background
   final ConnectionManagerImpl connectionManager;
@@ -50,10 +60,10 @@ class CFClient {
   final Map<String, List<void Function(dynamic)>> _configListeners = {};
 
   // This field is intentionally unused in the current implementation
-  // but will be used in future versions
+  // but will be used in future versions for feature flag listeners
   @pragma('vm:entry-point')
-  // ignore: unused_field, deprecated_member_use_from_same_package
-  final Map<String, List<FeatureFlagChangeListener<dynamic>>>
+  // ignore: unused_field, will be used in future implementations
+  final Map<String, List<FeatureFlagChangeListener>>
       _featureFlagListeners = {};
   // ignore: unused_field
   final Set<AllFlagsListener> _allFlagsListeners = {};
@@ -77,19 +87,29 @@ class CFClient {
   final Completer<void> _sdkSettingsCompleter = Completer<void>();
 
   CFClient._(CFConfig config, CFUser user)
-      : _sessionId = Uuid().v4(),
+      : _sessionId = const Uuid().v4(),
         _mutableConfig = MutableCFConfig(config),
         _httpClient = HttpClient(config),
         connectionManager = ConnectionManagerImpl(config),
         backgroundStateMonitor = DefaultBackgroundStateMonitor(),
         _user = user,
         summaryManager =
-            SummaryManager(Uuid().v4(), HttpClient(config), user, config),
+            SummaryManager(const Uuid().v4(), HttpClient(config), user, config),
         eventTracker = EventTracker(HttpClient(config),
-            ConnectionManagerImpl(config), user, Uuid().v4(), config),
+            ConnectionManagerImpl(config), user, const Uuid().v4(), config),
         // Convert CFConfig to SdkSettings using a helper method
         configFetcher = ConfigFetcher(
-            HttpClient(config), _convertToSdkSettings(config), user) {
+            HttpClient(config), _convertToSdkSettings(config), user),
+        // Initialize core managers
+        userManager = UserManagerImpl(user),
+        // Create a new ConfigFetcher instance for ConfigManager to avoid instance member access in initializer
+        configManager = ConfigManagerImpl(
+            config: config, 
+            configFetcher: ConfigFetcher(HttpClient(config), _convertToSdkSettings(config), user)),
+        environmentManager = EnvironmentManagerImpl(
+            backgroundStateMonitor: DefaultBackgroundStateMonitor(), 
+            userManager: UserManagerImpl(user)),
+        listenerManager = ListenerManagerImpl() {
     // Configure logging
     LogLevelUpdater.updateLogLevel(_mutableConfig.config);
 
@@ -136,7 +156,9 @@ class CFClient {
     // Create a proper ConnectionStatusListener implementation
     final listener = _ConnectionStatusListenerImpl(
       (status, info) {
-        for (var lst in _connectionsListeners) lst(status, info);
+        for (var lst in _connectionsListeners) {
+          lst(status, info);
+        }
       },
     );
     connectionManager.addConnectionStatusListener(listener);
@@ -242,7 +264,7 @@ class CFClient {
 
           // Try to get configs (ignoring success/failure and just using the result)
           try {
-            final configsResult = await configFetcher.getConfigs();
+            final configsResult = configFetcher.getConfigs();
             final Map<String, dynamic> configs =
                 configsResult.getOrNull() ?? {};
             _updateConfigMap(configs);
@@ -307,6 +329,21 @@ class CFClient {
   Future<void> shutdown() async {
     _sdkSettingsTimer?.cancel();
     connectionManager.shutdown();
+    backgroundStateMonitor.shutdown();
+    environmentManager.shutdown();
+    
+    // Flush any pending events
+    try {
+      await eventTracker.flush();
+      // SummaryManager doesn't have flush method yet
+    } catch (e) {
+      ErrorHandler.handleException(
+        e,
+        'Error flushing events during shutdown',
+        source: _SOURCE,
+        severity: ErrorSeverity.medium
+      );
+    }
   }
 
   // Helper method to convert CFConfig to SdkSettings

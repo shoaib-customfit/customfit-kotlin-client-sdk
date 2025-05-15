@@ -64,7 +64,7 @@ class ConfigFetcher {
     }
 
     // Prevent concurrent fetches
-    var currentLock = _fetchLock;
+    final currentLock = _fetchLock;
     if (!currentLock.isCompleted) {
       await currentLock.future;
     }

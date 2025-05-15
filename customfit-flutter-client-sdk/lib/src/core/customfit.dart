@@ -17,7 +17,7 @@ class CustomFit {
   final String _clientKey;
 
   // Configuration
-  CFConfig _config;
+  final CFConfig _config;
 
   // Current user
   CFUser? _user;
@@ -114,9 +114,8 @@ class CustomFit {
   static void _collectDeviceInfo(CustomFit instance) {
     try {
       DeviceInfoDetector.detectDeviceInfo().then((deviceContext) {
-        if (deviceContext != null && instance._user != null) {
-          instance._user = instance._user!.withDeviceContext(deviceContext);
-        }
+        // DeviceInfoDetector.detectDeviceInfo() always returns a non-null DeviceContext
+        instance._user = instance._user?.withDeviceContext(deviceContext);
       });
     } catch (e) {
       debugPrint('Failed to detect device info: $e');
@@ -127,12 +126,12 @@ class CustomFit {
   static void _collectAppInfo(CustomFit instance) {
     try {
       ApplicationInfoDetector.detectApplicationInfo().then((appInfo) {
-        if (appInfo != null && instance._user != null) {
-          instance._user = instance._user!.withApplicationInfo(appInfo);
+        if (appInfo != null) {
+          instance._user = instance._user?.withApplicationInfo(appInfo);
         }
       });
     } catch (e) {
-      debugPrint('Failed to detect application info: $e');
+      debugPrint('Failed to detect app info: $e');
     }
   }
 
