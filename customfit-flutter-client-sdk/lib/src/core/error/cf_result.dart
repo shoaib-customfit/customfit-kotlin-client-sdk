@@ -4,7 +4,7 @@ import 'error_category.dart';
 import 'error_handler.dart';
 import 'error_severity.dart';
 
-/// Mirrors Kotlin’s sealed CFResult<T>.
+/// Mirrors Kotlin's sealed CFResult<T>.
 class CFResult<T> {
   final T? _value;
   final String? _errorMessage;
@@ -30,7 +30,7 @@ class CFResult<T> {
   factory CFResult.success(T value) =>
       CFResult._(value: value, isSuccess: true);
 
-  /// Error result (logs automatically, like Kotlin’s companion.error)
+  /// Error result (logs automatically, like Kotlin's companion.error)
   factory CFResult.error(
     String message, {
     dynamic exception,
@@ -75,6 +75,12 @@ class CFResult<T> {
 
   /// Returns the value or null if error
   T? getOrNull() => isSuccess ? _value : null;
+
+  /// Returns the error message or null if success
+  String? getErrorMessage() => isSuccess ? null : _errorMessage;
+
+  /// Returns the status code (e.g., HTTP status code) if available
+  int getStatusCode() => _code;
 
   /// Returns the value or calls [onError]
   T getOrElse(T Function(CFResult<T>) onError) =>

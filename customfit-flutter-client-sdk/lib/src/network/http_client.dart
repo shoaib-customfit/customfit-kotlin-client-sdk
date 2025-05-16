@@ -34,6 +34,48 @@ class HttpClient {
         CFConstants.http.headerContentType: CFConstants.http.contentTypeJson
       },
     ));
+
+    // Add custom interceptor for full request/response/error logging
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          debugPrint('==== CF API REQUEST ====');
+          debugPrint('URL: \\${options.uri}');
+          debugPrint('Method: \\${options.method}');
+          debugPrint('Headers: \\${options.headers}');
+          debugPrint('Payload: \\${options.data}');
+          debugPrint('=======================');
+          return handler.next(options);
+        },
+        onResponse: (response, handler) {
+          debugPrint('==== CF API RESPONSE ====');
+          debugPrint('Status: \\${response.statusCode}');
+          debugPrint('Data: \\${response.data}');
+          debugPrint('========================');
+          return handler.next(response);
+        },
+        onError: (DioError e, handler) {
+          debugPrint('==== CF API ERROR ====');
+          debugPrint('URL: \\${e.requestOptions.uri}');
+          debugPrint('Error: \\${e.error}');
+          debugPrint('Response: \\${e.response}');
+          debugPrint('======================');
+          return handler.next(e);
+        },
+      ),
+    );
+
+    // Add logging interceptor
+    _dio.interceptors.add(LogInterceptor(
+      request: true,
+      requestHeader: true,
+      requestBody: true,
+      responseHeader: true,
+      responseBody: true,
+      error: true,
+      logPrint: (log) => debugPrint('HTTP: $log'),
+    ));
+
     debugPrint(
         'HttpClient initialized with connectTimeout=$_connectionTimeoutMs, readTimeout=$_readTimeoutMs');
   }
@@ -54,20 +96,60 @@ class HttpClient {
     debugPrint('Updated read timeout to $timeoutMs ms');
   }
 
-  /// HEAD request for metadata (Last-Modified, ETag)
-  Future<CFResult<Map<String, String>>> fetchMetadata(String url) async {
+  /// GET request for metadata (Last-Modified, ETag)
+  Future<CFResult<Map<String, String>>> fetchMetadata(String url,
+      {String? lastModified, String? etag}) async {
     try {
-      debugPrint('HEAD $url');
-      final resp = await _dio.head(url);
+      debugPrint('GET $url for metadata');
+
+      // Add caching headers to avoid unnecessary network calls
+      final headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+      };
+
+      // Add conditional request headers if available
+      if (lastModified != null &&
+          lastModified.isNotEmpty &&
+          lastModified != 'unchanged') {
+        headers['If-Modified-Since'] = lastModified;
+      }
+
+      if (etag != null && etag.isNotEmpty && etag != 'unchanged') {
+        headers['If-None-Match'] = etag;
+      }
+
+      final options = Options(
+        headers: headers,
+        // Set validateStatus to accept 304 Not Modified responses
+        validateStatus: (status) =>
+            status != null && (status >= 200 && status < 300 || status == 304),
+      );
+
+      final resp = await _dio.get(url, options: options);
+
+      // Handle 304 Not Modified (return the same headers)
+      if (resp.statusCode == 304) {
+        debugPrint('Metadata unchanged (304 Not Modified)');
+        return CFResult.success({
+          CFConstants.http.headerLastModified: lastModified ?? 'unchanged',
+          CFConstants.http.headerEtag: etag ?? 'unchanged',
+        });
+      }
+
+      // Handle 200 OK with headers
       if (resp.statusCode == 200) {
         final headers = resp.headers;
-        return CFResult.success({
+        final resultHeaders = {
           CFConstants.http.headerLastModified:
               headers.value('Last-Modified') ?? '',
           CFConstants.http.headerEtag: headers.value('ETag') ?? '',
-        });
+        };
+        debugPrint('Got metadata headers: $resultHeaders');
+        return CFResult.success(resultHeaders);
       } else {
-        final msg = 'Failed HEAD $url: ${resp.statusCode}';
+        final msg = 'Failed GET metadata $url: ${resp.statusCode}';
+        debugPrint(msg);
         ErrorHandler.handleError(msg,
             source: _SOURCE,
             category: ErrorCategory.network,
@@ -76,9 +158,11 @@ class HttpClient {
             code: resp.statusCode ?? 0, category: ErrorCategory.network);
       }
     } catch (e) {
-      ErrorHandler.handleException(e, 'Error HEAD $url',
+      final errorMsg = 'Error GET metadata $url: ${e.toString()}';
+      debugPrint(errorMsg);
+      ErrorHandler.handleException(e, errorMsg,
           source: _SOURCE, severity: ErrorSeverity.high);
-      return CFResult.error('Network error HEAD $url: ${e.toString()}',
+      return CFResult.error(errorMsg,
           exception: e, category: ErrorCategory.network);
     }
   }

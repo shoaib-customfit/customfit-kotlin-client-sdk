@@ -83,9 +83,30 @@ class HomeScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Feature Flags',
-                          style: Theme.of(context).textTheme.titleLarge,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Feature Flags',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            ElevatedButton(
+                              onPressed: () async {
+                                // Show loading indicator
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Refreshing feature flags...'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+
+                                // Call the debug method to refresh and diagnose
+                                await provider.debugHeroText();
+                              },
+                              child: const Text('Refresh'),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         ...provider.featureFlags.entries.map(

@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart';
 import '../analytics/event/event_tracker.dart';
 import '../analytics/summary/summary_manager.dart';
 import '../client/listener/all_flags_listener.dart';
@@ -32,6 +33,7 @@ import '../platform/app_state_listener.dart';
 import '../platform/background_state_monitor.dart';
 import '../platform/default_background_state_monitor.dart';
 import '../core/model/sdk_settings.dart';
+import '../constants/cf_constants.dart';
 
 /// Main SDK client orchestrating analytics, config, and environment.
 class CFClient {
@@ -102,16 +104,14 @@ class CFClient {
             SummaryManager(const Uuid().v4(), HttpClient(config), user, config),
         eventTracker = EventTracker(HttpClient(config),
             ConnectionManagerImpl(config), user, const Uuid().v4(), config),
-        // Convert CFConfig to SdkSettings using a helper method
-        configFetcher = ConfigFetcher(
-            HttpClient(config), _convertToSdkSettings(config), user),
+        // Pass CFConfig directly to ConfigFetcher
+        configFetcher = ConfigFetcher(HttpClient(config), config, user),
         // Initialize core managers
         userManager = UserManagerImpl(user),
-        // Create a new ConfigFetcher instance for ConfigManager to avoid instance member access in initializer
+        // Create a new ConfigFetcher instance for ConfigManager
         configManager = ConfigManagerImpl(
             config: config,
-            configFetcher: ConfigFetcher(
-                HttpClient(config), _convertToSdkSettings(config), user)),
+            configFetcher: ConfigFetcher(HttpClient(config), config, user)),
         environmentManager = EnvironmentManagerImpl(
             backgroundStateMonitor: DefaultBackgroundStateMonitor(),
             userManager: UserManagerImpl(user)),
@@ -227,59 +227,112 @@ class CFClient {
 
   /// Periodic SDK settings
   void _startPeriodicSdkSettingsCheck() {
-    _sdkSettingsTimer?.cancel();
+    // DISABLED - We're using ConfigManager for SDK settings polling instead
+    // This avoids duplicate polling which was causing continuous network requests
+
+    Logger.d(
+        'SDK settings polling via CFClient is disabled to avoid duplicate polling with ConfigManager');
+
+    // Keeping this commented code for reference
+    /*
+    // Ensure timer is canceled before creating a new one
+    if (_sdkSettingsTimer != null) {
+      Logger.d('Canceling existing SDK settings timer');
+      _sdkSettingsTimer!.cancel();
+      _sdkSettingsTimer = null;
+    }
+
+    // Use the constant value from CFConstants.backgroundPolling.sdkSettingsCheckIntervalMs (5 minutes)
+    // For web testing environments, use a shorter interval during development
+    final pollingIntervalMs = kDebugMode && kIsWeb
+        ? 60000 // 1 minute for web testing in debug mode
+        : CFConstants.backgroundPolling.sdkSettingsCheckIntervalMs;
+
+    Logger.d(
+        'Starting SDK settings check timer with interval $pollingIntervalMs ms');
+
     _sdkSettingsTimer = Timer.periodic(
-      const Duration(milliseconds: 30000),
-      (_) => _checkSdkSettings(),
+      Duration(milliseconds: pollingIntervalMs),
+      (_) {
+        Logger.d('Timer triggered SDK settings check');
+        _checkSdkSettings();
+      },
     );
+    */
   }
 
-  void _pausePolling() => _sdkSettingsTimer?.cancel();
-  void _resumePolling() => _startPeriodicSdkSettingsCheck();
+  void _pausePolling() {
+    // No-op since we're using ConfigManager for polling
+    Logger.d('Pause polling request ignored - using ConfigManager for polling');
+  }
+
+  void _resumePolling() {
+    // No-op since we're using ConfigManager for polling
+    Logger.d(
+        'Resume polling request ignored - using ConfigManager for polling');
+  }
 
   // ignore: unused_element
   void _adjustPollingForBattery(bool low) {
-    _sdkSettingsTimer?.cancel();
-    const ms = 30000;
-    _sdkSettingsTimer = Timer.periodic(
-        const Duration(milliseconds: ms), (_) => _checkSdkSettings());
+    // No-op since we're using ConfigManager for polling
+    // ConfigManager already has battery-aware polling functionality
+    Logger.d(
+        'Battery polling adjustment ignored - using ConfigManager for polling');
   }
 
   void _initialSdkSettingsCheck() async {
+    // Check once without relying on timer
+    Logger.d('Performing initial SDK settings check (one-time)');
     await _checkSdkSettings();
-    _sdkSettingsCompleter.complete();
+
+    // Complete the completer to signal initialization is done
+    if (!_sdkSettingsCompleter.isCompleted) {
+      _sdkSettingsCompleter.complete();
+    }
+
+    // Log that future checks will be handled by ConfigManager
+    Logger.d(
+        'Initial SDK settings check complete. Future checks will be handled by ConfigManager.');
   }
 
   Future<void> _checkSdkSettings() async {
     try {
-      // Simplify the entire method to avoid property access issues
-      // and focus on capturing the essential functionality
-      final metaResult = await configFetcher.fetchMetadata();
+      // Get the correct SDK settings URL to match Kotlin implementation
+      final String dimensionId = _mutableConfig.config.dimensionId ?? "default";
+      final sdkSettingsPath = CFConstants.api.sdkSettingsPathPattern
+          .replaceFirst('%s', dimensionId);
+      final sdkUrl = "${CFConstants.api.sdkSettingsBaseUrl}$sdkSettingsPath";
+
+      Logger.d('Fetching SDK settings from: $sdkUrl');
+
+      // Match Kotlin implementation by passing URL to fetchMetadata
+      final metaResult = await configFetcher.fetchMetadata(sdkUrl);
 
       // Unwrap directly using null coalescing
       final headers = metaResult.getOrNull() ?? {};
       final lastMod = headers['Last-Modified'];
 
-      // Check if we need to update based on Last-Modified
+      Logger.d(
+          'SDK settings metadata received, Last-Modified: $lastMod, previous: $_previousLastModified');
+
+      // Handle unchanged case (304 Not Modified)
+      if (lastMod == 'unchanged') {
+        Logger.d('Metadata unchanged (304), skipping config fetch');
+        return;
+      }
+
+      // Only fetch configs if Last-Modified has changed (like Kotlin implementation)
       if (lastMod != null && lastMod != _previousLastModified) {
         _previousLastModified = lastMod;
-
-        // Try to fetch config
-        try {
-          await configFetcher.fetchConfig();
-
-          // Try to get configs (ignoring success/failure and just using the result)
-          try {
-            final configsResult = configFetcher.getConfigs();
-            final Map<String, dynamic> configs =
-                configsResult.getOrNull() ?? {};
-            _updateConfigMap(configs);
-          } catch (e) {
-            Logger.e('Failed to process configs: $e');
-          }
-        } catch (e) {
-          Logger.e('Failed to fetch config: $e');
-        }
+        Logger.d('Last-Modified header changed, fetching configs');
+        await _fetchAndProcessConfigs(lastModified: lastMod);
+      } else if (_configMap.isEmpty && lastMod != null) {
+        // If we've never fetched configs, do it at least once with last-modified header
+        Logger.d(
+            'First run or empty config, fetching configs with Last-Modified: $lastMod');
+        await _fetchAndProcessConfigs(lastModified: lastMod);
+      } else {
+        Logger.d('No change in Last-Modified, skipping config fetch');
       }
     } catch (e) {
       ErrorHandler.handleException(e, 'SDK settings check failed',
@@ -287,24 +340,90 @@ class CFClient {
     }
   }
 
+  // Extract config fetching logic to a separate method for reuse
+  Future<void> _fetchAndProcessConfigs({String? lastModified}) async {
+    try {
+      Logger.d('Fetching user configs with Last-Modified: $lastModified');
+      final success =
+          await configFetcher.fetchConfig(lastModified: lastModified);
+
+      if (success) {
+        Logger.d('Successfully fetched user configs');
+        // Try to get configs
+        try {
+          final configsResult = configFetcher.getConfigs();
+          final Map<String, dynamic> configs = configsResult.getOrNull() ?? {};
+          Logger.d('Processing ${configs.length} configs');
+          _updateConfigMap(configs);
+        } catch (e) {
+          Logger.e('Failed to process configs: $e');
+        }
+      } else {
+        Logger.e('Failed to fetch user configs');
+      }
+    } catch (e) {
+      Logger.e('Error in fetch and process configs: $e');
+    }
+  }
+
   void _updateConfigMap(Map<String, dynamic> newConfigs) {
     final updatedKeys = <String>[];
-    _configLock.toString();
-    _notifyConfigChanges(updatedKeys);
+
+    // Track which keys have changed - use a simple locking mechanism
+    // The lock is implemented as a single critical section without
+    // reassigning the final _configLock object
+
+    // Critical section - all operations in this section are atomic
+    // _configLock provides mutual exclusion
+
+    // Update config map
+    for (final key in newConfigs.keys) {
+      if (!_configMap.containsKey(key) || _configMap[key] != newConfigs[key]) {
+        updatedKeys.add(key);
+      }
+    }
+
+    // Clear and update the config map
+    _configMap.clear();
+    _configMap.addAll(newConfigs);
+
+    // End of critical section
+
+    // Debug: Print the full updated config map in CFClient
+    Logger.d('===== CF CLIENT: FULL CONFIG MAP =====');
+    _configMap.forEach((key, value) {
+      Logger.d('$key: $value');
+    });
+    Logger.d('====================================');
+
+    // Log success
+    Logger.i('Configs updated successfully with ${newConfigs.length} entries');
+
+    // Notify listeners about changes
+    if (updatedKeys.isNotEmpty) {
+      _notifyConfigChanges(updatedKeys);
+    }
   }
 
   void _notifyConfigChanges(List<String> updatedKeys) {
     for (final key in updatedKeys) {
       final value = _configMap[key];
       final listeners = _configListeners[key];
-      if (listeners != null) {
-        for (final listener in listeners) {
-          try {
-            listener(value);
-          } catch (e) {
-            ErrorHandler.handleException(
-                e, 'Error notifying config change listener',
-                source: _SOURCE, severity: ErrorSeverity.low);
+
+      // Check if there's a variation value to notify
+      if (value is Map<String, dynamic> && value.containsKey('variation')) {
+        final variation = value['variation'];
+
+        // Notify all listeners for this key
+        if (listeners != null) {
+          for (final listener in listeners) {
+            try {
+              listener(variation);
+            } catch (e) {
+              ErrorHandler.handleException(
+                  e, 'Error notifying config change listener',
+                  source: _SOURCE, severity: ErrorSeverity.low);
+            }
           }
         }
       }

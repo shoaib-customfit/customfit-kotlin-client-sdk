@@ -70,16 +70,27 @@ class CFUser {
 
   /// Convert user to a map for serialization
   Map<String, dynamic> toMap() {
+    // Start with a copy of properties
+    final updatedProperties = Map<String, dynamic>.from(properties);
+
+    // Inject contexts, device, application into properties (if present)
+    if (contexts.isNotEmpty) {
+      updatedProperties['contexts'] = contexts.map((e) => e.toMap()).toList();
+    }
+    if (device != null) {
+      updatedProperties['device'] = device!.toMap();
+    }
+    if (application != null) {
+      updatedProperties['application'] = application!.toMap();
+    }
+
     return {
       'user_customer_id': userCustomerId,
       'anonymous': anonymous,
       if (privateFields != null) 'private_fields': privateFields!.toMap(),
       if (sessionFields != null) 'session_fields': sessionFields!.toMap(),
-      'properties': properties,
-      'contexts': contexts.map((e) => e.toMap()).toList(),
-      if (device != null) 'device': device!.toMap(),
-      if (application != null) 'application': application!.toMap(),
-    };
+      'properties': updatedProperties,
+    }..removeWhere((_, v) => v == null);
   }
 
   /// Create a copy with an added property

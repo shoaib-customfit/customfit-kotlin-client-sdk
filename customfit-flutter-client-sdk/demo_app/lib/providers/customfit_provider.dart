@@ -18,12 +18,14 @@ class CustomFitProvider with ChangeNotifier {
   Future<void> initialize() async {
     if (_isInitialized) return;
 
+    debugPrint('Initializing CustomFit provider...');
+
     final config = CFConfig.builder(
       'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhY2NvdW50X2lkIjoiYTRiZGMxMTAtMDU3Zi0xMWYwLWFmZjUtNTk4ZGU5YTY0ZGY0IiwicHJvamVjdF9pZCI6ImFmNzE1MTMwLTA1N2YtMTFmMC1iNzZlLTU3YWQ4Y2ZmNGExNSIsImVudmlyb25tZW50X2lkIjoiYWY3MWVkNzAtMDU3Zi0xMWYwLWI3NmUtNTdhZDhjZmY0YTE1IiwiZGltZW5zaW9uX2lkIjoiYWY3NmY2ODAtMDU3Zi0xMWYwLWI3NmUtNTdhZDhjZmY0YTE1IiwiYXBpX2FjY2Vzc19sZXZlbCI6IkNMSUVOVCIsImtleV9pZCI6ImFmODU0ZTYwLTA1N2YtMTFmMC1iNzZlLTU3YWQ4Y2ZmNGExNSIsImlzcyI6InJISEg2R0lBaENMbG1DYUVnSlBuWDYwdUJaRmg2R3I4IiwiaWF0IjoxNzQyNDcwNjQxfQ.Nw8FmE9SzGffeSDEWcoEaYsZdmlj3Z_WYP-kMtiYHek',
     )
         .setDebugLoggingEnabled(true)
         .setOfflineMode(false)
-        .setSdkSettingsCheckIntervalMs(2000)
+        .setSdkSettingsCheckIntervalMs(60000)
         .setSummariesFlushTimeSeconds(30)
         .setSummariesFlushIntervalMs(30000)
         .setEventsFlushTimeSeconds(30)
@@ -39,27 +41,72 @@ class CustomFitProvider with ChangeNotifier {
       anonymous: true,
     );
 
+    debugPrint('Creating CFClient...');
     _client = CFClient.create(config, user);
-    await _loadConfigValues();
-    _isInitialized = true;
 
-    // Start listening to feature flag changes
+    // Register for flag changes before doing anything else
+    debugPrint('Setting up feature flag listeners...');
+    _setupFeatureFlagListeners();
+
+    // Trigger initial config fetch and wait for it to complete
+    debugPrint('Fetching initial configuration...');
+    await _client.configManager.refreshConfigs();
+
+    // Load the latest values from the fetched configuration
+    debugPrint('Loading config values...');
+    await _loadConfigValues();
+
+    // Mark as initialized and notify UI
+    _isInitialized = true;
+    notifyListeners();
+  }
+
+  /// Set up listeners for feature flag changes
+  void _setupFeatureFlagListeners() {
+    // Listen to all flags changes
     _client.listenerManager.registerAllFlagsListener(
       _CustomAllFlagsListener(
-        onFlagsChanged: (oldFlags, newFlags) {
+        onFlagsChanged: (oldFlags, newFlags) async {
+          debugPrint('⚡ Feature flags changed. Updating values...');
           _featureFlags = newFlags;
+
+          // When flags change, also update our local values
+          await _loadConfigValues();
+
+          // Then notify UI
           notifyListeners();
         },
       ),
     );
 
-    notifyListeners();
+    // Also set up specific listeners for our key feature flags
+    _client.configManager.addConfigListener<String>('hero_text', (value) {
+      debugPrint('⚡ hero_text specific listener triggered with value: $value');
+      _heroText = value;
+      notifyListeners();
+    });
+
+    _client.configManager.addConfigListener<bool>('enhanced_toast', (value) {
+      debugPrint(
+          '⚡ enhanced_toast specific listener triggered with value: $value');
+      _enhancedToast = value;
+      notifyListeners();
+    });
   }
 
   Future<void> _loadConfigValues() async {
+    // Get direct access to the raw config map to examine structure
+    final allFlags = _client.configManager.getAllFlags();
+    debugPrint('===== LOADING CONFIG VALUES =====');
+
+    // Check for specific feature flags we care about
     _heroText = await _client.configManager.getString('hero_text', 'CF DEMO');
     _enhancedToast =
         await _client.configManager.getBoolean('enhanced_toast', false);
+
+    // Debug logging to see the values
+    debugPrint('Loaded heroText value: $_heroText');
+    debugPrint('Loaded enhancedToast value: $_enhancedToast');
   }
 
   Future<void> toggleOfflineMode() async {
@@ -84,6 +131,59 @@ class CustomFitProvider with ChangeNotifier {
     if (!_isInitialized) return;
     _client.userManager.addUserProperty(key, value);
     notifyListeners();
+  }
+
+  /// Force a refresh of feature flags
+  Future<bool> refreshFeatureFlags() async {
+    if (!_isInitialized) return false;
+
+    debugPrint('Manually refreshing feature flags...');
+    final success = await _client.configManager.refreshConfigs();
+    return success;
+  }
+
+  /// Debug and refresh specifically the hero_text feature flag
+  Future<void> debugHeroText() async {
+    if (!_isInitialized) return;
+
+    debugPrint('=========== HERO TEXT DEBUG ===========');
+
+    // Dump the entire config map
+    _client.configManager.dumpConfigMap();
+
+    // Try to force access through getString
+    final heroTextValue =
+        await _client.configManager.getString('hero_text', 'NOT FOUND');
+    debugPrint('Current getString() result: "$heroTextValue"');
+
+    // Attempt to refresh
+    debugPrint('Triggering config refresh...');
+    await refreshFeatureFlags();
+
+    // Dump the config map again after refresh
+    debugPrint('AFTER REFRESH:');
+    _client.configManager.dumpConfigMap();
+
+    // Get the updated value
+    final updatedValue =
+        await _client.configManager.getString('hero_text', 'CF DEMO');
+    debugPrint('Updated hero_text value: "$updatedValue"');
+
+    debugPrint('=======================================');
+  }
+
+  // Helper method for debugging - DO NOT USE IN PRODUCTION
+  dynamic _getPrivateField(dynamic object, String fieldName) {
+    // This uses the dart:mirrors library behind the scenes
+    // It's for debugging purposes only
+    final instance = object;
+    try {
+      // ignore: avoid_dynamic_calls
+      return instance.$fieldName;
+    } catch (e) {
+      debugPrint('Error accessing private field: $e');
+      return null;
+    }
   }
 
   void dispose() {

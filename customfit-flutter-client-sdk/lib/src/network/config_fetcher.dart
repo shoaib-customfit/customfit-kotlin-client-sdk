@@ -11,13 +11,14 @@ import '../core/error/error_severity.dart';
 import '../core/error/error_handler.dart';
 import '../constants/cf_constants.dart';
 import 'http_client.dart';
+import '../config/core/cf_config.dart';
 
 /// Handles fetching configuration from the CustomFit API with support for offline mode
 class ConfigFetcher {
   static const String _source = "ConfigFetcher";
 
   final HttpClient _httpClient;
-  final SdkSettings _config;
+  final CFConfig _config;
   final CFUser _user;
 
   final _offlineMode = ValueNotifier<bool>(false);
@@ -26,6 +27,10 @@ class ConfigFetcher {
   final _mutex = Completer<void>();
   // ignore: unused_field
   int _lastFetchTime = 0;
+
+  // Store metadata headers for conditional requests
+  String? _lastModified;
+  String? _lastEtag;
 
   ConfigFetcher(this._httpClient, this._config, this._user) {
     _fetchMutex.complete();
@@ -52,7 +57,12 @@ class ConfigFetcher {
     await _fetchMutex.future;
     try {
       final url =
-          "${CFConstants.api.baseApiUrl}${CFConstants.api.userConfigsPath}?cfenc=${_config.cfKey}";
+          "${CFConstants.api.baseApiUrl}${CFConstants.api.userConfigsPath}?cfenc=${_config.clientKey}";
+
+      debugPrint("*** USER CONFIGS *** Fetching from URL: $url");
+      if (lastModified != null) {
+        debugPrint("*** USER CONFIGS *** Using Last-Modified: $lastModified");
+      }
 
       // Build payload
       final jsonObject = {
@@ -61,14 +71,19 @@ class ConfigFetcher {
       };
       final payload = jsonEncode(jsonObject);
 
-      debugPrint("Config fetch payload: $payload");
+      debugPrint(
+          "*** USER CONFIGS *** Request payload: ${payload.length > 500 ? payload.substring(0, 500) + '...' : payload}");
 
       final headers = <String, String>{
         CFConstants.http.headerContentType: CFConstants.http.contentTypeJson,
       };
+
+      // Add If-Modified-Since header if available (match Kotlin)
       if (lastModified != null) {
         headers[CFConstants.http.headerIfModifiedSince] = lastModified;
       }
+
+      debugPrint("*** USER CONFIGS *** Request headers: $headers");
 
       final result = await _httpClient.post(
         url,
@@ -76,9 +91,18 @@ class ConfigFetcher {
         options: Options(headers: headers),
       );
 
+      // Handle 304 Not Modified (match Kotlin)
+      if (result.getStatusCode() == 304) {
+        debugPrint(
+            "*** USER CONFIGS *** Configs not modified (304), using cached configs");
+        return true;
+      }
+
       if (!result.isSuccess) {
+        debugPrint(
+            "*** USER CONFIGS *** Failed to fetch: ${result.getOrNull()}");
         ErrorHandler.handleError(
-          "Failed to fetch configuration",
+          "Failed to fetch configuration: ${result.getOrNull()}",
           source: _source,
           category: ErrorCategory.network,
           severity: ErrorSeverity.high,
@@ -88,6 +112,7 @@ class ConfigFetcher {
 
       final responseBody = result.getOrNull();
       if (responseBody == null) {
+        debugPrint("*** USER CONFIGS *** Empty response received");
         ErrorHandler.handleError(
           "Empty configuration response",
           source: _source,
@@ -97,8 +122,14 @@ class ConfigFetcher {
         return false;
       }
 
-      return _handleConfigResponse(responseBody);
+      debugPrint(
+          "*** USER CONFIGS *** Received response with length: ${responseBody.toString().length}");
+      final handled = _handleConfigResponse(responseBody);
+      debugPrint(
+          "*** USER CONFIGS *** Handled response successfully: $handled");
+      return handled;
     } catch (e) {
+      debugPrint("*** USER CONFIGS *** Exception during fetch: $e");
       ErrorHandler.handleException(
         e,
         "Error fetching configuration",
@@ -153,6 +184,14 @@ class ConfigFetcher {
     try {
       // Parse the entire response string into a Map
       final responseMap = jsonDecode(jsonResponse) as Map<String, dynamic>;
+
+      // Debug: Print the raw response
+      debugPrint('===== CONFIG FETCHER: RAW RESPONSE =====');
+      debugPrint(jsonResponse.length > 1000
+          ? '${jsonResponse.substring(0, 1000)}... (truncated)'
+          : jsonResponse);
+      debugPrint('=======================================');
+
       final configsJson = responseMap['configs'] as Map<String, dynamic>?;
 
       if (configsJson == null) {
@@ -165,6 +204,13 @@ class ConfigFetcher {
         );
         return CFResult.success(<String, dynamic>{});
       }
+
+      // Debug: Print the configs section
+      debugPrint('===== CONFIG FETCHER: CONFIGS SECTION =====');
+      debugPrint(jsonEncode(configsJson).length > 1000
+          ? '${jsonEncode(configsJson).substring(0, 1000)}... (truncated)'
+          : jsonEncode(configsJson));
+      debugPrint('=========================================');
 
       // Iterate through each config entry
       configsJson.forEach((key, configElement) {
@@ -212,6 +258,13 @@ class ConfigFetcher {
       if (finalConfigMap != _lastConfigMap) {
         _lastConfigMap = finalConfigMap;
         _lastFetchTime = DateTime.now().millisecondsSinceEpoch;
+
+        // Debug: Print the final processed config map
+        debugPrint('===== CONFIG FETCHER: PROCESSED CONFIG MAP =====');
+        finalConfigMap.forEach((key, value) {
+          debugPrint('$key: $value');
+        });
+        debugPrint('=============================================');
       }
 
       return CFResult.success(finalConfigMap);
@@ -229,8 +282,8 @@ class ConfigFetcher {
 
   /// Fetches metadata from a URL with improved error handling
   Future<CFResult<Map<String, String>>> fetchMetadata([String? url]) async {
-    final targetUrl = url ??
-        "${CFConstants.api.baseApiUrl}${CFConstants.api.userConfigsPath}?cfenc=${_config.cfKey}";
+    // If no URL is provided, construct the SDK settings URL (not user configs)
+    final targetUrl = url ?? _buildSdkSettingsUrl();
 
     if (isOffline()) {
       debugPrint("Not fetching metadata because client is in offline mode");
@@ -239,15 +292,25 @@ class ConfigFetcher {
     }
 
     try {
-      final result = await _httpClient.head(targetUrl);
+      debugPrint("Fetching metadata from $targetUrl");
+      // Pass previously stored headers for conditional request
+      final result = await _httpClient.fetchMetadata(targetUrl,
+          lastModified: _lastModified, etag: _lastEtag);
+
       if (result.isSuccess) {
-        final response = result.getOrNull();
-        final headers = response?.headers.map
-            .map((key, values) => MapEntry(key, values.join(',')));
-        return CFResult.success(headers ?? {});
-      } else {
+        // Store the headers for next request
+        final headers = result.getOrNull() ?? {};
+        _lastModified = headers[CFConstants.http.headerLastModified];
+        _lastEtag = headers[CFConstants.http.headerEtag];
+
+        debugPrint(
+            "Stored headers for next request - Last-Modified: $_lastModified, ETag: $_lastEtag");
+      }
+
+      if (!result.isSuccess) {
         return CFResult.error("Error fetching metadata");
       }
+      return result;
     } catch (e) {
       ErrorHandler.handleException(
         e,
@@ -257,16 +320,61 @@ class ConfigFetcher {
       );
 
       return Future<CFResult<Map<String, String>>>.value(
-          CFResult.error("Error fetching metadata"));
+          CFResult.error("Error fetching metadata: ${e.toString()}"));
     }
+  }
+
+  /// Build SDK settings URL with dimension ID
+  String _buildSdkSettingsUrl() {
+    final String dimensionId = _config.dimensionId ?? "default";
+    final sdkSettingsPath =
+        CFConstants.api.sdkSettingsPathPattern.replaceFirst('%s', dimensionId);
+    return "${CFConstants.api.sdkSettingsBaseUrl}$sdkSettingsPath";
   }
 
   /// Returns the last successfully fetched configuration map
   CFResult<Map<String, dynamic>> getConfigs() {
     if (_lastConfigMap != null) {
+      // Debug: Print the full last config map
+      debugPrint('===== CONFIG FETCHER: LAST CONFIG MAP =====');
+      _lastConfigMap!.forEach((key, value) {
+        debugPrint('$key: $value');
+      });
+      debugPrint('=========================================');
+
       return CFResult.success(_lastConfigMap!);
     } else {
       return CFResult.error("No configuration has been fetched yet");
+    }
+  }
+
+  Future<CFResult<Map<String, dynamic>>> fetchSdkSettings() async {
+    // Respect offline mode
+    if (_offlineMode.value) {
+      return CFResult.error("Cannot fetch SDK settings in offline mode",
+          category: ErrorCategory.network);
+    }
+
+    try {
+      // Build request URL with dimension ID
+      final dimensionId = _config.dimensionId;
+      if (dimensionId == null) {
+        return CFResult.error("Failed to extract dimension ID from client key",
+            category: ErrorCategory.validation);
+      }
+
+      // Use the same URL building helper method for consistency
+      final url = _buildSdkSettingsUrl();
+
+      // Make request using fetchJson
+      final result = await _httpClient.fetchJson(url);
+
+      return result;
+    } catch (e) {
+      ErrorHandler.handleException(e, "Unexpected error fetching SDK settings",
+          source: _source, severity: ErrorSeverity.high);
+      return CFResult.error("Failed to fetch SDK settings",
+          exception: e, category: ErrorCategory.internal);
     }
   }
 }

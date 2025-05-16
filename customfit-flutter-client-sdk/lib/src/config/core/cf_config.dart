@@ -99,7 +99,7 @@ class CFConfig {
     this.summariesQueueSize = 10,
     this.summariesFlushTimeSeconds = 30,
     this.summariesFlushIntervalMs = 30000,
-    this.sdkSettingsCheckIntervalMs = 120000,
+    this.sdkSettingsCheckIntervalMs = 240000,
     this.networkConnectionTimeoutMs = 10000,
     this.networkReadTimeoutMs = 30000,
     this.loggingEnabled = true,
@@ -151,7 +151,7 @@ class Builder {
   int summariesQueueSize = 10;
   int summariesFlushTimeSeconds = 30;
   int summariesFlushIntervalMs = 30000;
-  int sdkSettingsCheckIntervalMs = 120000;
+  int sdkSettingsCheckIntervalMs = 240000;
   int networkConnectionTimeoutMs = 10000;
   int networkReadTimeoutMs = 30000;
   bool loggingEnabled = true;
