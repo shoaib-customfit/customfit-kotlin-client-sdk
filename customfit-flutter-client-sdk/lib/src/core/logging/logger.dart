@@ -9,32 +9,29 @@ class Logger {
   /// Whether debug logging is enabled
   static bool debugEnabled = false;
 
-  /// Gets a timestamp string for logs
-  static String _timestamp() {
-    final now = DateTime.now();
-    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}.${now.millisecond.toString().padLeft(3, '0')}';
-  }
+  /// Log prefix to identify the SDK platform
+  static const String _logPrefix = "Customfit.ai-SDK [Flutter]";
 
   /// Enhanced console output with emoji indicators
   static void _directConsoleOutput(String message) {
-    final timestamp = _timestamp();
-
     if (message.contains('API POLL')) {
-      print('[$timestamp] 📡 $message');
+      developer.log('📡 $message', name: _logPrefix, level: 500);
     } else if (message.contains('SUMMARY')) {
-      print('[$timestamp] 📊 $message');
+      developer.log('📊 $message', name: _logPrefix, level: 500);
     } else if (message.contains('CONFIG VALUE') ||
         message.contains('CONFIG UPDATE')) {
-      print('[$timestamp] 🔧 $message');
+      developer.log('🔧 $message', name: _logPrefix, level: 500);
     } else if (message.contains('TRACK') || message.contains('🔔')) {
-      print('[$timestamp] 🔔 $message');
+      developer.log('🔔 $message', name: _logPrefix, level: 500);
+    } else {
+      developer.log(message, name: _logPrefix, level: 500);
     }
   }
 
   /// Log a debug message
   static void d(String message) {
     if (enabled && debugEnabled) {
-      developer.log(message, name: 'CustomFit', level: 500);
+      developer.log(message, name: _logPrefix, level: 500);
       if (kDebugMode) {
         _directConsoleOutput(message);
       }
@@ -44,7 +41,7 @@ class Logger {
   /// Log an info message
   static void i(String message) {
     if (enabled) {
-      developer.log(message, name: 'CustomFit', level: 800);
+      developer.log(message, name: _logPrefix, level: 800);
       if (kDebugMode) {
         _directConsoleOutput(message);
       }
@@ -54,7 +51,7 @@ class Logger {
   /// Log a warning message
   static void w(String message) {
     if (enabled) {
-      developer.log(message, name: 'CustomFit', level: 900);
+      developer.log(message, name: _logPrefix, level: 900);
       if (kDebugMode) {
         _directConsoleOutput(message);
       }
@@ -64,7 +61,7 @@ class Logger {
   /// Log an error message
   static void e(String message) {
     if (enabled) {
-      developer.log(message, name: 'CustomFit', level: 1000);
+      developer.log(message, name: _logPrefix, level: 1000);
       if (kDebugMode) {
         _directConsoleOutput(message);
       }
@@ -78,7 +75,7 @@ class Logger {
       final errorMsg =
           '$message\nError: $error${stackTrace != null ? '\nStackTrace: $stackTrace' : ''}';
       developer.log(errorMsg,
-          name: 'CustomFit', level: 1000, error: error, stackTrace: stackTrace);
+          name: _logPrefix, level: 1000, error: error, stackTrace: stackTrace);
       if (kDebugMode) {
         _directConsoleOutput('ERROR: $message');
       }

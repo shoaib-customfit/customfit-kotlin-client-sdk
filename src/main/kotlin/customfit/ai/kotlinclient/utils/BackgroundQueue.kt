@@ -1,295 +1,366 @@
 package customfit.ai.kotlinclient.utils
 
-import customfit.ai.kotlinclient.logging.Logger
-import kotlinx.coroutines.*
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import java.io.File
-import java.util.*
+import customfit.ai.kotlinclient.logging.Timber
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 /**
- * A persistent queue for processing operations in the background.
- * Supports durability across app restarts and prioritization.
+ * Thread-safe background processing queue with persistence.
+ *
+ * Features:
+ * - Persistent queue that survives app restarts
+ * - Priority-based processing
+ * - Automatic retry on failure
+ * - Operation deduplication by key
  */
-class BackgroundQueue(
+class BackgroundQueue<T>(
     private val queueName: String,
-    private val processor: suspend (Map<String, Any>) -> Boolean,
+    private val queueFile: java.io.File? = null,
+    private val processor: (T) -> Boolean,
     private val maxRetries: Int = 3,
-    private val queueDirectory: File? = null
+    private val initialDelay: Long = 1000,
+    private val maxDelay: Long = 30000,
+    private val backoffMultiplier: Double = 2.0,
+    private val serializeOperation: ((T) -> String)? = null,
+    private val deserializeOperation: ((String) -> T)? = null
 ) {
     companion object {
         private const val TAG = "BackgroundQueue"
     }
 
-    // Path for queue storage
-    private val queueFile: File by lazy {
-        val dir = queueDirectory ?: File(System.getProperty("java.io.tmpdir"), "cf_queues")
-        if (!dir.exists()) {
-            dir.mkdirs()
+    private val queueLock = java.util.concurrent.locks.ReentrantLock()
+    private val pendingOperations = mutableListOf<QueueOperation<T>>()
+    private val isProcessing = AtomicBoolean(false)
+    private var isPaused = false
+    private val processingScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val idCounter = AtomicInteger(0)
+    
+    // Extension function to use the lock more cleanly
+    private inline fun <T> java.util.concurrent.locks.ReentrantLock.withLock(action: () -> T): T {
+        this.lock()
+        try {
+            return action()
+        } finally {
+            this.unlock()
         }
-        File(dir, "${queueName}_queue.json")
     }
 
-    // Queue operations
-    private val pendingOperations = Collections.synchronizedList(mutableListOf<QueuedOperation>())
-    
-    // Queue state
-    private var isProcessing = false
-    private var isPaused = false
-    
-    // Lock for synchronization
-    private val queueLock = ReentrantLock()
-    
-    // Coroutine scope for processing
-    private val processingScope = CoroutineScope(
-        Executors.newSingleThreadExecutor().asCoroutineDispatcher() + SupervisorJob()
-    )
-    
-    // JSON serializer
-    private val json = Json { ignoreUnknownKeys = true }
-    
-    // Initialization
+    // Initialize with persisted queue
     init {
-        loadPersistedQueue()
-        
-        // Start processing if there are pending operations
-        if (pendingOperations.isNotEmpty()) {
-            startProcessing()
+        queueLock.withLock {
+            if (queueFile != null && queueFile.exists() && serializeOperation != null && deserializeOperation != null) {
+                loadPersistedQueue()
+            }
+            
+            Timber.i("Background queue $queueName initialized with ${pendingOperations.size} operations")
         }
-        
-        Logger.i(TAG, "Background queue $queueName initialized with ${pendingOperations.size} operations")
     }
-    
+
     /**
-     * Load previously persisted queue from disk
+     * Load previously persisted operations from storage
      */
     private fun loadPersistedQueue() {
         try {
-            if (queueFile.exists()) {
-                val contents = queueFile.readText()
-                val deserializedQueue = json.decodeFromString<List<SerializableQueuedOperation>>(contents)
+            if (queueFile != null && queueFile.exists() && serializeOperation != null && deserializeOperation != null) {
+                val jsonString = queueFile.readText()
                 
-                queueLock.withLock {
+                if (jsonString.isNotEmpty()) {
+                    val serializableList = Json.decodeFromString<List<SerializableOperation>>(jsonString)
+                    
                     pendingOperations.clear()
                     
-                    for (item in deserializedQueue) {
-                        pendingOperations.add(item.toQueuedOperation())
+                    serializableList.forEach { serOp ->
+                        try {
+                            val operation = deserializeOperation.invoke(serOp.serializedOperation)
+                            pendingOperations.add(
+                                QueueOperation(
+                                    id = serOp.id,
+                                    operation = operation,
+                                    uniqueKey = serOp.uniqueKey,
+                                    priority = serOp.priority,
+                                    retryCount = serOp.retryCount,
+                                    initialBackoffMs = serOp.initialBackoffMs,
+                                    maxBackoffMs = serOp.maxBackoffMs,
+                                    backoffMultiplier = serOp.backoffMultiplier
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to deserialize operation: ${e.message}")
+                        }
                     }
                     
-                    // Sort by priority then timestamp
+                    // Update id counter to be higher than any existing ID
+                    val maxId = pendingOperations.maxOfOrNull { it.id.toInt() } ?: 0
+                    idCounter.set(maxId + 1)
+                    
+                    // Sort by priority
                     sortQueue()
                 }
                 
-                Logger.d(TAG, "Loaded ${pendingOperations.size} operations from persisted queue")
+                Timber.d("Loaded ${pendingOperations.size} operations from persisted queue")
             }
         } catch (e: Exception) {
-            Logger.e(TAG, "Error loading persisted queue: ${e.message}", e)
+            Timber.e(e, "Error loading persisted queue: ${e.message}")
             // Continue with empty queue on error
         }
     }
-    
+
     /**
-     * Save queue to disk
+     * Persist queue to storage
      */
     private fun persistQueue() {
+        if (queueFile == null || serializeOperation == null) {
+            return
+        }
+        
         try {
-            val serializableList = queueLock.withLock {
-                pendingOperations.map { it.toSerializable() }
+            queueLock.withLock {
+                // Create serializable list
+                val serializableList = pendingOperations.map { op ->
+                    SerializableOperation(
+                        id = op.id,
+                        serializedOperation = serializeOperation.invoke(op.operation),
+                        uniqueKey = op.uniqueKey,
+                        priority = op.priority,
+                        retryCount = op.retryCount,
+                        initialBackoffMs = op.initialBackoffMs,
+                        maxBackoffMs = op.maxBackoffMs,
+                        backoffMultiplier = op.backoffMultiplier
+                    )
+                }
+                
+                // Write to file
+                val jsonString = Json.encodeToString(serializableList)
+                queueFile.writeText(jsonString)
+                
+                Timber.d("Persisted ${serializableList.size} operations to queue file")
             }
-            
-            val jsonString = json.encodeToString(serializableList)
-            queueFile.writeText(jsonString)
-            
-            Logger.d(TAG, "Persisted ${serializableList.size} operations to queue file")
         } catch (e: Exception) {
-            Logger.e(TAG, "Error persisting queue: ${e.message}", e)
+            Timber.e(e, "Error persisting queue: ${e.message}")
         }
     }
-    
-    /**
-     * Sort the queue by priority (higher first) then timestamp (older first)
-     */
-    private fun sortQueue() {
-        pendingOperations.sortWith(compareByDescending<QueuedOperation> { it.priority }
-            .thenBy { it.timestamp })
-    }
-    
+
     /**
      * Add an operation to the queue
      *
-     * @param data The data for the operation
-     * @param priority Priority of the operation (higher is processed first)
-     * @param uniqueKey Optional key to ensure uniqueness (will replace existing operation with same key)
-     * @return Operation ID
+     * @param operation The operation to execute
+     * @param uniqueKey Optional unique key for deduplication (replaces existing operation with same key)
+     * @param priority Priority for this operation (lower number = higher priority)
+     * @return ID of the queued operation
      */
     fun enqueue(
-        data: Map<String, Any>,
-        priority: Int = 0,
-        uniqueKey: String? = null
+        operation: T,
+        uniqueKey: String? = null,
+        priority: Int = 5
     ): String {
-        val id = uniqueKey ?: UUID.randomUUID().toString()
+        val id = idCounter.getAndIncrement().toString()
         
         queueLock.withLock {
-            // Check if operation with same uniqueKey exists
+            // Handle deduplication if uniqueKey is provided
             if (uniqueKey != null) {
-                val existingIndex = pendingOperations.indexOfFirst { it.id == uniqueKey }
+                val existingIndex = pendingOperations.indexOfFirst { it.uniqueKey == uniqueKey }
                 if (existingIndex != -1) {
-                    Logger.d(TAG, "Replacing existing operation with uniqueKey: $uniqueKey")
+                    Timber.d("Replacing existing operation with uniqueKey: $uniqueKey")
                     pendingOperations.removeAt(existingIndex)
                 }
             }
             
             // Add new operation
-            val operation = QueuedOperation(
-                id = id,
-                data = data,
-                priority = priority,
-                timestamp = System.currentTimeMillis(),
-                retryCount = 0
+            pendingOperations.add(
+                QueueOperation(
+                    id = id,
+                    operation = operation,
+                    uniqueKey = uniqueKey,
+                    priority = priority,
+                    initialBackoffMs = initialDelay,
+                    maxBackoffMs = maxDelay,
+                    backoffMultiplier = backoffMultiplier
+                )
             )
             
-            pendingOperations.add(operation)
-            
-            // Re-sort queue
+            // Sort the queue by priority
             sortQueue()
         }
         
-        // Persist queue
+        // Persist to storage
         persistQueue()
         
-        Logger.d(TAG, "Enqueued operation with ID: $id (priority: $priority)")
+        Timber.d("Enqueued operation with ID: $id (priority: $priority)")
         
         // Start processing if not already running
-        if (!isProcessing && !isPaused) {
-            startProcessing()
-        }
+        startProcessing()
         
         return id
     }
-    
+
+    /**
+     * Sort the queue by priority
+     */
+    private fun sortQueue() {
+        pendingOperations.sortBy { it.priority }
+    }
+
     /**
      * Start processing the queue
      */
     private fun startProcessing() {
-        queueLock.withLock {
-            if (isProcessing || isPaused || pendingOperations.isEmpty()) {
-                return
+        val shouldStart = queueLock.withLock {
+            if (isProcessing.get() || isPaused || pendingOperations.isEmpty()) {
+                false
+            } else {
+                isProcessing.set(true)
+                true
             }
-            
-            isProcessing = true
         }
         
-        Logger.d(TAG, "Starting queue processing")
-        
-        // Process outside of the lock using coroutine
-        processingScope.launch {
-            processNextOperation()
+        if (shouldStart) {
+            Timber.d("Starting queue processing")
+            
+            // Process outside of the lock using coroutine
+            processingScope.launch {
+                processNextOperation()
+            }
         }
     }
-    
+
     /**
      * Process the next operation in the queue
      */
     private suspend fun processNextOperation() {
-        var operation: QueuedOperation? = null
-        
-        // Get the next operation under the lock
-        queueLock.withLock {
-            if (pendingOperations.isEmpty() || isPaused) {
-                isProcessing = false
-                return
+        // Get the next operation
+        val operation = queueLock.withLock {
+            if (pendingOperations.isEmpty()) {
+                isProcessing.set(false)
+                null
+            } else {
+                pendingOperations.first()
             }
-            
-            operation = pendingOperations.first()
         }
         
-        // If no operation or paused, stop processing
         if (operation == null) {
-            queueLock.withLock {
-                isProcessing = false
-            }
             return
         }
         
         try {
-            Logger.d(TAG, "Processing operation: ${operation!!.id}")
+            Timber.d("Processing operation: ${operation.id}")
             
             // Process the operation
-            val success = processor(operation!!.data)
+            val success = processor(operation.operation)
             
-            // Remove operation if successful
+            // Remove if successful
             if (success) {
                 queueLock.withLock {
-                    pendingOperations.remove(operation)
+                    val index = pendingOperations.indexOfFirst { it.id == operation.id }
+                    if (index != -1) {
+                        pendingOperations.removeAt(index)
+                    }
                 }
                 
-                Logger.d(TAG, "Operation processed successfully: ${operation!!.id}")
+                Timber.d("Operation processed successfully: ${operation.id}")
                 
                 // Persist queue
                 persistQueue()
                 
-                // Process next operation
-                processNextOperation()
-            } else {
-                // Handle retry
-                handleRetry(operation!!)
+                // Continue processing
+                if (!isPaused) {
+                    queueLock.withLock {
+                        if (pendingOperations.isEmpty()) {
+                            isProcessing.set(false)
+                        }
+                    }
+                    
+                    if (isProcessing.get()) {
+                        processNextOperation()
+                    }
+                } else {
+                    isProcessing.set(false)
+                }
             }
         } catch (e: Exception) {
-            Logger.e(TAG, "Error processing operation ${operation!!.id}: ${e.message}", e)
+            Timber.e(e, "Error processing operation ${operation.id}: ${e.message}")
             
             // Handle retry
-            handleRetry(operation!!)
-        }
-    }
-    
-    /**
-     * Handle retry logic for a failed operation
-     */
-    private suspend fun handleRetry(operation: QueuedOperation) {
-        queueLock.withLock {
-            // Remove from current position
-            pendingOperations.remove(operation)
+            queueLock.withLock {
+                val index = pendingOperations.indexOfFirst { it.id == operation.id }
+                
+                if (index == -1) {
+                    // Operation was removed by another thread somehow
+                    isProcessing.set(false)
+                    return
+                }
+                
+                val op = pendingOperations[index]
+                
+                if (op.retryCount < maxRetries) {
+                    // Retry
+                    val updatedOp = op.copy(retryCount = op.retryCount + 1)
+                    pendingOperations[index] = updatedOp
+                    
+                    // Move to end of its priority level
+                    pendingOperations.removeAt(index)
+                    pendingOperations.add(updatedOp)
+                    sortQueue()
+                    
+                    Timber.w("Operation ${operation.id} failed, retrying (${updatedOp.retryCount}/$maxRetries)")
+                } else {
+                    // Operation failed permanently
+                    Timber.e("Operation ${operation.id} failed permanently after ${operation.retryCount} retries")
+                }
+            }
             
-            // If under retry limit, increment retry count and requeue
-            if (operation.retryCount < maxRetries) {
-                val updatedOp = operation.copy(retryCount = operation.retryCount + 1)
-                
-                // Move to end of its priority level
-                pendingOperations.add(updatedOp)
-                
-                // Re-sort queue
-                sortQueue()
-                
-                Logger.w(TAG, "Operation ${operation.id} failed, retrying (${updatedOp.retryCount}/$maxRetries)")
+            // Persist updated queue
+            persistQueue()
+            
+            // Continue processing after failure with a delay for backoff
+            val delay = calculateBackoff(operation.retryCount, operation.initialBackoffMs, operation.maxBackoffMs, operation.backoffMultiplier)
+            kotlinx.coroutines.delay(delay)
+            
+            if (!isPaused) {
+                processNextOperation()
             } else {
-                // Operation failed permanently
-                Logger.e(TAG, "Operation ${operation.id} failed permanently after ${operation.retryCount} retries")
+                isProcessing.set(false)
             }
         }
-        
-        // Persist queue
-        persistQueue()
-        
-        // Process next operation
-        processNextOperation()
     }
-    
+
+    /**
+     * Calculate exponential backoff delay
+     */
+    private fun calculateBackoff(
+        attempt: Int,
+        initialDelayMs: Long,
+        maxDelayMs: Long,
+        multiplier: Double
+    ): Long {
+        val delay = (initialDelayMs * Math.pow(multiplier, attempt.toDouble())).toLong()
+        return Math.min(delay, maxDelayMs)
+    }
+
     /**
      * Pause queue processing
      */
     fun pause() {
         queueLock.withLock {
             isPaused = true
-            Logger.i(TAG, "Queue $queueName paused")
+            Timber.i("Queue $queueName paused")
         }
     }
-    
+
     /**
      * Resume queue processing
      */
@@ -297,52 +368,45 @@ class BackgroundQueue(
         val shouldStart = queueLock.withLock {
             val wasPaused = isPaused
             isPaused = false
-            Logger.i(TAG, "Queue $queueName resumed")
-            wasPaused && !isProcessing && pendingOperations.isNotEmpty()
+            Timber.i("Queue $queueName resumed")
+            wasPaused && !isProcessing.get() && pendingOperations.isNotEmpty()
         }
         
         if (shouldStart) {
             startProcessing()
         }
     }
-    
+
     /**
-     * Get number of pending operations
-     */
-    fun getPendingCount(): Int {
-        return queueLock.withLock { pendingOperations.size }
-    }
-    
-    /**
-     * Check if operation with given ID exists in the queue
-     */
-    fun containsOperation(id: String): Boolean {
-        return queueLock.withLock { pendingOperations.any { it.id == id } }
-    }
-    
-    /**
-     * Remove an operation from the queue by ID
+     * Remove an operation from the queue
+     *
+     * @param id ID of the operation to remove
+     * @return true if the operation was found and removed
      */
     fun removeOperation(id: String): Boolean {
         val removed = queueLock.withLock {
             val index = pendingOperations.indexOfFirst { it.id == id }
-            
-            if (index == -1) {
-                return@withLock false
+            if (index != -1) {
+                pendingOperations.removeAt(index)
+                true
+            } else {
+                false
             }
-            
-            pendingOperations.removeAt(index)
-            true
         }
         
         if (removed) {
             persistQueue()
-            Logger.d(TAG, "Removed operation with ID: $id")
+            Timber.d("Removed operation with ID: $id")
         }
         
         return removed
     }
-    
+
+    /**
+     * Get the number of pending operations
+     */
+    fun size(): Int = queueLock.withLock { pendingOperations.size }
+
     /**
      * Clear all operations from the queue
      */
@@ -352,113 +416,71 @@ class BackgroundQueue(
         }
         
         persistQueue()
-        Logger.i(TAG, "Cleared all operations from queue $queueName")
+        Timber.i("Cleared all operations from queue $queueName")
     }
-    
+
     /**
-     * Flush the queue, processing all operations immediately
-     * Returns the number of successfully processed operations
+     * Get the number of operations with the given priority
+     */
+    fun countByPriority(priority: Int): Int = queueLock.withLock {
+        pendingOperations.count { it.priority == priority }
+    }
+
+    /**
+     * Flush all pending operations
+     *
+     * @return Number of successfully processed operations
      */
     suspend fun flush(): Int {
-        val operations = queueLock.withLock {
-            pendingOperations.toList()
-        }
+        // Pause queue processing
+        pause()
+        
+        // Get all operations
+        val operations = queueLock.withLock { pendingOperations.toList() }
         
         var successCount = 0
         
-        // Process all operations
+        // Process each operation
         for (operation in operations) {
             try {
-                Logger.d(TAG, "Flushing operation: ${operation.id}")
+                Timber.d("Flushing operation: ${operation.id}")
                 
                 // Process the operation
-                val success = processor(operation.data)
+                val success = processor(operation.operation)
                 
                 if (success) {
                     queueLock.withLock {
-                        pendingOperations.remove(operation)
+                        val index = pendingOperations.indexOfFirst { it.id == operation.id }
+                        if (index != -1) {
+                            pendingOperations.removeAt(index)
+                        }
                     }
                     
                     successCount++
-                    Logger.d(TAG, "Successfully flushed operation: ${operation.id}")
+                    Timber.d("Successfully flushed operation: ${operation.id}")
                 } else {
-                    Logger.w(TAG, "Failed to flush operation: ${operation.id}")
+                    Timber.w("Failed to flush operation: ${operation.id}")
                 }
             } catch (e: Exception) {
-                Logger.e(TAG, "Error flushing operation ${operation.id}: ${e.message}", e)
+                Timber.e(e, "Error flushing operation ${operation.id}: ${e.message}")
             }
         }
         
-        // Persist queue
+        // Persist updated queue
         persistQueue()
         
-        Logger.i(TAG, "Flushed $successCount/${operations.size} operations from queue $queueName")
+        Timber.i("Flushed $successCount/${operations.size} operations from queue $queueName")
         
         return successCount
     }
-    
+
     /**
-     * Shutdown the queue
+     * Clean up resources
      */
     fun shutdown() {
-        // Pause processing
-        pause()
-        
-        // Persist queue to ensure no operations are lost
-        persistQueue()
-        
-        // Cancel any pending coroutines
+        // Cancel all coroutines
         processingScope.cancel()
         
-        Logger.i(TAG, "Queue $queueName shut down")
-    }
-}
-
-/**
- * Represents an operation in the queue
- */
-data class QueuedOperation(
-    val id: String,
-    val data: Map<String, Any>,
-    val priority: Int,
-    val timestamp: Long,
-    val retryCount: Int
-) {
-    /**
-     * Convert to serializable form
-     */
-    fun toSerializable(): SerializableQueuedOperation {
-        return SerializableQueuedOperation(
-            id = id,
-            data = data.mapValues { it.value.toString() },
-            priority = priority,
-            timestamp = timestamp,
-            retryCount = retryCount
-        )
-    }
-}
-
-/**
- * Serializable version of QueuedOperation for persistence
- */
-@Serializable
-data class SerializableQueuedOperation(
-    val id: String,
-    val data: Map<String, String>,
-    val priority: Int,
-    val timestamp: Long,
-    val retryCount: Int
-) {
-    /**
-     * Convert to regular QueuedOperation
-     */
-    fun toQueuedOperation(): QueuedOperation {
-        return QueuedOperation(
-            id = id,
-            data = data,
-            priority = priority,
-            timestamp = timestamp,
-            retryCount = retryCount
-        )
+        Timber.i("Queue $queueName shut down")
     }
 } 

@@ -13,7 +13,7 @@ object CFConstants {
         const val DEFAULT_SDK_VERSION = "1.0.0"
         
         /** Logger name for the CustomFit SDK */
-        const val LOGGER_NAME = "CustomFitSDK"
+        const val LOGGER_NAME = "Customfit.ai-SDK [Kotlin]"
     }
     
     /**

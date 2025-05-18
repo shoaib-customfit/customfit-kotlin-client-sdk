@@ -12,17 +12,20 @@ import java.util.Date
 object Timber {
     private val logger = LoggerFactory.getLogger(CFConstants.General.LOGGER_NAME)
     private val timestamp = { SimpleDateFormat("HH:mm:ss.SSS").format(Date()) }
+    private const val LOG_PREFIX = "Customfit.ai-SDK [Kotlin]"
     
     // Add direct console output for important logs
     private fun directConsoleOutput(message: String) {
         if (message.contains("API POLL")) {
-            println("[${timestamp()}] 📡 $message")
+            println("[${timestamp()}] 📡 $LOG_PREFIX: $message")
         } else if (message.contains("SUMMARY")) {
-            println("[${timestamp()}] 📊 $message")
+            println("[${timestamp()}] 📊 $LOG_PREFIX: $message")
         } else if (message.contains("CONFIG VALUE") || message.contains("CONFIG UPDATE")) {
-            println("[${timestamp()}] 🔧 $message")
+            println("[${timestamp()}] 🔧 $LOG_PREFIX: $message")
         } else if (message.contains("TRACK") || message.contains("🔔")) {
-            println("[${timestamp()}] 🔔 $message")
+            println("[${timestamp()}] 🔔 $LOG_PREFIX: $message")
+        } else {
+            println("[${timestamp()}] $LOG_PREFIX: $message")
         }
     }
     

@@ -9,6 +9,7 @@ import '../../network/config_fetcher.dart';
 import '../../analytics/summary/summary_manager.dart';
 import '../../logging/logger.dart';
 import '../../core/error/cf_result.dart';
+import '../../core/util/config_cache.dart';
 
 /// Interface for ConfigManager
 abstract class ConfigManager {
@@ -58,6 +59,9 @@ class ConfigManagerImpl implements ConfigManager {
   final ConfigFetcher _configFetcher;
   final SummaryManager? _summaryManager;
 
+  // Configuration cache
+  final ConfigCache _configCache = ConfigCache();
+
   // Cache for feature flags
   final Map<String, dynamic> _configMap = {};
 
@@ -79,6 +83,9 @@ class ConfigManagerImpl implements ConfigManager {
   // Completer for SDK settings initialization
   final Completer<void> _sdkSettingsCompleter = Completer<void>();
 
+  // Flag to track if we've loaded from cache
+  bool _initialCacheLoadComplete = false;
+
   /// Create a new ConfigManagerImpl
   ConfigManagerImpl({
     required CFConfig config,
@@ -92,8 +99,39 @@ class ConfigManagerImpl implements ConfigManager {
     Logger.d(
         'ConfigManagerImpl initialized with isSdkFunctionalityEnabled=true');
 
-    // Start SDK settings check
-    _startSdkSettingsCheck();
+    // Load from cache first
+    _loadFromCache().then((_) {
+      // Start SDK settings check after loading from cache
+      _startSdkSettingsCheck();
+    });
+  }
+
+  /// Load configuration from cache during initialization
+  Future<void> _loadFromCache() async {
+    if (_initialCacheLoadComplete) {
+      return;
+    }
+
+    Logger.i('Loading configuration from cache...');
+
+    final cacheResult = await _configCache.getCachedConfig();
+
+    if (cacheResult.configMap != null) {
+      Logger.i(
+          'Found cached configuration with ${cacheResult.configMap!.length} entries');
+
+      // Update the config map with cached values
+      _updateConfigMap(cacheResult.configMap!);
+
+      // Set metadata for future conditional requests
+      _previousLastModified = cacheResult.lastModified;
+
+      Logger.i('Successfully initialized from cached configuration');
+    } else {
+      Logger.i('No cached configuration found, will wait for server response');
+    }
+
+    _initialCacheLoadComplete = true;
   }
 
   /// Start periodic SDK settings check
@@ -218,6 +256,11 @@ class ConfigManagerImpl implements ConfigManager {
         final configs = configsResult.getOrNull() ?? {};
         Logger.i(
             '🔎 API POLL: Successfully fetched ${configs.length} config entries');
+
+        // Cache the successful response
+        await _configCache.cacheConfig(configs, lastModified, null);
+
+        // Update config map with new values
         _updateConfigMap(configs);
       } else {
         Logger.d(

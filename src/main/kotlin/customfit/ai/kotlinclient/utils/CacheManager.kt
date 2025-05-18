@@ -1,11 +1,32 @@
 package customfit.ai.kotlinclient.utils
 
-import customfit.ai.kotlinclient.logging.Logger
+import customfit.ai.kotlinclient.logging.Timber
 import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.contextual
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -57,6 +78,9 @@ class CacheManager private constructor() {
         ignoreUnknownKeys = true 
         isLenient = true
         prettyPrint = false
+        serializersModule = SerializersModule {
+            contextual(AnySerializer)
+        }
     }
 
     // Coroutine scope for background operations
@@ -115,10 +139,10 @@ class CacheManager private constructor() {
                 persistEntry(normalizedKey, entry)
             }
             
-            Logger.d(TAG, "Cached value for key $normalizedKey, expires in ${policy.ttlSeconds}s")
+            Timber.d("Cached value for key $normalizedKey, expires in ${policy.ttlSeconds}s")
             return true
         } catch (e: Exception) {
-            Logger.e(TAG, "Error caching value: ${e.message}", e)
+            Timber.e(e, "Error caching value: ${e.message}")
             return false
         }
     }
@@ -139,10 +163,10 @@ class CacheManager private constructor() {
             memoryCache[normalizedKey]?.let { entry ->
                 // If not expired or explicitly allowing expired entries
                 if (!entry.isExpired() || allowExpired) {
-                    Logger.d(TAG, "Cache hit for key $normalizedKey (memory)")
+                    Timber.d("Cache hit for key $normalizedKey (memory)")
                     return entry.value as? T
                 } else {
-                    Logger.d(TAG, "Cache hit for key $normalizedKey but entry expired")
+                    Timber.d("Cache hit for key $normalizedKey but entry expired")
                 }
             }
         }
@@ -162,17 +186,17 @@ class CacheManager private constructor() {
                 
                 // If not expired or explicitly allowing expired entries
                 if (!entry.isExpired() || allowExpired) {
-                    Logger.d(TAG, "Cache hit for key $normalizedKey (persistent)")
+                    Timber.d("Cache hit for key $normalizedKey (persistent)")
                     return entry.value
                 } else {
-                    Logger.d(TAG, "Cache hit for key $normalizedKey but entry expired")
+                    Timber.d("Cache hit for key $normalizedKey but entry expired")
                 }
             }
         } catch (e: Exception) {
-            Logger.e(TAG, "Error reading from cache: ${e.message}", e)
+            Timber.e(e, "Error reading from cache: ${e.message}")
         }
         
-        Logger.d(TAG, "Cache miss for key $normalizedKey")
+        Timber.d("Cache miss for key $normalizedKey")
         return null
     }
 
@@ -201,7 +225,7 @@ class CacheManager private constructor() {
                 return System.currentTimeMillis() < expiresAt
             }
         } catch (e: Exception) {
-            Logger.e(TAG, "Error checking cache: ${e.message}", e)
+            Timber.e(e, "Error checking cache: ${e.message}")
         }
         
         return false
@@ -222,10 +246,10 @@ class CacheManager private constructor() {
             val file = File(cacheDir, "$normalizedKey.json")
             val result = if (file.exists()) file.delete() else false
             
-            Logger.d(TAG, "Removed key $normalizedKey from cache: $result")
+            Timber.d("Removed key $normalizedKey from cache: $result")
             return result
         } catch (e: Exception) {
-            Logger.e(TAG, "Error removing from cache: ${e.message}", e)
+            Timber.e(e, "Error removing from cache: ${e.message}")
             return false
         }
     }
@@ -249,14 +273,14 @@ class CacheManager private constructor() {
             for (file in files) {
                 if (!file.delete()) {
                     success = false
-                    Logger.w(TAG, "Failed to delete cache file: ${file.absolutePath}")
+                    Timber.w("Failed to delete cache file: ${file.absolutePath}")
                 }
             }
             
-            Logger.d(TAG, "Cache cleared (${files.size} entries)")
+            Timber.d("Cache cleared (${files.size} entries)")
             return success
         } catch (e: Exception) {
-            Logger.e(TAG, "Error clearing cache: ${e.message}", e)
+            Timber.e(e, "Error clearing cache: ${e.message}")
             return false
         }
     }
@@ -271,7 +295,7 @@ class CacheManager private constructor() {
         metadata: Map<String, String>? = null
     ): T? {
         try {
-            Logger.d(TAG, "Refreshing cached value for key $key")
+            Timber.d("Refreshing cached value for key $key")
             val freshValue = provider()
             
             // Cache the fresh value
@@ -284,7 +308,7 @@ class CacheManager private constructor() {
             
             return freshValue
         } catch (e: Exception) {
-            Logger.e(TAG, "Error refreshing cached value: ${e.message}", e)
+            Timber.e(e, "Error refreshing cached value: ${e.message}")
             return null
         }
     }
@@ -314,7 +338,7 @@ class CacheManager private constructor() {
                     val refreshThresholdMs = policy.ttlSeconds * 100L
                     
                     if (expirationMs <= refreshThresholdMs) {
-                        Logger.d(TAG, "Background refreshing cache for key $normalizedKey")
+                        Timber.d("Background refreshing cache for key $normalizedKey")
                         // Launch background refresh
                         cacheScope.launch {
                             refresh(key, provider, policy, metadata)
@@ -345,9 +369,9 @@ class CacheManager private constructor() {
             val file = File(cacheDir, "$key.json")
             val serialized = serializeEntry(entry)
             file.writeText(serialized)
-            Logger.d(TAG, "Persisted cache entry to file: ${file.absolutePath}")
+            Timber.d("Persisted cache entry to file: ${file.absolutePath}")
         } catch (e: Exception) {
-            Logger.e(TAG, "Error persisting cache entry: ${e.message}", e)
+            Timber.e(e, "Error persisting cache entry: ${e.message}")
         }
     }
 
@@ -363,10 +387,10 @@ class CacheManager private constructor() {
                 
                 // Handle any metadata needed (e.g., last cleanup time)
                 val lastCleanup = meta["lastCleanup"] ?: 0L
-                Logger.d(TAG, "Cache last cleaned: ${Date(lastCleanup)}")
+                Timber.d("Cache last cleaned: ${Date(lastCleanup)}")
             }
         } catch (e: Exception) {
-            Logger.e(TAG, "Error loading cache metadata: ${e.message}", e)
+            Timber.e(e, "Error loading cache metadata: ${e.message}")
         }
     }
 
@@ -382,7 +406,7 @@ class CacheManager private constructor() {
             val metaJson = json.encodeToString(meta)
             metaFile.writeText(metaJson)
         } catch (e: Exception) {
-            Logger.e(TAG, "Error saving cache metadata: ${e.message}", e)
+            Timber.e(e, "Error saving cache metadata: ${e.message}")
         }
     }
 
@@ -416,16 +440,16 @@ class CacheManager private constructor() {
                     }
                 } catch (e: Exception) {
                     // Skip invalid files
-                    Logger.w(TAG, "Skipping invalid cache file: ${file.name}", e)
+                    Timber.w("Skipping invalid cache file: ${file.name}")
                 }
             }
             
             // Update cache metadata
             saveCacheMetadata()
             
-            Logger.d(TAG, "Cache cleanup complete: removed $removedCount expired entries")
+            Timber.d("Cache cleanup complete: removed $removedCount expired entries")
         } catch (e: Exception) {
-            Logger.e(TAG, "Error during cache cleanup: ${e.message}", e)
+            Timber.e(e, "Error during cache cleanup: ${e.message}")
         }
     }
 
@@ -525,12 +549,105 @@ data class CacheEntry<T : Any>(
  */
 @Serializable
 data class SerializableCacheEntry(
-    val value: Any,
+    @Contextual val value: Any,
     val expiresAt: Long,
     val createdAt: Long,
     val key: String,
     val metadata: Map<String, String>? = null
 )
+
+/**
+ * Serializer for Any type
+ */
+object AnySerializer : KSerializer<Any> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Any") {
+        element<String>("type")
+        element<JsonElement>("value")
+    }
+
+    override fun serialize(encoder: Encoder, value: Any) {
+        val jsonEncoder = encoder as? kotlinx.serialization.json.JsonEncoder 
+            ?: throw SerializationException("This serializer can only be used with JSON")
+        
+        val jsonElement = when (value) {
+            is String -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            is Map<*, *> -> {
+                val map = value.entries.associate { 
+                    it.key.toString() to (it.value?.let { v -> 
+                        when (v) {
+                            is String, is Number, is Boolean -> Json.encodeToJsonElement(v)
+                            else -> JsonPrimitive(v.toString())
+                        }
+                    } ?: JsonPrimitive("null"))
+                }
+                JsonObject(map)
+            }
+            else -> JsonPrimitive(value.toString())
+        }
+        
+        encoder.encodeSerializableValue(JsonElement.serializer(), jsonElement)
+    }
+
+    override fun deserialize(decoder: Decoder): Any {
+        val jsonDecoder = decoder as? kotlinx.serialization.json.JsonDecoder 
+            ?: throw SerializationException("This serializer can only be used with JSON")
+        
+        val jsonElement = jsonDecoder.decodeSerializableValue(JsonElement.serializer())
+        
+        return when (jsonElement) {
+            is JsonPrimitive -> {
+                when {
+                    jsonElement.isString -> jsonElement.content
+                    jsonElement.content == "true" -> true
+                    jsonElement.content == "false" -> false
+                    jsonElement.content.toDoubleOrNull() != null -> {
+                        val content = jsonElement.content
+                        when {
+                            content.contains('.') -> content.toDouble()
+                            content.toLongOrNull() != null -> content.toLong()
+                            else -> content.toInt()
+                        }
+                    }
+                    else -> jsonElement.content
+                }
+            }
+            is JsonObject -> jsonElement.toMap()
+            else -> jsonElement.toString()
+        }
+    }
+}
+
+/**
+ * Extension function to convert JsonObject to Map
+ */
+private fun JsonObject.toMap(): Map<String, Any> {
+    val result = mutableMapOf<String, Any>()
+    for ((key, value) in this.entries) {
+        result[key] = when (value) {
+            is JsonPrimitive -> {
+                when {
+                    value.isString -> value.content
+                    value.content == "true" -> true
+                    value.content == "false" -> false
+                    value.content.toDoubleOrNull() != null -> {
+                        val content = value.content
+                        when {
+                            content.contains('.') -> content.toDouble()
+                            content.toLongOrNull() != null -> content.toLong()
+                            else -> content.toInt()
+                        }
+                    }
+                    else -> value.content
+                }
+            }
+            is JsonObject -> value.toMap()
+            else -> value.toString()
+        }
+    }
+    return result
+}
 
 /**
  * Cache policy to control caching behavior
