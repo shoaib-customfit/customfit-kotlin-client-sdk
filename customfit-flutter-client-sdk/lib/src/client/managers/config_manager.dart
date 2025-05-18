@@ -1,11 +1,14 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+// Removing unused foundation and uuid imports
+// import 'package:flutter/foundation.dart';
+// import 'package:uuid/uuid.dart';
 
 import '../../config/core/cf_config.dart';
 import '../../network/config_fetcher.dart';
 import '../../analytics/summary/summary_manager.dart';
 import '../../core/logging/logger.dart';
+import '../../core/error/cf_result.dart';
 
 /// Interface for ConfigManager
 abstract class ConfigManager {
@@ -89,8 +92,8 @@ class ConfigManagerImpl implements ConfigManager {
 
     // IMPORTANT: Enforce a reasonable minimum interval to prevent network abuse
     // Minimum 1 minute (60000ms), recommended 4+ minutes (240000ms)
-    final minimumInterval = 60000; // 1 minute absolute minimum
-    final recommendedInterval = 240000; // 4 minutes recommended
+    const minimumInterval = 60000; // 1 minute absolute minimum
+    const recommendedInterval = 240000; // 4 minutes recommended
 
     // Apply minimum interval with clear warnings
     final actualIntervalMs =
@@ -422,11 +425,11 @@ class ConfigManagerImpl implements ConfigManager {
 
         // Use async/await with pushSummary instead of then
         Logger.d('Pushing summary for key: $key');
-        _summaryManager!.pushSummary(configMapWithKey).onSuccess((_) {
+        _summaryManager.pushSummary(configMapWithKey).then((_) {
           Logger.d('Summary pushed for key: $key');
-        }).onError((result) {
+        }).catchError((error) {
           Logger.w(
-              'Failed to push summary for key "$key": ${result.getErrorMessage()}');
+              'Failed to push summary for key "$key": ${error is CFResult ? error.getErrorMessage() : error}');
         });
       }
     } catch (e) {
@@ -459,7 +462,7 @@ class ConfigManagerImpl implements ConfigManager {
     // Notify immediately if we already have a value
     final variation = _getVariation(key);
     if (variation != null && variation is T) {
-      listener(variation as T);
+      listener(variation);
     }
   }
 

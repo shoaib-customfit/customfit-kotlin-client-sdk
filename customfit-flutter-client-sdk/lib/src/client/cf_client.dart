@@ -2,7 +2,6 @@
 
 import 'dart:async';
 import 'package:uuid/uuid.dart';
-import 'package:flutter/foundation.dart';
 import '../analytics/event/event_tracker.dart';
 import '../analytics/summary/summary_manager.dart';
 import '../client/listener/all_flags_listener.dart';
@@ -33,12 +32,11 @@ import '../platform/app_state.dart';
 import '../platform/app_state_listener.dart';
 import '../platform/background_state_monitor.dart';
 import '../platform/default_background_state_monitor.dart';
-import '../core/model/sdk_settings.dart';
 import '../constants/cf_constants.dart';
 
 /// Main SDK client orchestrating analytics, config, and environment.
 class CFClient {
-  static const _SOURCE = 'CFClient';
+  static const _source = 'CFClient';
 
   /// Factory method to create a new CFClient instance
   static CFClient create(CFConfig config, CFUser user) {
@@ -66,18 +64,19 @@ class CFClient {
   final BackgroundStateMonitor backgroundStateMonitor;
 
   /// Feature config and flag listeners
-  final Map<String, List<void Function(dynamic)>> _configListeners = {};
+  final Map<String, List<void Function(dynamic)>> _configListeners = const {};
 
   // This field is intentionally unused in the current implementation
   // but will be used in future versions for feature flag listeners
   @pragma('vm:entry-point')
   // ignore: unused_field, will be used in future implementations
-  final Map<String, List<FeatureFlagChangeListener>> _featureFlagListeners = {};
+  final Map<String, List<FeatureFlagChangeListener>> _featureFlagListeners =
+      const {};
   // ignore: unused_field
-  final Set<AllFlagsListener> _allFlagsListeners = {};
+  final Set<AllFlagsListener> _allFlagsListeners = const {};
 
   /// Contexts, device/app info
-  final Map<String, EvaluationContext> _contexts = {};
+  final Map<String, EvaluationContext> _contexts = const {};
   // ignore: unused_field
   late DeviceContext _deviceContext;
   // ignore: unused_field
@@ -174,7 +173,7 @@ class CFClient {
   }
 
   final List<void Function(ConnectionStatus, ConnectionInformation)>
-      _connectionsListeners = [];
+      _connectionsListeners = const [];
   void addConnectionStatusListener(
       void Function(ConnectionStatus, ConnectionInformation) lst) {
     _connectionsListeners.add(lst);
@@ -339,7 +338,7 @@ class CFClient {
       }
     } catch (e) {
       ErrorHandler.handleException(e, 'SDK settings check failed',
-          source: _SOURCE, severity: ErrorSeverity.medium);
+          source: _source, severity: ErrorSeverity.medium);
     }
   }
 
@@ -425,7 +424,7 @@ class CFClient {
             } catch (e) {
               ErrorHandler.handleException(
                   e, 'Error notifying config change listener',
-                  source: _SOURCE, severity: ErrorSeverity.low);
+                  source: _source, severity: ErrorSeverity.low);
             }
           }
         }
@@ -446,7 +445,7 @@ class CFClient {
       ErrorHandler.handleException(
         e,
         'Failed to track event',
-        source: _SOURCE,
+        source: _source,
         severity: ErrorSeverity.medium,
       );
       return CFResult.error('Failed to track event: ${e.toString()}');
@@ -466,7 +465,7 @@ class CFClient {
       // SummaryManager doesn't have flush method yet
     } catch (e) {
       ErrorHandler.handleException(e, 'Error flushing events during shutdown',
-          source: _SOURCE, severity: ErrorSeverity.medium);
+          source: _source, severity: ErrorSeverity.medium);
     }
   }
 
@@ -508,7 +507,7 @@ class CFClient {
       ErrorHandler.handleException(
         e,
         errorMsg,
-        source: _SOURCE,
+        source: _source,
         severity: ErrorSeverity.high,
       );
       return CFResult.error(
@@ -517,54 +516,6 @@ class CFClient {
         category: ErrorCategory.internal,
       );
     }
-  }
-
-  // Helper method to convert CFConfig to SdkSettings
-  static SdkSettings _convertToSdkSettings(CFConfig config) {
-    return SdkSettings(
-      cfConfigsJson: {},
-      cfActivePages: {},
-      cfRevenuePages: {},
-      cfBrowserVariables: {},
-      cfKey: config.clientKey,
-      cfAccountEnabled: true,
-      cfIntelligentCodeEnabled: false,
-      cfPersonalizePostSdkTimeout: false,
-      isInbound: false,
-      isOutbound: false,
-      cfspa: false,
-      cfspaAutoDetectPageUrlChange: false,
-      isAutoFormCapture: false,
-      isAutoEmailCapture: false,
-      cfIsPageUpdateEnabled: false,
-      cfRetainTextValue: false,
-      cfIsWhitelabelAccount: false,
-      cfSkipSdk: false,
-      enableEventAnalyzer: false,
-      cfSkipDfs: false,
-      cfIsMsClarityEnabled: false,
-      cfIsHotjarEnabled: false,
-      cfIsShopifyIntegrated: false,
-      cfIsGaEnabled: false,
-      cfIsSegmentEnabled: false,
-      cfIsMixpanelEnabled: false,
-      cfIsMoengageEnabled: false,
-      cfIsClevertapEnabled: false,
-      cfIsWebengageEnabled: false,
-      cfIsNetcoreEnabled: false,
-      cfIsAmplitudeEnabled: false,
-      cfIsHeapEnabled: false,
-      cfIsGokwikEnabled: false,
-      cfIsShopfloEnabled: false,
-      cfSendErrorReport: false,
-      personalizedUsersLimitExceeded: false,
-      cfSdkTimeoutInSeconds: 30,
-      cfInitialDelayInMs: 0,
-      cfLastVisitedProductUrl: 0,
-      blacklistedPagePaths: [],
-      blacklistedReferrers: [],
-      cfSubdomains: [],
-    );
   }
 }
 

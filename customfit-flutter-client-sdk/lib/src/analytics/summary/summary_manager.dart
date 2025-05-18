@@ -17,7 +17,7 @@ import 'package:intl/intl.dart';
 
 /// Manages collection and flushing of configuration summaries, mirroring Kotlin's SummaryManager
 class SummaryManager {
-  static const _SOURCE = 'SummaryManager';
+  static const _source = 'SummaryManager';
 
   final String _sessionId;
   final HttpClient _httpClient;
@@ -61,7 +61,7 @@ class SummaryManager {
       ErrorHandler.handleException(
         e,
         'Failed to update flush interval to $intervalMs',
-        source: _SOURCE,
+        source: _source,
         severity: ErrorSeverity.medium,
       );
       return CFResult.error(
@@ -84,7 +84,7 @@ class SummaryManager {
       Logger.w('📊 SUMMARY: $msg');
       ErrorHandler.handleError(
         msg,
-        source: _SOURCE,
+        source: _source,
         category: ErrorCategory.validation,
         severity: ErrorSeverity.medium,
       );
@@ -98,7 +98,7 @@ class SummaryManager {
       Logger.w('📊 SUMMARY: $msg, summary not tracked');
       ErrorHandler.handleError(
         msg,
-        source: _SOURCE,
+        source: _source,
         category: ErrorCategory.validation,
         severity: ErrorSeverity.medium,
       );
@@ -120,7 +120,7 @@ class SummaryManager {
       Logger.w('📊 SUMMARY: $msg, summary not tracked');
       ErrorHandler.handleError(
         msg,
-        source: _SOURCE,
+        source: _source,
         category: ErrorCategory.validation,
         severity: ErrorSeverity.medium,
       );
@@ -163,7 +163,7 @@ class SummaryManager {
       Logger.w('📊 SUMMARY: Queue full, forcing flush for new entry');
       ErrorHandler.handleError(
         'Summary queue full, forcing flush for new entry',
-        source: _SOURCE,
+        source: _source,
         category: ErrorCategory.internal,
         severity: ErrorSeverity.medium,
       );
@@ -174,7 +174,7 @@ class SummaryManager {
         Logger.e('📊 SUMMARY: Failed to queue summary after flush');
         ErrorHandler.handleError(
           'Failed to queue summary after flush',
-          source: _SOURCE,
+          source: _source,
           category: ErrorCategory.internal,
           severity: ErrorSeverity.high,
         );
@@ -238,7 +238,7 @@ class SummaryManager {
       ErrorHandler.handleException(
         e,
         'Unexpected error during summary flush',
-        source: _SOURCE,
+        source: _source,
         severity: ErrorSeverity.high,
       );
       return CFResult.error(
@@ -271,7 +271,7 @@ class SummaryManager {
 
     try {
       var success = false;
-      final result = await RetryUtil.withRetry<CFResult<dynamic>>(
+      await RetryUtil.withRetry<CFResult<dynamic>>(
         block: () async {
           Logger.d('📊 SUMMARY: Attempting to send summaries');
           final res = await _httpClient.post(
@@ -313,7 +313,7 @@ class SummaryManager {
       ErrorHandler.handleException(
         e,
         'Error sending summaries to server',
-        source: _SOURCE,
+        source: _source,
         severity: ErrorSeverity.high,
       );
       await _handleSendFailure(summaries);
@@ -345,7 +345,7 @@ class SummaryManager {
           '📊 SUMMARY: Failed to re-queue $requeueFailCount summaries after send failure');
       ErrorHandler.handleError(
         'Failed to re-queue $requeueFailCount summaries after send failure',
-        source: _SOURCE,
+        source: _source,
         category: ErrorCategory.internal,
         severity: ErrorSeverity.high,
       );
@@ -371,7 +371,7 @@ class SummaryManager {
             ErrorHandler.handleException(
               e,
               'Error during periodic summary flush',
-              source: _SOURCE,
+              source: _source,
               severity: ErrorSeverity.medium,
             );
           }
@@ -402,7 +402,7 @@ class SummaryManager {
             ErrorHandler.handleException(
               e,
               'Error during periodic summary flush',
-              source: _SOURCE,
+              source: _source,
               severity: ErrorSeverity.medium,
             );
           }

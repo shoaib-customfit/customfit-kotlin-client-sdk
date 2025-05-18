@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 
-import '../core/model/sdk_settings.dart';
 import '../core/model/cf_user.dart';
 import '../core/error/error_category.dart';
 import '../core/error/error_severity.dart';
@@ -72,7 +71,7 @@ class ConfigFetcher {
       final payload = jsonEncode(jsonObject);
 
       debugPrint(
-          "*** USER CONFIGS *** Request payload: ${payload.length > 500 ? payload.substring(0, 500) + '...' : payload}");
+          "*** USER CONFIGS *** Request payload: ${payload.length > 500 ? '${payload.substring(0, 500)}...' : payload}");
 
       final headers = <String, String>{
         CFConstants.http.headerContentType: CFConstants.http.contentTypeJson,
@@ -329,7 +328,7 @@ class ConfigFetcher {
     final String dimensionId = _config.dimensionId ?? "default";
     final sdkSettingsPath =
         CFConstants.api.sdkSettingsPathPattern.replaceFirst('%s', dimensionId);
-    return "${CFConstants.api.sdkSettingsBaseUrl}$sdkSettingsPath";
+    return CFConstants.api.sdkSettingsBaseUrl + sdkSettingsPath;
   }
 
   /// Returns the last successfully fetched configuration map

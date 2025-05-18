@@ -96,13 +96,11 @@ class CustomFitProvider with ChangeNotifier {
 
   Future<void> _loadConfigValues() async {
     // Get direct access to the raw config map to examine structure
-    final allFlags = _client.configManager.getAllFlags();
     debugPrint('===== LOADING CONFIG VALUES =====');
 
     // Check for specific feature flags we care about
-    _heroText = await _client.configManager.getString('hero_text', 'CF DEMO');
-    _enhancedToast =
-        await _client.configManager.getBoolean('enhanced_toast', false);
+    _heroText = _client.configManager.getString('hero_text', 'CF DEMO');
+    _enhancedToast = _client.configManager.getBoolean('enhanced_toast', false);
 
     // Debug logging to see the values
     debugPrint('Loaded heroText value: $_heroText');
@@ -153,7 +151,7 @@ class CustomFitProvider with ChangeNotifier {
 
     // Try to force access through getString
     final heroTextValue =
-        await _client.configManager.getString('hero_text', 'NOT FOUND');
+        _client.configManager.getString('hero_text', 'NOT FOUND');
     debugPrint('Current getString() result: "$heroTextValue"');
 
     // Attempt to refresh
@@ -166,26 +164,13 @@ class CustomFitProvider with ChangeNotifier {
 
     // Get the updated value
     final updatedValue =
-        await _client.configManager.getString('hero_text', 'CF DEMO');
+        _client.configManager.getString('hero_text', 'CF DEMO');
     debugPrint('Updated hero_text value: "$updatedValue"');
 
     debugPrint('=======================================');
   }
 
-  // Helper method for debugging - DO NOT USE IN PRODUCTION
-  dynamic _getPrivateField(dynamic object, String fieldName) {
-    // This uses the dart:mirrors library behind the scenes
-    // It's for debugging purposes only
-    final instance = object;
-    try {
-      // ignore: avoid_dynamic_calls
-      return instance.$fieldName;
-    } catch (e) {
-      debugPrint('Error accessing private field: $e');
-      return null;
-    }
-  }
-
+  @override
   void dispose() {
     if (_isInitialized) {
       _client.shutdown();
@@ -213,6 +198,6 @@ CFClient createCFClient(CFConfig config, CFUser user) {
   // In a real implementation, CFClient would have a public factory method
   // We're using dynamic to bypass the private constructor restriction
   // In a real implementation, you would use the public factory method
-  final dynamic client = CFClient;
+  const dynamic client = CFClient;
   return client._(config, user);
 }

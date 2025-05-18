@@ -42,7 +42,7 @@ class EventData {
   /// Factory to create a validated EventData with default timestamp/ID
   static EventData create({
     required String eventCustomerId,
-    EventType eventType = EventType.TRACK,
+    EventType eventType = EventType.track,
     Map<String, dynamic> properties = const {},
     DateTime? timestamp,
     String? sessionId,

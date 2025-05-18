@@ -19,7 +19,7 @@ class HttpClient {
   int _connectionTimeoutMs;
   int _readTimeoutMs;
 
-  static const String _SOURCE = 'HttpClient';
+  static const String _source = 'HttpClient';
 
   HttpClient(this._config)
       : _connectionTimeoutMs = _config.networkConnectionTimeoutMs,
@@ -55,7 +55,7 @@ class HttpClient {
           Logger.d('========================');
           return handler.next(response);
         },
-        onError: (DioError e, handler) {
+        onError: (DioException e, handler) {
           Logger.e('==== CF API ERROR ====');
           Logger.e('URL: ${e.requestOptions.uri}');
           Logger.e('Error: ${e.error}');
@@ -155,7 +155,7 @@ class HttpClient {
         final msg = 'Failed GET metadata $url: ${resp.statusCode}';
         Logger.w('🔎 API HTTP: $msg');
         ErrorHandler.handleError(msg,
-            source: _SOURCE,
+            source: _source,
             category: ErrorCategory.network,
             severity: ErrorSeverity.medium);
         return CFResult.error(msg,
@@ -165,7 +165,7 @@ class HttpClient {
       final errorMsg = 'Error GET metadata $url: ${e.toString()}';
       Logger.e('🔎 API HTTP: $errorMsg');
       ErrorHandler.handleException(e, errorMsg,
-          source: _SOURCE, severity: ErrorSeverity.high);
+          source: _source, severity: ErrorSeverity.high);
       return CFResult.error(errorMsg,
           exception: e, category: ErrorCategory.network);
     }
@@ -185,7 +185,7 @@ class HttpClient {
           final msg = 'GET $url JSON not object';
           Logger.w('🔎 API HTTP: $msg - Response data is not a JSON object');
           ErrorHandler.handleError(msg,
-              source: _SOURCE,
+              source: _source,
               category: ErrorCategory.serialization,
               severity: ErrorSeverity.medium);
           return CFResult.error(msg, category: ErrorCategory.serialization);
@@ -194,7 +194,7 @@ class HttpClient {
         final msg = 'Failed GET $url: ${resp.statusCode}';
         Logger.w('🔎 API HTTP: $msg');
         ErrorHandler.handleError(msg,
-            source: _SOURCE,
+            source: _source,
             category: ErrorCategory.network,
             severity: ErrorSeverity.high);
         return CFResult.error(msg,
@@ -203,7 +203,7 @@ class HttpClient {
     } catch (e) {
       Logger.e('🔎 API HTTP: Error GET $url: ${e.toString()}');
       ErrorHandler.handleException(e, 'Error GET $url',
-          source: _SOURCE, severity: ErrorSeverity.high);
+          source: _source, severity: ErrorSeverity.high);
       return CFResult.error('Network error GET $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     }
@@ -263,7 +263,7 @@ class HttpClient {
         }
 
         ErrorHandler.handleError('$msg – $body',
-            source: _SOURCE,
+            source: _source,
             category: ErrorCategory.network,
             severity: ErrorSeverity.high);
         Logger.e('Error: $body');
@@ -279,7 +279,7 @@ class HttpClient {
       }
 
       ErrorHandler.handleException(e, 'Error POST $url',
-          source: _SOURCE, severity: ErrorSeverity.high);
+          source: _source, severity: ErrorSeverity.high);
       return CFResult.error('Network error POST $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     } finally {
@@ -299,8 +299,8 @@ class HttpClient {
       Logger.i('POST $url');
 
       // Determine if this is a tracking or summary request
-      bool isTracking = url.contains("events") || url.contains("cfe");
-      bool isSummary = url.contains("summary");
+      final bool isTracking = url.contains("events") || url.contains("cfe");
+      final bool isSummary = url.contains("summary");
 
       if (isTracking) {
         Logger.i('🔔 TRACK HTTP: POST request to: $url');
@@ -345,7 +345,7 @@ class HttpClient {
         }
 
         ErrorHandler.handleError('$msg – $body',
-            source: _SOURCE,
+            source: _source,
             category: ErrorCategory.network,
             severity: ErrorSeverity.high);
         Logger.e('Error: $body');
@@ -353,8 +353,8 @@ class HttpClient {
             code: resp.statusCode ?? 0, category: ErrorCategory.network);
       }
     } catch (e) {
-      bool isTracking = url.contains("events") || url.contains("cfe");
-      bool isSummary = url.contains("summary");
+      final bool isTracking = url.contains("events") || url.contains("cfe");
+      final bool isSummary = url.contains("summary");
 
       if (isTracking) {
         Logger.e('🔔 TRACK HTTP: Exception: ${e.toString()}');
@@ -363,7 +363,7 @@ class HttpClient {
       }
 
       ErrorHandler.handleException(e, 'Error POST $url',
-          source: _SOURCE, severity: ErrorSeverity.high);
+          source: _source, severity: ErrorSeverity.high);
       return CFResult.error('Network error POST $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     } finally {
@@ -379,7 +379,7 @@ class HttpClient {
       return CFResult.success(resp);
     } catch (e) {
       ErrorHandler.handleException(e, 'Error HEAD $url',
-          source: _SOURCE, severity: ErrorSeverity.high);
+          source: _source, severity: ErrorSeverity.high);
       return CFResult.error('Network error HEAD $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     }

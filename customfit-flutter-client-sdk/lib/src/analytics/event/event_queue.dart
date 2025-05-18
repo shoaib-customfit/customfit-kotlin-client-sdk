@@ -81,7 +81,7 @@ class EventQueue {
 
       if (droppedEvents.isNotEmpty && _onEventsDropped != null) {
         try {
-          _onEventsDropped?.call(droppedEvents);
+          _onEventsDropped(droppedEvents);
         } catch (e) {
           debugPrint('Error notifying about dropped events: $e');
         }

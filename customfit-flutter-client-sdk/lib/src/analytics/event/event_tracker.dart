@@ -64,7 +64,7 @@ class EventTracker implements ConnectionStatusListener {
       if (_summaryManager != null) {
         debugPrint(
             '🔔 🔔 TRACK: Flushing summaries before tracking event: $eventName');
-        await _summaryManager!.flushSummaries().then((result) {
+        await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
             debugPrint(
                 '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
@@ -81,7 +81,7 @@ class EventTracker implements ConnectionStatusListener {
       // Create event data
       final internalEvent = EventData(
         eventCustomerId: _user.userCustomerId ?? 'anonymous',
-        eventType: EventType.TRACK,
+        eventType: EventType.track,
         properties: properties,
         eventTimestamp: DateTime.now().toUtc(),
       );
@@ -151,7 +151,7 @@ class EventTracker implements ConnectionStatusListener {
       if (_summaryManager != null) {
         debugPrint(
             '🔔 🔔 TRACK: Flushing summaries before tracking ${events.length} events');
-        await _summaryManager!.flushSummaries().then((result) {
+        await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
             debugPrint(
                 '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
@@ -224,7 +224,7 @@ class EventTracker implements ConnectionStatusListener {
       // Flush summaries first
       if (_summaryManager != null) {
         debugPrint('🔔 🔔 TRACK: Flushing summaries before flushing events');
-        await _summaryManager!.flushSummaries().then((result) {
+        await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
             debugPrint(
                 '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
@@ -253,7 +253,7 @@ class EventTracker implements ConnectionStatusListener {
       debugPrint('🔔 TRACK HTTP: Event payload size: ${payload.length} bytes');
 
       // Send events to server
-      final url = 'https://api.customfit.ai/v2/events';
+      const url = 'https://api.customfit.ai/v2/events';
       debugPrint('🔔 TRACK HTTP: POST request to: $url');
 
       final result = await _httpClient.post(

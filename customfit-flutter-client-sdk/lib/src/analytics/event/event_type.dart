@@ -1,4 +1,4 @@
-enum EventType { TRACK }
+enum EventType { track }
 
 extension EventTypeExtension on EventType {
   /// Get string for API
@@ -8,7 +8,7 @@ extension EventTypeExtension on EventType {
   static EventType fromString(String s) {
     switch (s.toUpperCase()) {
       case 'TRACK':
-        return EventType.TRACK;
+        return EventType.track;
       default:
         throw ArgumentError('Unknown EventType: $s');
     }
