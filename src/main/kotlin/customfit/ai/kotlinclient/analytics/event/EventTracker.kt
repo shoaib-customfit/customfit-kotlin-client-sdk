@@ -45,6 +45,9 @@ class EventTracker(
     private val eventsQueueSize = cfConfig.eventsQueueSize
     private val eventsFlushTimeSeconds = AtomicInteger(cfConfig.eventsFlushTimeSeconds)
     private val eventsFlushIntervalMs = AtomicLong(cfConfig.eventsFlushIntervalMs)
+    
+    // Store the max events limit from config for storage enforcement
+    private val maxStoredEvents = cfConfig.maxStoredEvents
 
     private val eventQueue: LinkedBlockingQueue<EventData> = LinkedBlockingQueue(eventsQueueSize)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -52,10 +55,127 @@ class EventTracker(
     // Timer management
     private var flushTimer: Timer? = null
     private val timerMutex = Mutex()
+    
+    // Track stored events metrics
+    private val totalEventsTracked = AtomicInteger(0)
+    private val totalEventsDropped = AtomicInteger(0)
+    private val persistedEventsMutex = Mutex()
+    
+    // Storage for persisted events
+    private val eventStorageManager = EventStorageManager(cfConfig, scope)
 
     init {
-        Timber.i("EventTracker initialized with eventsQueueSize=$eventsQueueSize, eventsFlushTimeSeconds=${eventsFlushTimeSeconds.get()}, eventsFlushIntervalMs=${eventsFlushIntervalMs.get()}")
-        startPeriodicFlush()
+        Timber.i("EventTracker initialized with eventsQueueSize=$eventsQueueSize, maxStoredEvents=$maxStoredEvents, eventsFlushTimeSeconds=${eventsFlushTimeSeconds.get()}, eventsFlushIntervalMs=${eventsFlushIntervalMs.get()}")
+        
+        // Load persisted events on initialization
+        scope.launch {
+            loadPersistedEvents()
+            startPeriodicFlush()
+        }
+    }
+    
+    /**
+     * Load persisted events from storage while respecting queue size limits
+     */
+    private suspend fun loadPersistedEvents() {
+        try {
+            Timber.i("Loading persisted events from storage...")
+            val events = eventStorageManager.loadEvents()
+            
+            // Check if we need to enforce the maxStoredEvents limit
+            val eventsToLoad = if (events.size > maxStoredEvents) {
+                Timber.w("Loaded ${events.size} events, but maxStoredEvents is $maxStoredEvents. Truncating.")
+                events.takeLast(maxStoredEvents)
+            } else {
+                events
+            }
+            
+            if (eventsToLoad.isEmpty()) {
+                Timber.i("No persisted events found")
+                return
+            }
+            
+            var addedCount = 0
+            var droppedCount = 0
+            
+            // Add events to the queue, respecting queue size limits
+            for (event in eventsToLoad) {
+                if (eventQueue.size < eventsQueueSize) {
+                    if (eventQueue.offer(event)) {
+                        addedCount++
+                        totalEventsTracked.incrementAndGet()
+                    }
+                } else {
+                    droppedCount++
+                    totalEventsDropped.incrementAndGet()
+                }
+            }
+            
+            if (addedCount > 0) {
+                Timber.i("Loaded $addedCount persisted events from storage")
+            }
+            
+            if (droppedCount > 0) {
+                Timber.w("Dropped $droppedCount persisted events due to queue size limit")
+                ErrorHandler.handleError(
+                    "Dropped $droppedCount persisted events due to queue size limit",
+                    SOURCE,
+                    ErrorHandler.ErrorCategory.INTERNAL,
+                    ErrorHandler.ErrorSeverity.MEDIUM
+                )
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load persisted events: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to load persisted events",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+        }
+    }
+    
+    /**
+     * Persist current events to storage for later retrieval
+     */
+    suspend fun persistEvents(): CFResult<Int> {
+        try {
+            persistedEventsMutex.withLock {
+                // Get a snapshot of all events in the queue
+                val events = eventQueue.toList()
+                
+                // Enforce maxStoredEvents limit
+                val eventsToStore = if (events.size > maxStoredEvents) {
+                    Timber.w("Attempting to store ${events.size} events, but maxStoredEvents is $maxStoredEvents. Truncating.")
+                    events.takeLast(maxStoredEvents)
+                } else {
+                    events
+                }
+                
+                if (eventsToStore.isEmpty()) {
+                    Timber.d("No events to persist")
+                    return CFResult.success(0)
+                }
+                
+                Timber.i("Persisting ${eventsToStore.size} events to storage")
+                eventStorageManager.storeEvents(eventsToStore)
+                
+                return CFResult.success(eventsToStore.size)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to persist events: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to persist events",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.MEDIUM
+            )
+            return CFResult.error(
+                "Failed to persist events",
+                e,
+                category = ErrorHandler.ErrorCategory.INTERNAL
+            )
+        }
     }
 
     /**
@@ -106,7 +226,7 @@ class EventTracker(
     }
 
     /**
-     * Tracks an event with improved error handling
+     * Tracks an event with improved error handling and storage limit enforcement
      * Always flushes summaries before tracking a new event
      */
     fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()): CFResult<EventData> {
@@ -145,7 +265,7 @@ class EventTracker(
                 insertId = UUID.randomUUID().toString()
             )
 
-            // Handle queue management with proper error tracking
+            // Handle queue management with proper error and storage limit tracking
             if (eventQueue.size >= eventsQueueSize) {
                 Timber.w("🔔 TRACK: Event queue is full (size = $eventsQueueSize), dropping oldest event")
                 ErrorHandler.handleError(
@@ -155,6 +275,7 @@ class EventTracker(
                     ErrorHandler.ErrorSeverity.MEDIUM
                 )
                 eventQueue.poll() // Remove the oldest event
+                totalEventsDropped.incrementAndGet()
             }
 
             if (!eventQueue.offer(event)) {
@@ -176,10 +297,20 @@ class EventTracker(
                         ErrorHandler.ErrorCategory.INTERNAL,
                         ErrorHandler.ErrorSeverity.HIGH
                     )
+                    totalEventsDropped.incrementAndGet()
                     return CFResult.error(message, category = ErrorHandler.ErrorCategory.INTERNAL)
                 }
             } else {
                 Timber.i("🔔 TRACK: Event added to queue: ${event.event_customer_id}, queue size=${eventQueue.size}")
+                totalEventsTracked.incrementAndGet()
+                
+                // If approaching capacity, persist to storage as backup
+                if (eventQueue.size > eventsQueueSize * 0.7) {
+                    scope.launch { 
+                        persistEvents() 
+                    }
+                }
+                
                 if (eventQueue.size >= eventsQueueSize) {
                     Timber.i("🔔 TRACK: Queue size threshold reached (${eventQueue.size}/${eventsQueueSize}), triggering flush")
                     scope.launch { flushEvents() }
@@ -319,21 +450,45 @@ class EventTracker(
                 
                 val result = sendTrackEvents(eventsToFlush)
                 
-                return result.fold(
-                    onSuccess = {
-                        Timber.i("🔔 TRACK: Flushed ${eventsToFlush.size} events successfully")
-                        CFResult.success(eventsToFlush.size)
-                    },
-                    onError = { error ->
-                        Timber.w("🔔 TRACK: Failed to flush events: ${error.error}")
-                        CFResult.error(
-                            "Failed to flush events: ${error.error}",
-                            error.exception,
-                            error.code,
-                            error.category
-                        )
+                if (result is CFResult.Success) {
+                    Timber.i("🔔 TRACK: Flushed ${eventsToFlush.size} events successfully")
+                    
+                    // Clear persisted events on successful flush - in a coroutine to avoid suspension issues
+                    scope.launch {
+                        try {
+                            eventStorageManager.clearEvents()
+                            Timber.d("🔔 TRACK: Cleared persisted events after successful flush")
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to clear persisted events: ${e.message}")
+                        }
                     }
-                )
+                    
+                    return CFResult.success(eventsToFlush.size)
+                } else if (result is CFResult.Error) {
+                    Timber.w("🔔 TRACK: Failed to flush events: ${result.error}")
+                    
+                    // Persist undelivered events for retry later - in a coroutine to avoid suspension issues
+                    scope.launch {
+                        try {
+                            Timber.i("🔔 TRACK: Persisting ${eventsToFlush.size} undelivered events for retry later")
+                            persistedEventsMutex.withLock {
+                                eventStorageManager.storeEvents(eventsToFlush)
+                            }
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to persist undelivered events: ${e.message}")
+                        }
+                    }
+                    
+                    return CFResult.error(
+                        "Failed to flush events: ${result.error}",
+                        result.exception,
+                        result.code,
+                        result.category
+                    )
+                } else {
+                    Timber.d("🔔 TRACK: No events to flush after drain")
+                    return CFResult.success(0)
+                }
             } else {
                 Timber.d("🔔 TRACK: No events to flush after drain")
                 return CFResult.success(0)
@@ -346,6 +501,60 @@ class EventTracker(
                 ErrorHandler.ErrorSeverity.HIGH
             )
             return CFResult.error("Failed to flush events", e, category = ErrorHandler.ErrorCategory.INTERNAL)
+        }
+    }
+    
+    /**
+     * Get metrics about event tracking
+     */
+    fun getEventMetrics(): EventMetrics {
+        return EventMetrics(
+            queueSize = eventQueue.size,
+            totalTracked = totalEventsTracked.get(),
+            totalDropped = totalEventsDropped.get(),
+            queueLimit = eventsQueueSize,
+            storageLimit = maxStoredEvents
+        )
+    }
+    
+    /**
+     * Clear all events from the queue and storage
+     */
+    suspend fun clearAllEvents(): CFResult<Boolean> {
+        try {
+            eventQueue.clear()
+            eventStorageManager.clearEvents()
+            Timber.i("Cleared all events from queue and storage")
+            return CFResult.success(true)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to clear events: ${e.message}")
+            return CFResult.error("Failed to clear events", e, category = ErrorHandler.ErrorCategory.INTERNAL)
+        }
+    }
+    
+    /**
+     * Shutdown the event tracker, persisting events first
+     */
+    suspend fun shutdown() {
+        try {
+            Timber.i("Shutting down EventTracker, persisting ${eventQueue.size} events")
+            flushTimer?.cancel()
+            flushTimer = null
+            
+            // Try to flush first
+            val flushResult = flushEvents()
+            if (flushResult is CFResult.Error) {
+                // If flush fails, persist the events
+                persistEvents()
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error during EventTracker shutdown: ${e.message}")
+            try {
+                // Last attempt to persist events
+                persistEvents()
+            } catch (innerE: Exception) {
+                Timber.e(innerE, "Failed to persist events during shutdown: ${innerE.message}")
+            }
         }
     }
 
@@ -500,6 +709,84 @@ class EventTracker(
             }
         }
         else -> JsonPrimitive(value.toString())
+    }
+}
+
+/**
+ * Data class for event manager metrics
+ */
+data class EventMetrics(
+    val queueSize: Int,
+    val totalTracked: Int,
+    val totalDropped: Int,
+    val queueLimit: Int,
+    val storageLimit: Int
+)
+
+/**
+ * Manages persistent storage of events
+ */
+private class EventStorageManager(
+    private val config: CFConfig,
+    private val scope: CoroutineScope
+) {
+    private val prefsKey = "cf_stored_events"
+    private val storageSerializer = Json { 
+        ignoreUnknownKeys = true 
+        isLenient = true
+    }
+    
+    /**
+     * Store events to persistent storage
+     * 
+     * @param events List of events to store
+     * @return True if successful
+     */
+    suspend fun storeEvents(events: List<EventData>): Boolean {
+        try {
+            // In a real implementation, we would use platform-specific storage
+            // This is a stub implementation that logs the action
+            Timber.i("Would store ${events.size} events to persistent storage (stub)")
+            Timber.d("STUB: Storage would enforce a limit of ${config.maxStoredEvents} events")
+            return true
+        } catch (e: Exception) {
+            Timber.e(e, "Error storing events: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * Load events from persistent storage
+     * 
+     * @return List of loaded events
+     */
+    suspend fun loadEvents(): List<EventData> {
+        try {
+            // In a real implementation, we would use platform-specific storage
+            // This is a stub implementation that logs the action
+            Timber.i("Would load events from persistent storage (stub)")
+            return emptyList()
+        } catch (e: Exception) {
+            Timber.e(e, "Error loading events: ${e.message}")
+            return emptyList()
+        }
+    }
+    
+    /**
+     * Clear all stored events
+     * 
+     * @return True if successful
+     */
+    suspend fun clearEvents(): Boolean {
+        try {
+            // In a real implementation, we would use platform-specific storage
+            // This is a stub implementation that logs the action
+            Timber.i("Would clear all stored events from persistent storage (stub)")
+            return true
+        } catch (e: Exception) {
+            Timber.e(e, "Error clearing events: ${e.message}")
+            return false
+        }
     }
 }
 

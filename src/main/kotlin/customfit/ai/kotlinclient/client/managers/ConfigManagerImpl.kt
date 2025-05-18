@@ -376,16 +376,39 @@ class ConfigManagerImpl(
                     // Cancel existing timer if any
                     sdkSettingsTimer?.cancel()
                     
+                    // Check if background polling is disabled in config
+                    if (cfConfig.disableBackgroundPolling) {
+                        Timber.i("Background polling is disabled in config, skipping timer setup")
+                        
+                        // Perform immediate check only if requested, even if polling is disabled
+                        if (initialCheck) {
+                            clientScope.launch {
+                                checkSdkSettings()
+                            }
+                        }
+                        
+                        return@withLock
+                    }
+                    
+                    // Get the battery-aware polling interval
+                    val batteryManager = customfit.ai.kotlinclient.utils.BatteryManager.getInstance()
+                    val actualIntervalMs = batteryManager.getPollingInterval(
+                        normalIntervalMs = intervalMs,
+                        reducedIntervalMs = cfConfig.reducedPollingIntervalMs,
+                        useReducedWhenLow = cfConfig.useReducedPollingWhenBatteryLow
+                    )
+                    
                     // Log the actual interval we're using
-                    Timber.i("Starting periodic settings check with interval: $intervalMs ms")
+                    Timber.i("Starting periodic settings check with interval: $actualIntervalMs ms" +
+                             (if (actualIntervalMs != intervalMs) " (adjusted for battery)" else ""))
 
                     // Create a new timer
                     sdkSettingsTimer =
                         kotlin.concurrent.fixedRateTimer(
                             "SdkSettingsCheck",
                             daemon = true,
-                            initialDelay = intervalMs,
-                            period = intervalMs
+                            initialDelay = actualIntervalMs,
+                            period = actualIntervalMs
                         ) {
                             clientScope.launch {
                                 // Skip this check if another one is already in progress
@@ -409,7 +432,7 @@ class ConfigManagerImpl(
                             }
                         }
 
-                    Timber.d("Started SDK settings check timer with interval $intervalMs ms")
+                    Timber.d("Started SDK settings check timer with interval $actualIntervalMs ms")
 
                     // Perform immediate check only if requested
                     if (initialCheck) {
@@ -430,16 +453,49 @@ class ConfigManagerImpl(
             // Cancel existing timer if any
             sdkSettingsTimer?.cancel()
             
+            // Check if background polling is disabled in config
+            if (cfConfig.disableBackgroundPolling) {
+                Timber.i("Background polling is disabled in config, skipping timer restart")
+                
+                // Perform immediate check only if requested, even if polling is disabled
+                if (initialCheck) {
+                    clientScope.launch {
+                        CoroutineUtils.withErrorHandling(
+                            errorMessage = "Failed immediate SDK settings check"
+                        ) {
+                            Timber.d(
+                                "Performing immediate SDK settings check from restartPeriodicSdkSettingsCheck"
+                            )
+                            checkSdkSettings()
+                        }
+                        .onFailure { e ->
+                            Timber.e(e, "Failed immediate SDK settings check: ${e.message}")
+                        }
+                    }
+                }
+                
+                return@withLock
+            }
+            
+            // Get the battery-aware polling interval
+            val batteryManager = customfit.ai.kotlinclient.utils.BatteryManager.getInstance()
+            val actualIntervalMs = batteryManager.getPollingInterval(
+                normalIntervalMs = intervalMs,
+                reducedIntervalMs = cfConfig.reducedPollingIntervalMs,
+                useReducedWhenLow = cfConfig.useReducedPollingWhenBatteryLow
+            )
+            
             // Log the actual interval being used
-            Timber.i("Restarting periodic settings check with interval: $intervalMs ms")
+            Timber.i("Restarting periodic settings check with interval: $actualIntervalMs ms" +
+                     (if (actualIntervalMs != intervalMs) " (adjusted for battery)" else ""))
 
             // Create a new timer with updated interval
             sdkSettingsTimer =
                 kotlin.concurrent.fixedRateTimer(
                     "SdkSettingsCheck",
                     daemon = true,
-                    initialDelay = intervalMs,
-                    period = intervalMs
+                    initialDelay = actualIntervalMs,
+                    period = actualIntervalMs
                 ) {
                     clientScope.launch {
                         // Skip this check if another one is already in progress
@@ -462,7 +518,7 @@ class ConfigManagerImpl(
                         }
                     }
                 }
-            Timber.d("Restarted periodic SDK settings check with interval $intervalMs ms")
+            Timber.d("Restarted periodic SDK settings check with interval $actualIntervalMs ms")
 
             // Perform immediate check only if requested
             if (initialCheck) {
