@@ -7,7 +7,7 @@ import '../../core/error/cf_result.dart';
 import '../../core/error/error_category.dart';
 import '../../core/error/error_handler.dart';
 import '../../core/error/error_severity.dart';
-import '../../core/logging/logger.dart';
+import '../../logging/logger.dart';
 import '../../core/model/cf_user.dart';
 import '../../config/core/cf_config.dart';
 import '../../core/util/retry_util.dart';
@@ -45,7 +45,7 @@ class SummaryManager {
     _queueSize = _config.summariesQueueSize;
     _flushIntervalMs = _config.summariesFlushIntervalMs;
     Logger.i(
-        'SummaryManager initialized with queueSize=$_queueSize, flushIntervalMs=$_flushIntervalMs, flushTimeSeconds=$_flushTimeSeconds');
+        '📊 SUMMARY: SummaryManager initialized with queueSize=$_queueSize, flushIntervalMs=$_flushIntervalMs, flushTimeSeconds=$_flushTimeSeconds');
     _startPeriodicFlush();
   }
 
@@ -55,7 +55,8 @@ class SummaryManager {
       if (intervalMs <= 0) throw ArgumentError('Interval must be > 0');
       _flushIntervalMs = intervalMs;
       await _restartPeriodicFlush();
-      Logger.i('Updated summaries flush interval to $intervalMs ms');
+      Logger.i(
+          '📊 SUMMARY: Updated summaries flush interval to $intervalMs ms');
       return CFResult.success(intervalMs);
     } catch (e) {
       ErrorHandler.handleException(

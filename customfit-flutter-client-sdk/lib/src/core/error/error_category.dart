@@ -1,101 +1,100 @@
 // lib/models/error_category.dart
 
-/// Error categories for the CustomFit SDK.
-enum ErrorCategory {
-  /// Network-related errors.
-  network,
+/// Describes the category of an error for better debugging and handling
+/// This is modeled after the Kotlin ErrorCategory enum
+class ErrorCategory {
+  /// Network errors (connectivity, server issues, etc)
+  static const network = ErrorCategory._('NETWORK');
 
-  /// Serialization-related errors.
-  serialization,
+  /// Internal SDK errors
+  static const internal = ErrorCategory._('INTERNAL');
 
-  /// Validation-related errors.
-  validation,
+  /// Serialization/deserialization errors
+  static const serialization = ErrorCategory._('SERIALIZATION');
 
-  /// Permission-related errors.
-  permission,
+  /// Validation errors (invalid parameters, etc)
+  static const validation = ErrorCategory._('VALIDATION');
 
-  /// Timeout-related errors.
-  timeout,
+  /// Storage-related errors
+  static const storage = ErrorCategory._('STORAGE');
 
-  /// Internal errors.
-  internal,
+  /// Permission-related errors
+  static const permission = ErrorCategory._('PERMISSION');
 
-  /// Unknown errors.
-  unknown,
+  /// Authentication-related errors
+  static const authentication = ErrorCategory._('AUTHENTICATION');
 
-  /// Configuration-related errors.
-  configuration,
+  /// Configuration-related errors
+  static const configuration = ErrorCategory._('CONFIGURATION');
 
-  /// User-related errors.
-  user,
+  /// Timeout-related errors
+  static const timeout = ErrorCategory._('TIMEOUT');
 
-  /// Analytics-related errors.
-  analytics,
+  /// Rate limit errors
+  static const rateLimit = ErrorCategory._('RATE_LIMIT');
 
-  /// Feature flag-related errors.
-  feature,
+  /// Circuit breaker errors
+  static const circuitBreaker = ErrorCategory._('CIRCUIT_BREAKER');
 
-  /// General errors.
-  general,
-}
+  /// Thread/concurrency-related errors
+  static const concurrency = ErrorCategory._('CONCURRENCY');
 
-/// Extension methods for ErrorCategory.
-extension ErrorCategoryExtension on ErrorCategory {
-  /// Convert to string representation.
-  String toValue() {
-    switch (this) {
-      case ErrorCategory.network:
-        return 'network';
-      case ErrorCategory.serialization:
-        return 'serialization';
-      case ErrorCategory.validation:
-        return 'validation';
-      case ErrorCategory.permission:
-        return 'permission';
-      case ErrorCategory.timeout:
-        return 'timeout';
-      case ErrorCategory.internal:
-        return 'internal';
-      case ErrorCategory.unknown:
-        return 'unknown';
-      case ErrorCategory.configuration:
-        return 'configuration';
-      case ErrorCategory.user:
-        return 'user';
-      case ErrorCategory.analytics:
-        return 'analytics';
-      case ErrorCategory.feature:
-        return 'feature';
-      case ErrorCategory.general:
-        return 'general';
-    }
-  }
+  /// User-related errors
+  static const user = ErrorCategory._('USER');
 
-  /// Create from string representation.
-  static ErrorCategory fromValue(String? value) {
-    switch (value?.toLowerCase()) {
-      case 'network':
-        return ErrorCategory.network;
-      case 'serialization':
-        return ErrorCategory.serialization;
-      case 'validation':
-        return ErrorCategory.validation;
-      case 'permission':
-        return ErrorCategory.permission;
-      case 'timeout':
-        return ErrorCategory.timeout;
-      case 'internal':
-        return ErrorCategory.internal;
-      case 'configuration':
-        return ErrorCategory.configuration;
-      case 'user':
-        return ErrorCategory.user;
-      case 'analytics':
-        return ErrorCategory.analytics;
-      case 'feature':
-        return ErrorCategory.feature;
+  /// Analytics-related errors
+  static const analytics = ErrorCategory._('ANALYTICS');
+
+  /// Feature flag-related errors
+  static const feature = ErrorCategory._('FEATURE');
+
+  /// Unknown error category
+  static const unknown = ErrorCategory._('UNKNOWN');
+
+  /// String identifier for this category
+  final String name;
+
+  /// Creates a new error category (internal constructor)
+  const ErrorCategory._(this.name);
+
+  @override
+  String toString() => name;
+
+  /// Get category from a string name
+  static ErrorCategory fromString(String name) {
+    switch (name.toUpperCase()) {
+      case 'NETWORK':
+        return network;
+      case 'INTERNAL':
+        return internal;
+      case 'SERIALIZATION':
+        return serialization;
+      case 'VALIDATION':
+        return validation;
+      case 'STORAGE':
+        return storage;
+      case 'PERMISSION':
+        return permission;
+      case 'AUTHENTICATION':
+        return authentication;
+      case 'CONFIGURATION':
+        return configuration;
+      case 'TIMEOUT':
+        return timeout;
+      case 'RATE_LIMIT':
+        return rateLimit;
+      case 'CIRCUIT_BREAKER':
+        return circuitBreaker;
+      case 'CONCURRENCY':
+        return concurrency;
+      case 'USER':
+        return user;
+      case 'ANALYTICS':
+        return analytics;
+      case 'FEATURE':
+        return feature;
       default:
-        return ErrorCategory.unknown;
+        return unknown;
     }
   }
 }

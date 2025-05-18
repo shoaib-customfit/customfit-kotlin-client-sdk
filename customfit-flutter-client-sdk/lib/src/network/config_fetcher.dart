@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:customfit_flutter_client_sdk/src/core/error/cf_result.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:convert';
 
 import '../core/model/cf_user.dart';
@@ -9,6 +8,7 @@ import '../core/error/error_category.dart';
 import '../core/error/error_severity.dart';
 import '../core/error/error_handler.dart';
 import '../constants/cf_constants.dart';
+import '../../logging/logger.dart';
 import 'http_client.dart';
 import '../config/core/cf_config.dart';
 
@@ -20,11 +20,10 @@ class ConfigFetcher {
   final CFConfig _config;
   final CFUser _user;
 
-  final _offlineMode = ValueNotifier<bool>(false);
+  bool _offlineMode = false;
   Completer<void> _fetchMutex = Completer<void>();
   Map<String, dynamic>? _lastConfigMap;
   final _mutex = Completer<void>();
-  // ignore: unused_field
   int _lastFetchTime = 0;
 
   // Store metadata headers for conditional requests
@@ -34,36 +33,37 @@ class ConfigFetcher {
   ConfigFetcher(this._httpClient, this._config, this._user) {
     _fetchMutex.complete();
     _mutex.complete();
+    Logger.d('ConfigFetcher initialized with user: ${_user.userCustomerId}');
   }
 
   /// Returns whether the client is in offline mode
-  bool isOffline() => _offlineMode.value;
+  bool isOffline() => _offlineMode;
 
   /// Sets the offline mode status
   void setOffline(bool offline) {
-    _offlineMode.value = offline;
-    debugPrint("ConfigFetcher offline mode set to: $offline");
+    _offlineMode = offline;
+    Logger.i("ConfigFetcher offline mode set to: $offline");
   }
 
   /// Fetches configuration from the API with improved error handling
   Future<bool> fetchConfig({String? lastModified}) async {
     // Don't fetch if in offline mode
     if (isOffline()) {
-      debugPrint("Not fetching config because client is in offline mode");
+      Logger.d("Not fetching config because client is in offline mode");
       return false;
     }
 
     // Create a new mutex if needed
-    var completer = Completer<void>();
-    var oldCompleter = _fetchMutex;
+    final completer = Completer<void>();
+    final oldCompleter = _fetchMutex;
     if (oldCompleter.isCompleted) {
       _fetchMutex = completer;
     } else {
-      debugPrint("Fetch already in progress, waiting...");
+      Logger.d("Fetch already in progress, waiting...");
       await _fetchMutex.future.timeout(
         const Duration(seconds: 5),
         onTimeout: () {
-          debugPrint("Timed out waiting for previous fetch to complete");
+          Logger.w("Timed out waiting for previous fetch to complete");
           // Continue anyway, but create a new mutex
           _fetchMutex = completer;
         },
@@ -74,9 +74,9 @@ class ConfigFetcher {
       final url =
           "${CFConstants.api.baseApiUrl}${CFConstants.api.userConfigsPath}?cfenc=${_config.clientKey}";
 
-      debugPrint("*** USER CONFIGS *** Fetching from URL: $url");
+      Logger.i("API POLL: Fetching config from URL: $url");
       if (lastModified != null) {
-        debugPrint("*** USER CONFIGS *** Using Last-Modified: $lastModified");
+        Logger.i("API POLL: Using If-Modified-Since: $lastModified");
       }
 
       // Build payload
@@ -86,8 +86,7 @@ class ConfigFetcher {
       };
       final payload = jsonEncode(jsonObject);
 
-      debugPrint(
-          "*** USER CONFIGS *** Request payload: ${payload.length > 500 ? '${payload.substring(0, 500)}...' : payload}");
+      Logger.d("Config fetch payload size: ${payload.length} bytes");
 
       final headers = <String, String>{
         CFConstants.http.headerContentType: CFConstants.http.contentTypeJson,
@@ -98,8 +97,6 @@ class ConfigFetcher {
         headers[CFConstants.http.headerIfModifiedSince] = lastModified;
       }
 
-      debugPrint("*** USER CONFIGS *** Request headers: $headers");
-
       // Add timeout to the HTTP request
       final result = await _httpClient
           .post(
@@ -107,31 +104,30 @@ class ConfigFetcher {
         data: payload,
         options: Options(
           headers: headers,
-          sendTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(milliseconds: 10000),
+          receiveTimeout: const Duration(milliseconds: 10000),
         ),
       )
           .timeout(
         const Duration(seconds: 10),
         onTimeout: () {
-          debugPrint("*** USER CONFIGS *** Request timed out after 10 seconds");
-          return CFResult.error("Request timed out");
+          Logger.w("API POLL: Request timed out after 10 seconds");
+          return CFResult.error("Request timed out",
+              category: ErrorCategory.network);
         },
       );
 
       // Handle 304 Not Modified (match Kotlin)
       if (result.getStatusCode() == 304) {
-        debugPrint(
-            "*** USER CONFIGS *** Configs not modified (304), using cached configs");
+        Logger.i("API POLL: Configs not modified (304), using cached configs");
         completer.complete();
         return true;
       }
 
       if (!result.isSuccess) {
-        debugPrint(
-            "*** USER CONFIGS *** Failed to fetch: ${result.getOrNull()}");
+        Logger.w("API POLL: Failed to fetch: ${result.getErrorMessage()}");
         ErrorHandler.handleError(
-          "Failed to fetch configuration: ${result.getOrNull()}",
+          "Failed to fetch configuration: ${result.getErrorMessage()}",
           source: _source,
           category: ErrorCategory.network,
           severity: ErrorSeverity.high,
@@ -142,7 +138,7 @@ class ConfigFetcher {
 
       final responseBody = result.getOrNull();
       if (responseBody == null) {
-        debugPrint("*** USER CONFIGS *** Empty response received");
+        Logger.w("API POLL: Empty response received");
         ErrorHandler.handleError(
           "Empty configuration response",
           source: _source,
@@ -153,15 +149,14 @@ class ConfigFetcher {
         return false;
       }
 
-      debugPrint(
-          "*** USER CONFIGS *** Received response with length: ${responseBody.toString().length}");
+      Logger.i(
+          "API POLL: Successfully fetched config, response size: ${responseBody.toString().length} bytes");
       final handled = _handleConfigResponse(responseBody);
-      debugPrint(
-          "*** USER CONFIGS *** Handled response successfully: $handled");
+      Logger.i("API POLL: Handled response successfully: $handled");
       completer.complete();
       return handled;
     } catch (e) {
-      debugPrint("*** USER CONFIGS *** Exception during fetch: $e");
+      Logger.e("API POLL: Error fetching configuration: ${e.toString()}");
       ErrorHandler.handleException(
         e,
         "Error fetching configuration",
@@ -196,7 +191,7 @@ class ConfigFetcher {
 
       // Unexpected response type
       else {
-        debugPrint("Unexpected response type: ${responseBody.runtimeType}");
+        Logger.w("Unexpected response type: ${responseBody.runtimeType}");
         return false;
       }
     } catch (e) {
@@ -218,13 +213,6 @@ class ConfigFetcher {
       // Parse the entire response string into a Map
       final responseMap = jsonDecode(jsonResponse) as Map<String, dynamic>;
 
-      // Debug: Print the raw response
-      debugPrint('===== CONFIG FETCHER: RAW RESPONSE =====');
-      debugPrint(jsonResponse.length > 1000
-          ? '${jsonResponse.substring(0, 1000)}... (truncated)'
-          : jsonResponse);
-      debugPrint('=======================================');
-
       final configsJson = responseMap['configs'] as Map<String, dynamic>?;
 
       if (configsJson == null) {
@@ -237,13 +225,6 @@ class ConfigFetcher {
         );
         return CFResult.success(<String, dynamic>{});
       }
-
-      // Debug: Print the configs section
-      debugPrint('===== CONFIG FETCHER: CONFIGS SECTION =====');
-      debugPrint(jsonEncode(configsJson).length > 1000
-          ? '${jsonEncode(configsJson).substring(0, 1000)}... (truncated)'
-          : jsonEncode(configsJson));
-      debugPrint('=========================================');
 
       // Iterate through each config entry
       configsJson.forEach((key, configElement) {
@@ -291,13 +272,31 @@ class ConfigFetcher {
       if (finalConfigMap != _lastConfigMap) {
         _lastConfigMap = finalConfigMap;
         _lastFetchTime = DateTime.now().millisecondsSinceEpoch;
+      }
 
-        // Debug: Print the final processed config map
-        debugPrint('===== CONFIG FETCHER: PROCESSED CONFIG MAP =====');
-        finalConfigMap.forEach((key, value) {
-          debugPrint('$key: $value');
-        });
-        debugPrint('=============================================');
+      // Log config keys
+      Logger.d("Config keys: ${finalConfigMap.keys.join(', ')}");
+
+      // Print each config key and its variation value only (match Kotlin)
+      finalConfigMap.forEach((key, value) {
+        if (value is Map<String, dynamic> && value.containsKey('variation')) {
+          final variation = value['variation'];
+          Logger.d("$key: $variation");
+        } else {
+          Logger.d("$key: $value");
+        }
+      });
+
+      // Keep existing hero_text debug logging for backward compatibility
+      try {
+        final heroText = finalConfigMap['hero_text'] is Map<String, dynamic>
+            ? (finalConfigMap['hero_text'] as Map<String, dynamic>)['variation']
+            : null;
+        if (heroText != null) {
+          Logger.d("Hero text if present: $heroText");
+        }
+      } catch (e) {
+        // Ignore error
       }
 
       return CFResult.success(finalConfigMap);
@@ -309,7 +308,11 @@ class ConfigFetcher {
         severity: ErrorSeverity.high,
       );
 
-      return CFResult.error("Error parsing configuration response");
+      return CFResult.error(
+        "Error parsing configuration response: ${e.toString()}",
+        exception: e,
+        category: ErrorCategory.serialization,
+      );
     }
   }
 
@@ -319,32 +322,52 @@ class ConfigFetcher {
     final targetUrl = url ?? _buildSdkSettingsUrl();
 
     if (isOffline()) {
-      debugPrint("Not fetching metadata because client is in offline mode");
-      return Future<CFResult<Map<String, String>>>.value(
-          CFResult.error("Client is in offline mode"));
+      Logger.d("Not fetching metadata because client is in offline mode");
+      return CFResult.error("Client is in offline mode",
+          category: ErrorCategory.network);
     }
 
     try {
-      debugPrint("Fetching metadata from $targetUrl");
-      // Pass previously stored headers for conditional request
-      final result = await _httpClient.fetchMetadata(targetUrl,
+      Logger.i(
+          "API POLL: Fetch metadata strategy - First trying HEAD request: $targetUrl");
+
+      // First try a lightweight HEAD request (match Kotlin)
+      final headResult = await _httpClient.head(targetUrl);
+
+      if (headResult.isSuccess) {
+        final headers = headResult.getOrNull()?.headers.map ?? {};
+        final metadata = {
+          CFConstants.http.headerLastModified:
+              headers['last-modified']?.first ?? '',
+          CFConstants.http.headerEtag: headers['etag']?.first ?? '',
+        };
+        Logger.i("API POLL: HEAD request successful, using result: $metadata");
+        return CFResult.success(metadata);
+      }
+
+      // If HEAD fails, fall back to the original GET method
+      Logger.i(
+          "API POLL: HEAD request failed, falling back to GET: $targetUrl");
+      final getResult = await _httpClient.fetchMetadata(targetUrl,
           lastModified: _lastModified, etag: _lastEtag);
 
-      if (result.isSuccess) {
+      if (getResult.isSuccess) {
+        Logger.i("API POLL: Fallback GET successful: ${getResult.getOrNull()}");
+      } else {
+        Logger.w("API POLL: Both HEAD and GET failed for $targetUrl");
+      }
+
+      if (getResult.isSuccess) {
         // Store the headers for next request
-        final headers = result.getOrNull() ?? {};
+        final headers = getResult.getOrNull() ?? {};
         _lastModified = headers[CFConstants.http.headerLastModified];
         _lastEtag = headers[CFConstants.http.headerEtag];
-
-        debugPrint(
-            "Stored headers for next request - Last-Modified: $_lastModified, ETag: $_lastEtag");
       }
 
-      if (!result.isSuccess) {
-        return CFResult.error("Error fetching metadata");
-      }
-      return result;
+      return getResult;
     } catch (e) {
+      Logger.e(
+          "API POLL: Exception during metadata fetch attempts: ${e.toString()}");
       ErrorHandler.handleException(
         e,
         "Error fetching metadata from $targetUrl",
@@ -352,8 +375,11 @@ class ConfigFetcher {
         severity: ErrorSeverity.high,
       );
 
-      return Future<CFResult<Map<String, String>>>.value(
-          CFResult.error("Error fetching metadata: ${e.toString()}"));
+      return CFResult.error(
+        "Error fetching metadata: ${e.toString()}",
+        exception: e,
+        category: ErrorCategory.network,
+      );
     }
   }
 
@@ -368,44 +394,50 @@ class ConfigFetcher {
   /// Returns the last successfully fetched configuration map
   CFResult<Map<String, dynamic>> getConfigs() {
     if (_lastConfigMap != null) {
-      // Debug: Print the full last config map
-      debugPrint('===== CONFIG FETCHER: LAST CONFIG MAP =====');
+      // Log the full last config map for easier debugging
+      Logger.d('===== CONFIG FETCHER: LAST CONFIG MAP =====');
       _lastConfigMap!.forEach((key, value) {
-        debugPrint('$key: $value');
+        Logger.d('$key: $value');
       });
-      debugPrint('=========================================');
+      Logger.d('=========================================');
 
       return CFResult.success(_lastConfigMap!);
     } else {
-      return CFResult.error("No configuration has been fetched yet");
+      return CFResult.error("No configuration has been fetched yet",
+          category: ErrorCategory.validation);
     }
   }
 
   Future<CFResult<Map<String, dynamic>>> fetchSdkSettings() async {
     // Respect offline mode
-    if (_offlineMode.value) {
+    if (_offlineMode) {
+      Logger.d('Not fetching SDK settings because client is in offline mode');
       return CFResult.error("Cannot fetch SDK settings in offline mode",
           category: ErrorCategory.network);
     }
 
     try {
-      // Build request URL with dimension ID
-      final dimensionId = _config.dimensionId;
-      if (dimensionId == null) {
-        return CFResult.error("Failed to extract dimension ID from client key",
-            category: ErrorCategory.validation);
-      }
-
       // Use the same URL building helper method for consistency
       final url = _buildSdkSettingsUrl();
+
+      Logger.i("API POLL: Fetching full SDK settings with GET: $url");
 
       // Make request using fetchJson
       final result = await _httpClient.fetchJson(url);
 
+      if (result.isSuccess) {
+        Logger.i("API POLL: SDK settings parsed successfully");
+      } else {
+        Logger.w("API POLL: Failed to parse SDK settings response");
+      }
+
       return result;
     } catch (e) {
+      Logger.e(
+          "API POLL: Exception during SDK settings fetch: ${e.toString()}");
       ErrorHandler.handleException(e, "Unexpected error fetching SDK settings",
           source: _source, severity: ErrorSeverity.high);
+
       return CFResult.error("Failed to fetch SDK settings",
           exception: e, category: ErrorCategory.internal);
     }

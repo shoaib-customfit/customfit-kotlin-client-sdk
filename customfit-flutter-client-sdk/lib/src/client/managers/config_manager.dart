@@ -7,7 +7,7 @@ import 'dart:async';
 import '../../config/core/cf_config.dart';
 import '../../network/config_fetcher.dart';
 import '../../analytics/summary/summary_manager.dart';
-import '../../core/logging/logger.dart';
+import '../../logging/logger.dart';
 import '../../core/error/cf_result.dart';
 
 /// Interface for ConfigManager
@@ -282,6 +282,15 @@ class ConfigManagerImpl implements ConfigManager {
 
     // Notify listeners if anything changed
     if (updatedKeys.isNotEmpty) {
+      Logger.i('--- UPDATED CONFIG VALUES ---');
+      for (final key in updatedKeys) {
+        final config = newConfigs[key];
+        if (config is Map<String, dynamic> && config.containsKey('variation')) {
+          final variation = config['variation'];
+          Logger.i('CONFIG UPDATE: $key: $variation');
+        }
+      }
+
       Logger.i(
           '⚡ Notifying listeners about ${updatedKeys.length} changed keys: $updatedKeys');
       _notifyConfigChanges(updatedKeys);

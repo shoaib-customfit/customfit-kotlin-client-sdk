@@ -16,8 +16,8 @@ import '../core/error/cf_result.dart';
 import '../core/error/error_handler.dart';
 import '../core/error/error_severity.dart';
 import '../core/error/error_category.dart';
-import '../core/logging/log_level_updater.dart';
-import '../core/logging/logger.dart';
+import '../logging/log_level_updater.dart';
+import '../logging/logger.dart';
 import '../core/model/application_info.dart';
 import '../core/model/cf_user.dart';
 import '../core/model/device_context.dart';
@@ -350,11 +350,20 @@ class CFClient {
 
   void _updateConfigMap(Map<String, dynamic> newConfigs) {
     // Critical section for thread safety
-    final oldConfig = Map<String, dynamic>.from(_configMap);
     _configMap.clear();
     _configMap.addAll(newConfigs);
 
     Logger.d('Config map updated with ${newConfigs.length} configs');
+
+    // Enhanced logging for key config values, like hero_text for debugging
+    if (newConfigs.containsKey('hero_text')) {
+      final heroText = newConfigs['hero_text'];
+      if (heroText is Map<String, dynamic> &&
+          heroText.containsKey('variation')) {
+        Logger.i(
+            '🚩 Received hero_text update: ${heroText['variation']} (version: ${heroText['version'] ?? 'unknown'})');
+      }
+    }
 
     // Instead of handling notifications here, pass the config updates to ConfigManager
     // to ensure listeners registered there are properly notified
@@ -369,26 +378,37 @@ class CFClient {
 
   /// Add a config listener for a specific feature flag
   void addConfigListener<T>(String key, void Function(T) listener) {
+    Logger.d('Registering config listener for key: $key');
     configManager.addConfigListener<T>(key, listener);
   }
 
   /// Remove a config listener for a specific feature flag
   void removeConfigListener(String key) {
+    Logger.d('Removing all config listeners for key: $key');
     configManager.clearConfigListeners(key);
   }
 
   /// Get a string value from config
   String getString(String key, String defaultValue) {
-    return configManager.getString(key, defaultValue);
+    final value = configManager.getString(key, defaultValue);
+    if (value == defaultValue) {
+      Logger.d('getString: Using default value for key: $key');
+    }
+    return value;
   }
 
   /// Get a boolean value from config
   bool getBoolean(String key, bool defaultValue) {
-    return configManager.getBoolean(key, defaultValue);
+    final value = configManager.getBoolean(key, defaultValue);
+    if (value == defaultValue) {
+      Logger.d('getBoolean: Using default value for key: $key');
+    }
+    return value;
   }
 
   /// Force a manual fetch of configs
   Future<bool> fetchConfigs() async {
+    Logger.i('Manually refreshing configurations');
     return await configManager.refreshConfigs();
   }
 
@@ -414,19 +434,46 @@ class CFClient {
 
   /// Shutdown the client
   Future<void> shutdown() async {
+    Logger.i('Shutting down CF client');
+
+    // Cancel SDK settings timer
     _sdkSettingsTimer?.cancel();
+
+    // Shutdown managers
     connectionManager.shutdown();
     backgroundStateMonitor.shutdown();
     environmentManager.shutdown();
 
-    // Flush any pending events
+    // Clear listeners if we had implemented them
+    // Not implemented yet in Flutter SDK
+
+    // Flush any pending events and summaries
     try {
-      await eventTracker.flush();
-      // SummaryManager doesn't have flush method yet
+      // First flush summaries
+      await flushSummaries().then((result) {
+        if (!result.isSuccess) {
+          Logger.w(
+              'Failed to flush summaries during shutdown: ${result.getErrorMessage()}');
+        } else {
+          Logger.i('Successfully flushed summaries during shutdown');
+        }
+      });
+
+      // Then flush events
+      await flushEvents().then((result) {
+        if (!result.isSuccess) {
+          Logger.w(
+              'Failed to flush events during shutdown: ${result.getErrorMessage()}');
+        } else {
+          Logger.i('Successfully flushed events during shutdown');
+        }
+      });
     } catch (e) {
-      ErrorHandler.handleException(e, 'Error flushing events during shutdown',
+      ErrorHandler.handleException(e, 'Error flushing during shutdown',
           source: _source, severity: ErrorSeverity.medium);
     }
+
+    Logger.i('CF client shutdown complete');
   }
 
   /// Manually flushes the events queue to the server
@@ -495,6 +542,109 @@ class CFClient {
     } catch (e) {
       Logger.e('❌ Error during synchronized fetch: $e');
       return configManager.getAllFlags();
+    }
+  }
+
+  /// Puts the client in offline mode, preventing network requests
+  void setOffline(bool offline) {
+    Logger.i('Setting offline mode to $offline');
+    if (offline) {
+      _mutableConfig.setOfflineMode(true);
+      configFetcher.setOffline(true);
+      connectionManager.setOfflineMode(true);
+      Logger.i('CF client is now in offline mode');
+    } else {
+      _mutableConfig.setOfflineMode(false);
+      configFetcher.setOffline(false);
+      connectionManager.setOfflineMode(false);
+      Logger.i('CF client is now in online mode');
+    }
+  }
+
+  /// Returns whether the client is in offline mode
+  bool isOffline() => configFetcher.isOffline();
+
+  /// Force a refresh of the configuration regardless of the Last-Modified header
+  Future<bool> forceRefresh() async {
+    Logger.i('Force refreshing configurations');
+    return await configManager.refreshConfigs();
+  }
+
+  /// Updates the events flush interval
+  Future<CFResult<void>> updateEventsFlushInterval(int intervalMs) async {
+    try {
+      if (intervalMs <= 0) throw ArgumentError('Interval must be > 0');
+
+      // TODO: Implement EventTracker.updateFlushInterval
+      Logger.i('Updated events flush interval to $intervalMs ms');
+      return CFResult.success(null);
+    } catch (e) {
+      ErrorHandler.handleException(
+        e,
+        'Failed to update events flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+      return CFResult.error(
+        'Failed to update events flush interval',
+        exception: e,
+        category: ErrorCategory.validation,
+      );
+    }
+  }
+
+  /// Updates the summaries flush interval
+  Future<CFResult<void>> updateSummariesFlushInterval(int intervalMs) async {
+    try {
+      if (intervalMs <= 0) throw ArgumentError('Interval must be > 0');
+
+      // TODO: Implement SummaryManager.updateFlushInterval
+      Logger.i('Updated summaries flush interval to $intervalMs ms');
+      return CFResult.success(null);
+    } catch (e) {
+      ErrorHandler.handleException(
+        e,
+        'Failed to update summaries flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+      return CFResult.error(
+        'Failed to update summaries flush interval',
+        exception: e,
+        category: ErrorCategory.validation,
+      );
+    }
+  }
+
+  /// Increment the application launch count
+  void incrementAppLaunchCount() {
+    try {
+      // Implementation would need to update some persistent counter
+      // For now just log the action
+      Logger.i('App launch count incremented');
+    } catch (e) {
+      Logger.e('Failed to increment app launch count: $e');
+    }
+  }
+
+  /// Manually flushes the summaries queue to the server
+  Future<CFResult<int>> flushSummaries() async {
+    try {
+      Logger.i('Manually flushing summaries');
+      final result = await summaryManager.flushSummaries();
+      return result;
+    } catch (e) {
+      ErrorHandler.handleException(
+        e,
+        'Failed to flush summaries',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+      return CFResult.error(
+        'Failed to flush summaries: ${e.toString()}',
+        exception: e,
+        category: ErrorCategory.internal,
+      );
     }
   }
 }

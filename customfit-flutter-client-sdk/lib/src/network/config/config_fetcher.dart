@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 
 import '../../config/core/cf_config.dart';
@@ -10,6 +9,7 @@ import '../../core/error/error_category.dart';
 import '../../core/error/error_severity.dart';
 import '../../core/error/error_handler.dart';
 import '../../constants/cf_constants.dart';
+import '../../../logging/logger.dart';
 import '../http_client.dart';
 
 /// Handles fetching configuration from the CustomFit API with support for offline mode
@@ -41,7 +41,7 @@ class ConfigFetcher {
 
   /// Creates a new config fetcher
   ConfigFetcher(this._httpClient, this._config, this._user) {
-    debugPrint('ConfigFetcher initialized');
+    Logger.d('ConfigFetcher initialized');
   }
 
   /// Returns whether the client is in offline mode
@@ -50,7 +50,7 @@ class ConfigFetcher {
   /// Sets the offline mode status
   void setOffline(bool offline) {
     _offlineMode = offline;
-    debugPrint('ConfigFetcher offline mode set to: $_offlineMode');
+    Logger.d('ConfigFetcher offline mode set to: $_offlineMode');
   }
 
   /// Fetches configuration from the API
@@ -59,7 +59,7 @@ class ConfigFetcher {
   Future<bool> fetchConfig({String? lastModified}) async {
     // Don't fetch if in offline mode
     if (isOffline()) {
-      debugPrint('Not fetching config because client is in offline mode');
+      Logger.d('Not fetching config because client is in offline mode');
       return false;
     }
 
@@ -84,7 +84,7 @@ class ConfigFetcher {
         'include_only_features_flags': true,
       });
 
-      debugPrint('Config fetch payload: $payload');
+      Logger.d('Config fetch payload: $payload');
 
       // Build headers
       final headers = <String, dynamic>{
@@ -103,7 +103,7 @@ class ConfigFetcher {
       );
 
       if (result.isSuccess) {
-        debugPrint('Successfully fetched configuration');
+        Logger.d('Successfully fetched configuration');
 
         // Process the response
         final data = result.getOrNull();
@@ -176,7 +176,7 @@ class ConfigFetcher {
       _lastConfigMap = configMap;
       _lastFetchTime = DateTime.now().millisecondsSinceEpoch;
 
-      debugPrint('Processed ${configMap.length} feature flags');
+      Logger.d('Processed ${configMap.length} feature flags');
 
       return CFResult.success(configMap);
     } catch (e) {

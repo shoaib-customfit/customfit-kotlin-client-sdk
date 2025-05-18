@@ -21,6 +21,7 @@ dependencies:
   device_info_plus: ^9.1.2
   connectivity_plus: ^5.0.2
   synchronized: ^3.3.1
+  path_provider: ^2.1.2
 
 dev_dependencies:
   flutter_test:

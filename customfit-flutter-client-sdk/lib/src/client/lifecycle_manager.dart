@@ -1,7 +1,7 @@
 import '../platform/app_state.dart';
 import '../platform/app_state_listener.dart';
 import '../platform/background_state_monitor.dart';
-import '../core/logging/logger.dart';
+import '../../logging/logger.dart';
 import '../core/error/error_handler.dart';
 import '../core/error/error_severity.dart';
 import 'cf_client.dart';

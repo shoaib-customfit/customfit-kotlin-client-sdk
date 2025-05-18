@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 
 import '../../config/core/cf_config.dart';
 import '../../core/error/cf_result.dart';
 import '../../core/error/error_handler.dart';
 import '../../core/error/error_severity.dart';
+import '../../core/error/error_category.dart';
+import '../../logging/logger.dart';
 import '../../core/model/cf_user.dart';
 import '../../network/connection/connection_information.dart';
 import '../../network/connection/connection_manager.dart';
@@ -26,7 +27,6 @@ class EventTracker implements ConnectionStatusListener {
   final HttpClient _httpClient;
   final ConnectionManager _connectionManager;
   final CFUser _user;
-  // ignore: unused_field
   final String _sessionId;
   final CFConfig _config;
 
@@ -48,6 +48,8 @@ class EventTracker implements ConnectionStatusListener {
   }) : _summaryManager = summaryManager {
     _connectionManager.addConnectionStatusListener(this);
     _startFlushTimer();
+    Logger.i(
+        '🔔 TRACK: EventTracker initialized with autoFlush=$_autoFlushEnabled, sessionId=$_sessionId');
   }
 
   /// Track a single event.
@@ -57,56 +59,56 @@ class EventTracker implements ConnectionStatusListener {
       [Map<String, dynamic> properties = const {}]) async {
     try {
       // Enhanced logging similar to Kotlin improvements
-      debugPrint(
-          '🔔 🔔 TRACK: Tracking event: $eventName with properties: $properties');
+      Logger.i(
+          '🔔 TRACK: Tracking event: $eventName with properties: $properties');
 
       // Flush summaries before tracking a new event if SummaryManager is provided
       if (_summaryManager != null) {
-        debugPrint(
-            '🔔 🔔 TRACK: Flushing summaries before tracking event: $eventName');
+        Logger.d(
+            '🔔 TRACK: Flushing summaries before tracking event: $eventName');
         await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
-            debugPrint(
-                '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
+            Logger.w(
+                '🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
           }
         });
       }
 
       // Validate event name
       if (eventName.isEmpty) {
-        debugPrint('🔔 TRACK: Invalid event - Event name cannot be blank');
-        return CFResult.error('Event name cannot be blank');
+        Logger.w('🔔 TRACK: Invalid event - Event name cannot be blank');
+        return CFResult.error('Event name cannot be blank',
+            category: ErrorCategory.validation);
       }
 
       // Create event data
-      final internalEvent = EventData(
+      final eventData = EventData.create(
         eventCustomerId: _user.userCustomerId ?? 'anonymous',
-        eventType: EventType.track,
+        eventType: EventType.custom,
         properties: properties,
-        eventTimestamp: DateTime.now().toUtc(),
+        sessionId: _sessionId,
       );
 
       // Add to queue
       if (_eventQueue.size >= _getMaxQueueSize()) {
-        debugPrint(
+        Logger.w(
             '🔔 TRACK: Event queue is full (size = ${_eventQueue.size}), dropping oldest event');
-        ErrorHandler.handleError(
-          'Event queue is full, dropping oldest event',
-          source: _source,
-          severity: ErrorSeverity.medium,
-        );
+        ErrorHandler.handleError('Event queue is full, dropping oldest event',
+            source: _source,
+            severity: ErrorSeverity.medium,
+            category: ErrorCategory.internal);
         // Queue will handle dropping the oldest events automatically
       }
 
-      _eventQueue.addEvent(internalEvent);
-      debugPrint(
-          '🔔 TRACK: Event added to queue: ${internalEvent.eventCustomerId}, queue size=${_eventQueue.size}');
+      _eventQueue.addEvent(eventData);
+      Logger.i(
+          '🔔 TRACK: Event added to queue: ${eventData.eventType.name}, queue size=${_eventQueue.size}');
 
       // Notify callback if set
       if (_eventCallback != null) {
         try {
-          // Using as cast to ensure type safety
-          _eventCallback!(internalEvent);
+          _eventCallback!(eventData);
+          Logger.d('🔔 TRACK: Event callback executed successfully');
         } catch (e) {
           ErrorHandler.handleException(
             e,
@@ -121,22 +123,26 @@ class EventTracker implements ConnectionStatusListener {
       if (_autoFlushEnabled &&
           _connectionManager.getConnectionStatus() ==
               ConnectionStatus.connected) {
-        if (_eventQueue.size >= (_getMaxQueueSize() * 0.75).round()) {
-          debugPrint(
-              '🔔 TRACK: Queue size threshold reached (${_eventQueue.size}/${_getMaxQueueSize()}), triggering flush');
+        final threshold = (_getMaxQueueSize() * 0.75).round();
+        if (_eventQueue.size >= threshold) {
+          Logger.i(
+              '🔔 TRACK: Queue size threshold reached (${_eventQueue.size}/$threshold), triggering flush');
           _maybeFlushEvents();
         }
       }
 
-      return CFResult.success(internalEvent);
+      return CFResult.success(eventData);
     } catch (e) {
+      final errorMsg = 'Failed to track event: ${e.toString()}';
+      Logger.e('🔔 TRACK: $errorMsg');
       ErrorHandler.handleException(
         e,
         'Failed to track event',
         source: _source,
         severity: ErrorSeverity.medium,
       );
-      return CFResult.error('Failed to track event: ${e.toString()}');
+      return CFResult.error(errorMsg,
+          exception: e, category: ErrorCategory.internal);
     }
   }
 
@@ -145,30 +151,29 @@ class EventTracker implements ConnectionStatusListener {
   /// Returns a result with the tracked events or error.
   Future<CFResult<List<EventData>>> trackEvents(List<EventData> events) async {
     try {
-      debugPrint('🔔 🔔 TRACK: Tracking ${events.length} events');
+      Logger.i('🔔 TRACK: Tracking ${events.length} events');
 
       // Flush summaries before tracking new events if SummaryManager is provided
       if (_summaryManager != null) {
-        debugPrint(
-            '🔔 🔔 TRACK: Flushing summaries before tracking ${events.length} events');
+        Logger.d(
+            '🔔 TRACK: Flushing summaries before tracking ${events.length} events');
         await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
-            debugPrint(
-                '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
+            Logger.w(
+                '🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
           }
         });
       }
 
       // Add to queue
       _eventQueue.addEvents(events);
-      debugPrint(
+      Logger.i(
           '🔔 TRACK: ${events.length} events added to queue, queue size=${_eventQueue.size}');
 
       // Notify callback for each event if set
       if (_eventCallback != null) {
         for (final event in events) {
           try {
-            // Using as cast to ensure type safety
             _eventCallback!(event);
           } catch (e) {
             ErrorHandler.handleException(
@@ -185,76 +190,83 @@ class EventTracker implements ConnectionStatusListener {
       if (_autoFlushEnabled &&
           _connectionManager.getConnectionStatus() ==
               ConnectionStatus.connected) {
-        if (_eventQueue.size >= (_getMaxQueueSize() * 0.75).round()) {
-          debugPrint(
-              '🔔 TRACK: Queue size threshold reached (${_eventQueue.size}/${_getMaxQueueSize()}), triggering flush');
+        final threshold = (_getMaxQueueSize() * 0.75).round();
+        if (_eventQueue.size >= threshold) {
+          Logger.i(
+              '🔔 TRACK: Queue size threshold reached (${_eventQueue.size}/$threshold), triggering flush');
           _maybeFlushEvents();
         }
       }
 
       return CFResult.success(events);
     } catch (e) {
+      final errorMsg = 'Failed to track events: ${e.toString()}';
+      Logger.e('🔔 TRACK: $errorMsg');
       ErrorHandler.handleException(
         e,
         'Failed to track events',
         source: _source,
         severity: ErrorSeverity.medium,
       );
-      return CFResult.error('Failed to track events: ${e.toString()}');
+      return CFResult.error(errorMsg,
+          exception: e, category: ErrorCategory.internal);
     }
   }
 
   /// This will attempt to send all events in the queue immediately.
   /// Returns a result indicating success or failure.
   Future<CFResult<bool>> flush() async {
-    debugPrint('🔔 🔔 TRACK: Beginning event flush process');
+    Logger.i('🔔 TRACK: Beginning event flush process');
 
     if (_eventQueue.isEmpty) {
-      debugPrint('🔔 TRACK: No events to flush');
+      Logger.d('🔔 TRACK: No events to flush');
       return CFResult.success(true);
     }
 
     if (_connectionManager.getConnectionStatus() !=
         ConnectionStatus.connected) {
-      debugPrint('🔔 TRACK: Cannot flush events: network not connected');
-      return CFResult.error('Cannot flush events: network not connected');
+      Logger.w('🔔 TRACK: Cannot flush events: network not connected');
+      return CFResult.error('Cannot flush events: network not connected',
+          category: ErrorCategory.network);
     }
 
     try {
       // Flush summaries first
       if (_summaryManager != null) {
-        debugPrint('🔔 🔔 TRACK: Flushing summaries before flushing events');
+        Logger.d('🔔 TRACK: Flushing summaries before flushing events');
         await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
-            debugPrint(
-                '🔔 🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
+            Logger.w(
+                '🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
+          } else {
+            Logger.d('🔔 TRACK: Successfully flushed summaries before events');
           }
         });
       }
 
-      // Get batch of events to send
-      final events = _eventQueue.popEventBatch(100); // Default batch size
+      // Get batch of events to send (match Kotlin batch size)
+      final events = _eventQueue.popEventBatch(100);
       if (events.isEmpty) {
-        debugPrint('🔔 TRACK: No events to flush after drain');
+        Logger.d('🔔 TRACK: No events to flush after drain');
         return CFResult.success(true);
       }
 
-      debugPrint('🔔 TRACK: Flushing ${events.length} events to server');
+      Logger.i('🔔 TRACK: Flushing ${events.length} events to server');
 
       // Log individual events being sent (with limited detail for privacy)
       events.asMap().forEach((index, event) {
-        debugPrint(
-            '🔔 TRACK: Event #${index + 1}: ${event.eventCustomerId}, properties=${event.properties.keys.join(", ")}');
+        Logger.d(
+            '🔔 TRACK: Event #${index + 1}: ${event.eventCustomerId}, type=${event.eventType.name}, properties=${event.properties.keys.join(", ")}');
       });
 
       // Prepare events for sending
       final eventsJson = events.map((e) => e.toMap()).toList();
       final payload = jsonEncode(eventsJson);
-      debugPrint('🔔 TRACK HTTP: Event payload size: ${payload.length} bytes');
+      Logger.d('🔔 TRACK HTTP: Event payload size: ${payload.length} bytes');
 
       // Send events to server
       const url = 'https://api.customfit.ai/v2/events';
-      debugPrint('🔔 TRACK HTTP: POST request to: $url');
+      Logger.d('🔔 TRACK HTTP: POST request to: $url');
 
       final result = await _httpClient.post(
         url,
@@ -262,12 +274,12 @@ class EventTracker implements ConnectionStatusListener {
       );
 
       if (result.isSuccess) {
-        debugPrint('🔔 TRACK: Successfully flushed ${events.length} events');
+        Logger.i('🔔 TRACK: Successfully flushed ${events.length} events');
         _connectionManager.recordConnectionSuccess();
 
         // If we have more events, trigger another flush
         if (!_eventQueue.isEmpty) {
-          debugPrint(
+          Logger.d(
               '🔔 TRACK: Queue still has events, triggering another flush');
           _maybeFlushEvents();
         }
@@ -276,21 +288,21 @@ class EventTracker implements ConnectionStatusListener {
       } else {
         final errorMessage =
             'Failed to send events to server: ${result.getErrorMessage()}';
-        debugPrint('🔔 TRACK HTTP: $errorMessage');
+        Logger.e('🔔 TRACK HTTP: $errorMessage');
 
         // Put events back in queue
-        debugPrint(
+        Logger.w(
             '🔔 TRACK HTTP: Failed to send ${events.length} events, attempting to re-queue');
 
         var requeueFailCount = 0;
         for (final event in events) {
           if (_eventQueue.size >= _getMaxQueueSize()) {
             requeueFailCount++;
-            debugPrint(
+            Logger.w(
                 '🔔 TRACK: Failed to re-queue event ${event.eventCustomerId} after send failure');
           } else {
             _eventQueue.addEvent(event);
-            debugPrint(
+            Logger.d(
                 '🔔 TRACK: Successfully re-queued event ${event.eventCustomerId}');
           }
         }
@@ -299,22 +311,24 @@ class EventTracker implements ConnectionStatusListener {
             ? 'Failed to send events and $requeueFailCount event(s) could not be requeued'
             : 'Failed to send events but all ${events.length} were requeued';
 
-        debugPrint('🔔 TRACK: $resultMessage');
+        Logger.e('🔔 TRACK: $resultMessage');
 
         // Record connection failure
         _connectionManager.recordConnectionFailure(errorMessage);
 
-        return CFResult.error(resultMessage);
+        return CFResult.error(resultMessage, category: ErrorCategory.network);
       }
     } catch (e) {
-      debugPrint('🔔 TRACK HTTP: Error during flush: ${e.toString()}');
+      final errorMsg = 'Error during flush: ${e.toString()}';
+      Logger.e('🔔 TRACK HTTP: $errorMsg');
       ErrorHandler.handleException(
         e,
         'Failed to flush events',
         source: _source,
         severity: ErrorSeverity.medium,
       );
-      return CFResult.error('Failed to flush events: ${e.toString()}');
+      return CFResult.error('Failed to flush events: ${e.toString()}',
+          exception: e, category: ErrorCategory.internal);
     }
   }
 
@@ -322,9 +336,9 @@ class EventTracker implements ConnectionStatusListener {
   @override
   void onConnectionStatusChanged(
       ConnectionStatus status, ConnectionInformation info) {
-    debugPrint('🔔 TRACK: Connection status changed to $status');
+    Logger.i('🔔 TRACK: Connection status changed to $status');
     if (status == ConnectionStatus.connected && _autoFlushEnabled) {
-      debugPrint('🔔 TRACK: Connection restored, attempting to flush events');
+      Logger.d('🔔 TRACK: Connection restored, attempting to flush events');
       _maybeFlushEvents();
     }
   }
@@ -332,14 +346,14 @@ class EventTracker implements ConnectionStatusListener {
   /// Set a callback to be notified when events are tracked.
   void setEventCallback(EventCallback? callback) {
     _eventCallback = callback;
-    debugPrint(
+    Logger.d(
         '🔔 TRACK: Event callback ${callback == null ? 'removed' : 'set'}');
   }
 
   /// Enable or disable automatic event flushing.
   void setAutoFlush(bool enabled) {
     _autoFlushEnabled = enabled;
-    debugPrint('🔔 TRACK: Auto flush ${enabled ? 'enabled' : 'disabled'}');
+    Logger.i('🔔 TRACK: Auto flush ${enabled ? 'enabled' : 'disabled'}');
     if (enabled) {
       _startFlushTimer();
     } else {
@@ -349,7 +363,7 @@ class EventTracker implements ConnectionStatusListener {
 
   /// Shutdown the event tracker and release resources.
   Future<void> shutdown() async {
-    debugPrint('🔔 TRACK: Shutting down event tracker');
+    Logger.i('🔔 TRACK: Shutting down event tracker');
     _stopFlushTimer();
     _connectionManager.removeConnectionStatusListener(this);
     await flush();
@@ -359,12 +373,12 @@ class EventTracker implements ConnectionStatusListener {
   void _startFlushTimer() {
     _stopFlushTimer();
     if (_autoFlushEnabled) {
-      debugPrint(
+      Logger.d(
           '🔔 TRACK: Starting flush timer with interval ${_config.eventsFlushIntervalMs}ms');
       _flushTimer = Timer.periodic(
         Duration(milliseconds: _config.eventsFlushIntervalMs),
         (_) {
-          debugPrint('🔔 TRACK: Flush timer triggered');
+          Logger.d('🔔 TRACK: Flush timer triggered');
           _maybeFlushEvents();
         },
       );
@@ -374,7 +388,7 @@ class EventTracker implements ConnectionStatusListener {
   /// Stop the flush timer.
   void _stopFlushTimer() {
     if (_flushTimer != null) {
-      debugPrint('🔔 TRACK: Stopping flush timer');
+      Logger.d('🔔 TRACK: Stopping flush timer');
       _flushTimer!.cancel();
       _flushTimer = null;
     }
@@ -385,11 +399,11 @@ class EventTracker implements ConnectionStatusListener {
     if (_connectionManager.getConnectionStatus() ==
         ConnectionStatus.connected) {
       if (!_eventQueue.isEmpty) {
-        debugPrint('🔔 TRACK: Conditions met for flushing events');
+        Logger.d('🔔 TRACK: Conditions met for flushing events');
         flush();
       }
     } else {
-      debugPrint('🔔 TRACK: Skipping flush: network not connected');
+      Logger.d('🔔 TRACK: Skipping flush: network not connected');
     }
   }
 

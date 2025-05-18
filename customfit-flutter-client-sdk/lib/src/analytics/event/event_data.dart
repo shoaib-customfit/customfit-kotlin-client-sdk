@@ -1,109 +1,83 @@
-// lib/src/analytics/event/event_data.dart
-
 import 'dart:convert';
-import 'package:uuid/uuid.dart';
-import 'package:intl/intl.dart';
-import '../../core/logging/logger.dart';
+
 import 'event_type.dart';
 
-/// Data class representing an analytics event, mirroring Kotlin's EventData
+/// Represents event data to be sent to the backend
 class EventData {
-  /// Customer/user ID associated with the event
+  /// Unique identifier for the event
+  final String eventId;
+
+  /// Customer ID associated with the event
   final String eventCustomerId;
 
-  /// Type of event
+  /// Type of the event
   final EventType eventType;
 
-  /// Event properties as key-value pairs
+  /// Properties/attributes associated with the event
   final Map<String, dynamic> properties;
 
+  /// Session ID for the event
+  final String sessionId;
+
   /// Timestamp when the event occurred
-  final DateTime eventTimestamp;
+  final int eventTimestamp;
 
-  /// Session ID associated with the event
-  final String? sessionId;
-
-  /// Unique ID for the event insertion
-  final String? insertId;
-
-  // ISO 8601 format with milliseconds and timezone
-  static final _formatter = DateFormat('yyyy-MM-dd HH:mm:ss.SSSX');
-
-  /// Constructor
+  /// Creates a new event data instance
   EventData({
+    required this.eventId,
     required this.eventCustomerId,
     required this.eventType,
-    required this.properties,
+    this.properties = const {},
+    required this.sessionId,
     required this.eventTimestamp,
-    this.sessionId,
-    this.insertId,
   });
 
-  /// Factory to create a validated EventData with default timestamp/ID
+  /// Factory method to create an event with automatically generated values where needed
   static EventData create({
     required String eventCustomerId,
-    EventType eventType = EventType.track,
+    required EventType eventType,
     Map<String, dynamic> properties = const {},
-    DateTime? timestamp,
-    String? sessionId,
-    String? insertId,
+    required String sessionId,
+    int? eventTimestamp,
   }) {
-    final validProps = _validateProperties(properties);
     return EventData(
+      eventId: '${DateTime.now().millisecondsSinceEpoch}-${eventType.name}',
       eventCustomerId: eventCustomerId,
       eventType: eventType,
-      properties: validProps,
-      eventTimestamp: timestamp ?? DateTime.now().toUtc(),
+      properties: properties,
       sessionId: sessionId,
-      insertId: insertId ?? const Uuid().v4(),
+      eventTimestamp: eventTimestamp ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
-  /// Ensure no null values and log warnings exactly like Kotlin
-  static Map<String, dynamic> _validateProperties(Map<String, dynamic> props) {
-    final validated = <String, dynamic>{};
-    props.forEach((k, v) {
-      if (v != null) validated[k] = v;
-    });
-    final removed = props.length - validated.length;
-    if (removed > 0) {
-      Logger.w('Removed $removed null property values from event');
-    }
-    if (validated.length > 50) {
-      Logger.w(
-          'Large number of properties (${validated.length}) for event. Consider reducing for better performance');
-    }
-    return validated;
-  }
-
-  /// Convert to a Map for JSON serialization
+  /// Convert this event to a JSON map
   Map<String, dynamic> toMap() {
     return {
-      'event_customer_id': eventCustomerId,
-      'event_type': eventType.toApiString(),
+      'eventId': eventId,
+      'eventCustomerId': eventCustomerId,
+      'eventType': eventType.name,
       'properties': properties,
-      'event_timestamp': _formatter.format(eventTimestamp),
-      if (sessionId != null) 'session_id': sessionId,
-      if (insertId != null) 'insert_id': insertId,
+      'sessionId': sessionId,
+      'eventTimestamp': eventTimestamp,
     };
+  }
+
+  /// Create an EventData instance from a JSON map
+  factory EventData.fromMap(Map<String, dynamic> map) {
+    return EventData(
+      eventId: map['eventId'] as String,
+      eventCustomerId: map['eventCustomerId'] as String,
+      eventType: EventTypeExtension.fromString(map['eventType'] as String),
+      properties: map['properties'] as Map<String, dynamic>,
+      sessionId: map['sessionId'] as String,
+      eventTimestamp: map['eventTimestamp'] as int,
+    );
   }
 
   /// Convert to JSON string
   String toJson() => jsonEncode(toMap());
 
-  /// Create from a Map
-  factory EventData.fromMap(Map<String, dynamic> m) {
-    return EventData(
-      eventCustomerId: m['event_customer_id'] as String,
-      eventType: EventTypeExtension.fromString(m['event_type'] as String),
-      properties: Map<String, dynamic>.from(m['properties'] ?? {}),
-      eventTimestamp: DateTime.parse(m['event_timestamp'] as String),
-      sessionId: m['session_id'] as String?,
-      insertId: m['insert_id'] as String?,
-    );
-  }
-
   /// Create from JSON string
-  factory EventData.fromJson(String json) =>
-      EventData.fromMap(jsonDecode(json) as Map<String, dynamic>);
+  factory EventData.fromJson(String source) =>
+      EventData.fromMap(jsonDecode(source) as Map<String, dynamic>);
 }
