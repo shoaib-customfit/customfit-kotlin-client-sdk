@@ -9,23 +9,25 @@ import '../../network/connection/connection_information.dart';
 /// Interface for ListenerManager
 abstract class ListenerManager {
   /// Register a feature flag change listener
-  void registerFeatureFlagListener(String flagKey, FeatureFlagChangeListener listener);
-  
+  void registerFeatureFlagListener(
+      String flagKey, FeatureFlagChangeListener listener);
+
   /// Unregister a feature flag change listener
-  void unregisterFeatureFlagListener(String flagKey, FeatureFlagChangeListener listener);
-  
+  void unregisterFeatureFlagListener(
+      String flagKey, FeatureFlagChangeListener listener);
+
   /// Register an all flags listener
   void registerAllFlagsListener(AllFlagsListener listener);
-  
+
   /// Unregister an all flags listener
   void unregisterAllFlagsListener(AllFlagsListener listener);
-  
+
   /// Add a connection status listener
   void addConnectionStatusListener(ConnectionStatusListener listener);
-  
+
   /// Remove a connection status listener
   void removeConnectionStatusListener(ConnectionStatusListener listener);
-  
+
   /// Clear all listeners
   void clearAllListeners();
 }
@@ -34,21 +36,23 @@ abstract class ListenerManager {
 class ListenerManagerImpl implements ListenerManager {
   // Feature flag listeners
   final Map<String, Set<FeatureFlagChangeListener>> _featureFlagListeners = {};
-  
+
   // All flags listeners
   final Set<AllFlagsListener> _allFlagsListeners = {};
-  
+
   // Connection status listeners
   final Set<ConnectionStatusListener> _connectionStatusListeners = {};
-  
+
   @override
-  void registerFeatureFlagListener(String flagKey, FeatureFlagChangeListener listener) {
+  void registerFeatureFlagListener(
+      String flagKey, FeatureFlagChangeListener listener) {
     _featureFlagListeners[flagKey] ??= {};
     _featureFlagListeners[flagKey]!.add(listener);
   }
-  
+
   @override
-  void unregisterFeatureFlagListener(String flagKey, FeatureFlagChangeListener listener) {
+  void unregisterFeatureFlagListener(
+      String flagKey, FeatureFlagChangeListener listener) {
     final listeners = _featureFlagListeners[flagKey];
     if (listeners != null) {
       listeners.remove(listener);
@@ -57,29 +61,30 @@ class ListenerManagerImpl implements ListenerManager {
       }
     }
   }
-  
+
   @override
   void registerAllFlagsListener(AllFlagsListener listener) {
     _allFlagsListeners.add(listener);
   }
-  
+
   @override
   void unregisterAllFlagsListener(AllFlagsListener listener) {
     _allFlagsListeners.remove(listener);
   }
-  
+
   @override
   void addConnectionStatusListener(ConnectionStatusListener listener) {
     _connectionStatusListeners.add(listener);
   }
-  
+
   @override
   void removeConnectionStatusListener(ConnectionStatusListener listener) {
     _connectionStatusListeners.remove(listener);
   }
-  
+
   /// Notify feature flag listeners of a flag change
-  void notifyFeatureFlagListeners(String flagKey, dynamic oldValue, dynamic newValue) {
+  void notifyFeatureFlagListeners(
+      String flagKey, dynamic oldValue, dynamic newValue) {
     final listeners = _featureFlagListeners[flagKey];
     if (listeners != null) {
       for (final listener in Set<FeatureFlagChangeListener>.from(listeners)) {
@@ -91,9 +96,10 @@ class ListenerManagerImpl implements ListenerManager {
       }
     }
   }
-  
+
   /// Notify all flags listeners of flag changes
-  void notifyAllFlagsListeners(Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags) {
+  void notifyAllFlagsListeners(
+      Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags) {
     for (final listener in Set<AllFlagsListener>.from(_allFlagsListeners)) {
       try {
         listener.onAllFlagsChanged(oldFlags, newFlags);
@@ -102,10 +108,12 @@ class ListenerManagerImpl implements ListenerManager {
       }
     }
   }
-  
+
   /// Notify connection status listeners of a connection status change
-  void notifyConnectionStatusListeners(ConnectionStatus status, ConnectionInformation info) {
-    for (final listener in Set<ConnectionStatusListener>.from(_connectionStatusListeners)) {
+  void notifyConnectionStatusListeners(
+      ConnectionStatus status, ConnectionInformation info) {
+    for (final listener
+        in Set<ConnectionStatusListener>.from(_connectionStatusListeners)) {
       try {
         listener.onConnectionStatusChanged(status, info);
       } catch (e) {
@@ -113,7 +121,7 @@ class ListenerManagerImpl implements ListenerManager {
       }
     }
   }
-  
+
   @override
   void clearAllListeners() {
     _featureFlagListeners.clear();

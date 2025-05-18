@@ -44,6 +44,9 @@ abstract class ConfigManager {
 
   /// Debug method to dump the entire config map in detail
   void dumpConfigMap();
+
+  /// Returns whether SDK functionality is currently enabled
+  bool isSdkFunctionalityEnabled();
 }
 
 /// Implementation of ConfigManager
@@ -54,6 +57,9 @@ class ConfigManagerImpl implements ConfigManager {
 
   // Cache for feature flags
   final Map<String, dynamic> _configMap = {};
+
+  // Track whether SDK functionality is enabled (default to true)
+  bool _isSdkFunctionalityEnabled = true;
 
   // Listeners for feature flag changes
   final Map<String, List<void Function(dynamic)>> _configListeners = {};
@@ -78,6 +84,11 @@ class ConfigManagerImpl implements ConfigManager {
   })  : _config = config,
         _configFetcher = configFetcher,
         _summaryManager = summaryManager {
+    // Default to enabled unless explicitly disabled
+    _isSdkFunctionalityEnabled = true;
+    Logger.d(
+        'ConfigManagerImpl initialized with isSdkFunctionalityEnabled=true');
+
     // Start SDK settings check
     _startSdkSettingsCheck();
   }
@@ -169,6 +180,20 @@ class ConfigManagerImpl implements ConfigManager {
             '🔎 API POLL: Last-Modified changed from $_previousLastModified to $lastModified');
         _previousLastModified = lastModified;
 
+        // Fetch SDK settings first
+        final sdkSettingsResult = await _configFetcher.fetchSdkSettings();
+
+        if (sdkSettingsResult.isSuccess) {
+          final settings = sdkSettingsResult.getOrNull();
+          if (settings != null) {
+            // Process SDK settings
+            _processSdkSettings(settings);
+          }
+        } else {
+          Logger.w(
+              '🔎 API POLL: Failed to fetch SDK settings: ${sdkSettingsResult.getErrorMessage()}');
+        }
+
         // Fetch config
         final configSuccess =
             await _configFetcher.fetchConfig(lastModified: lastModified);
@@ -197,6 +222,32 @@ class ConfigManagerImpl implements ConfigManager {
       }
     } catch (e) {
       Logger.e('🔎 API POLL: Error checking SDK settings: $e');
+    }
+  }
+
+  /// Process SDK settings and update internal flags
+  void _processSdkSettings(Map<String, dynamic> settings) {
+    try {
+      // Extract cfSkipSdk setting - this determines if SDK functionality is enabled
+      final cfSkipSdk = settings['cf_skip_sdk'] as bool? ?? false;
+
+      // Update the SDK functionality flag (inverse of cfSkipSdk)
+      final newValue = !cfSkipSdk;
+
+      if (_isSdkFunctionalityEnabled != newValue) {
+        Logger.i(
+            'SDK functionality ${newValue ? "enabled" : "disabled"} based on cfSkipSdk=$cfSkipSdk');
+        _isSdkFunctionalityEnabled = newValue;
+      } else {
+        Logger.d(
+            'SDK functionality unchanged (${newValue ? "enabled" : "disabled"})');
+      }
+
+      // Additional SDK settings processing can be added here if needed
+    } catch (e) {
+      Logger.e('Error processing SDK settings: $e');
+      // Keep SDK functionality enabled by default in case of error
+      _isSdkFunctionalityEnabled = true;
     }
   }
 
@@ -271,6 +322,15 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   String getString(String key, String defaultValue) {
+    // If SDK functionality is disabled, return the default value
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          "getString: SDK functionality is disabled, returning fallback for key '$key'");
+      Logger.i(
+          'CONFIG VALUE: $key: $defaultValue (using fallback, SDK disabled)');
+      return defaultValue;
+    }
+
     final variation = _getVariation(key);
 
     if (variation == null) {
@@ -296,6 +356,15 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   bool getBoolean(String key, bool defaultValue) {
+    // If SDK functionality is disabled, return the default value
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          "getBoolean: SDK functionality is disabled, returning fallback for key '$key'");
+      Logger.i(
+          'CONFIG VALUE: $key: $defaultValue (using fallback, SDK disabled)');
+      return defaultValue;
+    }
+
     final variation = _getVariation(key);
 
     if (variation == null) {
@@ -321,6 +390,15 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   num getNumber(String key, num defaultValue) {
+    // If SDK functionality is disabled, return the default value
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          "getNumber: SDK functionality is disabled, returning fallback for key '$key'");
+      Logger.i(
+          'CONFIG VALUE: $key: $defaultValue (using fallback, SDK disabled)');
+      return defaultValue;
+    }
+
     final variation = _getVariation(key);
 
     if (variation == null) {
@@ -346,6 +424,15 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   Map<String, dynamic> getJson(String key, Map<String, dynamic> defaultValue) {
+    // If SDK functionality is disabled, return the default value
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          "getJson: SDK functionality is disabled, returning fallback for key '$key'");
+      Logger.i(
+          'CONFIG VALUE: $key: $defaultValue (using fallback, SDK disabled)');
+      return defaultValue;
+    }
+
     final variation = _getVariation(key);
 
     if (variation == null) {
@@ -371,6 +458,13 @@ class ConfigManagerImpl implements ConfigManager {
 
   /// Helper method to get the variation value
   dynamic _getVariation(String key) {
+    // If SDK functionality is disabled, return null which will cause fallback values to be used
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          '_getVariation: SDK functionality is disabled, returning null for key "$key"');
+      return null;
+    }
+
     final config = synchronized(_configLock, () => _configMap[key]);
 
     if (config == null) {
@@ -554,6 +648,12 @@ class ConfigManagerImpl implements ConfigManager {
     });
 
     Logger.i('==============================');
+  }
+
+  /// Returns whether SDK functionality is currently enabled
+  @override
+  bool isSdkFunctionalityEnabled() {
+    return _isSdkFunctionalityEnabled;
   }
 }
 

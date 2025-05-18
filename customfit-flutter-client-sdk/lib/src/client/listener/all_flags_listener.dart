@@ -4,5 +4,6 @@ abstract class AllFlagsListener {
   ///
   /// [oldFlags] is a map of all previous feature flags and their values.
   /// [newFlags] is a map of all current feature flags and their values.
-  void onAllFlagsChanged(Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags);
+  void onAllFlagsChanged(
+      Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags);
 }

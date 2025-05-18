@@ -41,7 +41,7 @@ class DeviceInfoDetector {
     final androidInfo = await _deviceInfoPlugin.androidInfo;
     final packageInfo = await PackageInfo.fromPlatform();
     final connectivityResult = await _connectivity.checkConnectivity();
-    
+
     String networkType = "unknown";
     if (connectivityResult == ConnectivityResult.mobile) {
       networkType = "cellular";
@@ -76,7 +76,7 @@ class DeviceInfoDetector {
     final iosInfo = await _deviceInfoPlugin.iosInfo;
     final packageInfo = await PackageInfo.fromPlatform();
     final connectivityResult = await _connectivity.checkConnectivity();
-    
+
     String networkType = "unknown";
     if (connectivityResult == ConnectivityResult.mobile) {
       networkType = "cellular";
@@ -107,7 +107,7 @@ class DeviceInfoDetector {
     final webInfo = await _deviceInfoPlugin.webBrowserInfo;
     final packageInfo = await PackageInfo.fromPlatform();
     final connectivityResult = await _connectivity.checkConnectivity();
-    
+
     String networkType = "unknown";
     if (connectivityResult == ConnectivityResult.ethernet) {
       networkType = "ethernet";

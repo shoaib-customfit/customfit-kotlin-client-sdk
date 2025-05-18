@@ -542,6 +542,12 @@
       "languageVersion": "3.1"
     },
     {
+      "name": "synchronized",
+      "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/synchronized-3.3.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
+    },
+    {
       "name": "term_glyph",
       "rootUri": "file:///Users/shoaibmohammed/.pub-cache/hosted/pub.dev/term_glyph-1.2.2",
       "packageUri": "lib/",
@@ -650,7 +656,7 @@
       "languageVersion": "3.2"
     }
   ],
-  "generated": "2025-05-18T13:11:45.791943Z",
+  "generated": "2025-05-18T13:49:27.920281Z",
   "generator": "pub",
   "generatorVersion": "3.7.2",
   "flutterRoot": "file:///Users/shoaibmohammed/Desktop/work/setup/flutter",

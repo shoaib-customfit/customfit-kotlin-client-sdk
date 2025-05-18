@@ -93,7 +93,8 @@ class DeviceContext {
       screenDensity: (map['screen_density'] as num?)?.toDouble(),
       networkType: map['network_type'] as String?,
       networkCarrier: map['network_carrier'] as String?,
-      customAttributes: (map['custom_attributes'] as Map<String, dynamic>?) ?? {},
+      customAttributes:
+          (map['custom_attributes'] as Map<String, dynamic>?) ?? {},
     );
   }
 
@@ -119,4 +120,4 @@ class DeviceContext {
 
     return map..removeWhere((key, value) => value == null);
   }
-} 
+}

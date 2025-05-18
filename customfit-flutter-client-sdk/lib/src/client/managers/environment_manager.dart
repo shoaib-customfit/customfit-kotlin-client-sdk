@@ -11,7 +11,7 @@ import 'user_manager.dart';
 abstract class EnvironmentManager {
   /// Detect environment information
   Future<void> detectEnvironmentInfo(bool force);
-  
+
   /// Shutdown the environment manager
   void shutdown();
 }
@@ -23,34 +23,37 @@ class EnvironmentManagerImpl implements EnvironmentManager {
 
   bool _isDetecting = false;
   DateTime? _lastDetectionTime;
-  
+
   EnvironmentManagerImpl({
     required BackgroundStateMonitor backgroundStateMonitor,
     required UserManager userManager,
-  }) : _backgroundStateMonitor = backgroundStateMonitor,
-       _userManager = userManager;
+  })  : _backgroundStateMonitor = backgroundStateMonitor,
+        _userManager = userManager;
 
   @override
   Future<void> detectEnvironmentInfo(bool force) async {
     // Skip if already detecting or if not forced and detected recently
-    if (_isDetecting || (!force && _lastDetectionTime != null && 
-        DateTime.now().difference(_lastDetectionTime!).inMinutes < 60)) {
+    if (_isDetecting ||
+        (!force &&
+            _lastDetectionTime != null &&
+            DateTime.now().difference(_lastDetectionTime!).inMinutes < 60)) {
       return;
     }
-    
+
     _isDetecting = true;
-    
+
     try {
       // Detect device info
       final deviceContext = await DeviceInfoDetector.detectDeviceInfo();
       _userManager.updateDeviceContext(deviceContext);
-      
+
       // Detect application info
-      final applicationInfo = await ApplicationInfoDetector.detectApplicationInfo();
+      final applicationInfo =
+          await ApplicationInfoDetector.detectApplicationInfo();
       if (applicationInfo != null) {
         _userManager.updateApplicationInfo(applicationInfo);
       }
-      
+
       _lastDetectionTime = DateTime.now();
     } catch (e) {
       debugPrint('Error detecting environment info: $e');
@@ -58,7 +61,7 @@ class EnvironmentManagerImpl implements EnvironmentManager {
       _isDetecting = false;
     }
   }
-  
+
   @override
   void shutdown() {
     // Clean up resources
