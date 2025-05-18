@@ -27,6 +27,7 @@ class ConnectionManagerImpl implements ConnectionManager {
   static const _heartbeatInterval = Duration(seconds: 15);
   static const _baseDelayMs = 1000;
   static const _maxDelayMs = 30000;
+  static const _maxReconnectAttempts = 3; // Limit reconnect attempts
 
   ConnectionManagerImpl(this._config) {
     if (!_offlineMode) _updateStatus(ConnectionStatus.connecting);
@@ -83,6 +84,7 @@ class ConnectionManagerImpl implements ConnectionManager {
   void recordConnectionFailure(String error) {
     _failureCount++;
     _lastError = error;
+
     if (!_offlineMode) {
       _updateStatus(ConnectionStatus.connecting);
       final delay = _calculateBackoff(_failureCount);

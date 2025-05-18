@@ -620,9 +620,40 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   Future<bool> refreshConfigs() async {
-    Logger.i('⚡ Manually refreshing configs');
+    // Don't fetch if offline
+    if (_configFetcher.isOffline()) {
+      Logger.d('Offline mode enabled, skipping config refresh');
+      return false;
+    }
+
+    Logger.d('Manual refresh of configs triggered');
     try {
-      await _checkSdkSettings();
+      // Add a timeout to the fetch operation to prevent hanging
+      final fetchSuccess = await _configFetcher.fetchConfig().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          Logger.w('Config fetch timed out after 10 seconds');
+          return false;
+        },
+      );
+
+      if (!fetchSuccess) {
+        Logger.w('Failed to fetch configs during manual refresh');
+        return false;
+      }
+
+      final configsResult = _configFetcher.getConfigs();
+
+      if (!configsResult.isSuccess) {
+        Logger.w(
+            'Failed to get configs during manual refresh: ${configsResult.getErrorMessage()}');
+        return false;
+      }
+
+      final configs = configsResult.getOrNull() ?? {};
+      Logger.i('Successfully refreshed ${configs.length} config entries');
+
+      _updateConfigMap(configs);
       return true;
     } catch (e) {
       Logger.e('Error refreshing configs: $e');

@@ -21,7 +21,7 @@ class ConfigFetcher {
   final CFUser _user;
 
   final _offlineMode = ValueNotifier<bool>(false);
-  final _fetchMutex = Completer<void>();
+  Completer<void> _fetchMutex = Completer<void>();
   Map<String, dynamic>? _lastConfigMap;
   final _mutex = Completer<void>();
   // ignore: unused_field
@@ -53,7 +53,23 @@ class ConfigFetcher {
       return false;
     }
 
-    await _fetchMutex.future;
+    // Create a new mutex if needed
+    var completer = Completer<void>();
+    var oldCompleter = _fetchMutex;
+    if (oldCompleter.isCompleted) {
+      _fetchMutex = completer;
+    } else {
+      debugPrint("Fetch already in progress, waiting...");
+      await _fetchMutex.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          debugPrint("Timed out waiting for previous fetch to complete");
+          // Continue anyway, but create a new mutex
+          _fetchMutex = completer;
+        },
+      );
+    }
+
     try {
       final url =
           "${CFConstants.api.baseApiUrl}${CFConstants.api.userConfigsPath}?cfenc=${_config.clientKey}";
@@ -84,16 +100,30 @@ class ConfigFetcher {
 
       debugPrint("*** USER CONFIGS *** Request headers: $headers");
 
-      final result = await _httpClient.post(
+      // Add timeout to the HTTP request
+      final result = await _httpClient
+          .post(
         url,
         data: payload,
-        options: Options(headers: headers),
+        options: Options(
+          headers: headers,
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      )
+          .timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint("*** USER CONFIGS *** Request timed out after 10 seconds");
+          return CFResult.error("Request timed out");
+        },
       );
 
       // Handle 304 Not Modified (match Kotlin)
       if (result.getStatusCode() == 304) {
         debugPrint(
             "*** USER CONFIGS *** Configs not modified (304), using cached configs");
+        completer.complete();
         return true;
       }
 
@@ -106,6 +136,7 @@ class ConfigFetcher {
           category: ErrorCategory.network,
           severity: ErrorSeverity.high,
         );
+        completer.complete();
         return false;
       }
 
@@ -118,6 +149,7 @@ class ConfigFetcher {
           category: ErrorCategory.network,
           severity: ErrorSeverity.high,
         );
+        completer.complete();
         return false;
       }
 
@@ -126,6 +158,7 @@ class ConfigFetcher {
       final handled = _handleConfigResponse(responseBody);
       debugPrint(
           "*** USER CONFIGS *** Handled response successfully: $handled");
+      completer.complete();
       return handled;
     } catch (e) {
       debugPrint("*** USER CONFIGS *** Exception during fetch: $e");
@@ -135,6 +168,7 @@ class ConfigFetcher {
         source: _source,
         severity: ErrorSeverity.high,
       );
+      completer.complete();
       return false;
     }
   }

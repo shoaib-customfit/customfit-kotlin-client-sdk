@@ -56,8 +56,14 @@ class MainActivity : AppCompatActivity() {
         val refreshButton = findViewById<Button>(R.id.refreshButton)
         refreshButton?.setOnClickListener {
             // Force a refresh of the config
-            CFHelper.recordEventWithProperties("config_manual_refresh", 
-                mapOf("config_key" to "hero_text", "refresh_source" to "user_action", "screen" to "main"))
+            CFHelper.recordEventWithProperties("kotlin_config_manual_refresh", 
+                mapOf(
+                    "config_key" to "hero_text", 
+                    "refresh_source" to "user_action", 
+                    "screen" to "main",
+                    "platform" to "kotlin"
+                )
+            )
             Toast.makeText(this, "Refreshing configuration...", Toast.LENGTH_SHORT).show()
             updateHeroText()
             updateToastMode()
@@ -65,8 +71,13 @@ class MainActivity : AppCompatActivity() {
         
         showToastButton.setOnClickListener {
             // Record button click event with more specific tracking
-            CFHelper.recordEventWithProperties("toast_button_interaction", 
-                mapOf("action" to "click", "feature" to "toast_message"))
+            CFHelper.recordEventWithProperties("kotlin_toast_button_interaction", 
+                mapOf(
+                    "action" to "click", 
+                    "feature" to "toast_message",
+                    "platform" to "kotlin"
+                )
+            )
             
             if (enhancedToastEnabled) {
                 Toast.makeText(this, "Enhanced toast feature enabled!", Toast.LENGTH_LONG).show()
@@ -77,8 +88,14 @@ class MainActivity : AppCompatActivity() {
         
         secondScreenButton.setOnClickListener {
             // Record navigation event with more specific tracking
-            CFHelper.recordEventWithProperties("screen_navigation", 
-                mapOf("from" to "main_screen", "to" to "second_screen", "user_flow" to "primary_navigation"))
+            CFHelper.recordEventWithProperties("kotlin_screen_navigation", 
+                mapOf(
+                    "from" to "main_screen", 
+                    "to" to "second_screen", 
+                    "user_flow" to "primary_navigation",
+                    "platform" to "kotlin"
+                )
+            )
             val intent = Intent(this, SecondActivity::class.java)
             startActivity(intent)
         }
