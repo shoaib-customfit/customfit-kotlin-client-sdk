@@ -242,9 +242,17 @@ class ConfigFetcher(
 
                     // Store the flattened map, ensuring Any? values are handled or filtered if needed
                     val filteredMap = flattenedMap.filterValues { it != null }
-                    // Safely cast to the desired type
+                    
+                    // Use more explicit type checking and then cast
                     @Suppress("UNCHECKED_CAST")
-                    finalConfigMap[key] = filteredMap as Map<String, Any>
+                    val safeMap = HashMap<String, Any>().apply {
+                        filteredMap.forEach { (k, v) -> 
+                            // v cannot be null due to filterValues above
+                            if (v != null) this[k] = v
+                        }
+                    }
+                    
+                    finalConfigMap[key] = safeMap
                 } catch (e: Exception) {
                     ErrorHandler.handleException(
                         e,
@@ -279,7 +287,7 @@ class ConfigFetcher(
             }
             
             // Keep existing hero_text debug logging for backward compatibility
-            val heroText = (finalConfigMap["hero_text"] as? Map<String, Any>)?.get("variation") as? String
+            val heroText = (finalConfigMap["hero_text"] as? Map<*, *>)?.get("variation") as? String
             if (heroText != null) {
                 Timber.d("Hero text if present: $heroText")
             }

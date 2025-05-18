@@ -13,6 +13,7 @@ import java.util.Date
 import java.util.concurrent.atomic.AtomicBoolean
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.utils.CoroutineUtils
+import java.util.TimerTask
 
 /**
  * Implementation of ConfigManager that handles config fetching and processing
@@ -401,34 +402,28 @@ class ConfigManagerImpl(
                              (if (actualIntervalMs != intervalMs) " (adjusted for battery)" else ""))
 
                     // Create a new timer
-                    sdkSettingsTimer =
-                        kotlin.concurrent.fixedRateTimer(
-                            "SDKTimer-${java.util.UUID.randomUUID()}",
-                            daemon = true,
-                            initialDelay = actualIntervalMs,
-                            period = actualIntervalMs
-                        ) {
-                            clientScope.launch {
-                                // Skip this check if another one is already in progress
-                                if (isCheckingSettings.get()) {
-                                    Timber.d("Skipping periodic SDK settings check because another check is already in progress")
-                                    return@launch
-                                }
-                                
-                                CoroutineUtils.withErrorHandling(
-                                    errorMessage = "Periodic SDK settings check failed"
-                                ) {
-                                    Timber.d("Periodic SDK settings check triggered by timer")
-                                    checkSdkSettings()
-                                }
-                                .onFailure { e ->
-                                    Timber.e(
-                                        e,
-                                        "Periodic SDK settings check failed: ${e.message}"
-                                    )
-                                }
+                    sdkSettingsTimer = createStartTimer(actualIntervalMs) {
+                        clientScope.launch {
+                            // Skip this check if another one is already in progress
+                            if (isCheckingSettings.get()) {
+                                Timber.d("Skipping periodic SDK settings check because another check is already in progress")
+                                return@launch
+                            }
+                            
+                            CoroutineUtils.withErrorHandling(
+                                errorMessage = "Periodic SDK settings check failed"
+                            ) {
+                                Timber.d("Periodic SDK settings check triggered by timer")
+                                checkSdkSettings()
+                            }
+                            .onFailure { e ->
+                                Timber.e(
+                                    e,
+                                    "Periodic SDK settings check failed: ${e.message}"
+                                )
                             }
                         }
+                    }
 
                     Timber.d("Started SDK settings check timer with interval $actualIntervalMs ms")
 
@@ -488,34 +483,28 @@ class ConfigManagerImpl(
                      (if (actualIntervalMs != intervalMs) " (adjusted for battery)" else ""))
 
             // Create a new timer with updated interval
-            sdkSettingsTimer =
-                kotlin.concurrent.fixedRateTimer(
-                    "SDKTimer-${java.util.UUID.randomUUID()}",
-                    daemon = true,
-                    initialDelay = actualIntervalMs,
-                    period = actualIntervalMs
-                ) {
-                    clientScope.launch {
-                        // Skip this check if another one is already in progress
-                        if (isCheckingSettings.get()) {
-                            Timber.d("Skipping periodic SDK settings check because another check is already in progress")
-                            return@launch
-                        }
-                        
-                        CoroutineUtils.withErrorHandling(
-                            errorMessage = "Periodic SDK settings check failed"
-                        ) {
-                            Timber.d("Periodic SDK settings check triggered by timer")
-                            checkSdkSettings()
-                        }
-                        .onFailure { e ->
-                            Timber.e(
-                                e,
-                                "Periodic SDK settings check failed: ${e.message}"
-                            )
-                        }
+            sdkSettingsTimer = createRestartTimer(actualIntervalMs) {
+                clientScope.launch {
+                    // Skip this check if another one is already in progress
+                    if (isCheckingSettings.get()) {
+                        Timber.d("Skipping periodic SDK settings check because another check is already in progress")
+                        return@launch
+                    }
+                    
+                    CoroutineUtils.withErrorHandling(
+                        errorMessage = "Periodic SDK settings check failed"
+                    ) {
+                        Timber.d("Periodic SDK settings check triggered by timer")
+                        checkSdkSettings()
+                    }
+                    .onFailure { e ->
+                        Timber.e(
+                            e,
+                            "Periodic SDK settings check failed: ${e.message}"
+                        )
                     }
                 }
+            }
             Timber.d("Restarted periodic SDK settings check with interval $actualIntervalMs ms")
 
             // Perform immediate check only if requested
@@ -607,5 +596,37 @@ class ConfigManagerImpl(
     override fun shutdown() {
         sdkSettingsTimer?.cancel()
         sdkSettingsTimer = null
+    }
+    
+    /**
+     * Creates a timer for starting periodic SDK settings checks
+     */
+    private fun createStartTimer(
+        intervalMs: Long,
+        action: TimerTask.() -> Unit
+    ): java.util.Timer {
+        return java.util.Timer("SDKTimerStartCheck-${System.currentTimeMillis()}", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    action()
+                }
+            }, intervalMs, intervalMs)
+        }
+    }
+
+    /**
+     * Creates a timer for restarting periodic SDK settings checks
+     */
+    private fun createRestartTimer(
+        intervalMs: Long,
+        action: TimerTask.() -> Unit
+    ): java.util.Timer {
+        return java.util.Timer("SDKTimerRestartCheck-${System.currentTimeMillis()}", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    action()
+                }
+            }, intervalMs, intervalMs)
+        }
     }
 } 

@@ -34,6 +34,9 @@ import kotlin.concurrent.read
 import kotlin.concurrent.write
 import java.util.Date
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.encoding.CompositeDecoder
 
 /**
  * Manages cache operations with TTL, disk persistence, and background reloading.
@@ -81,6 +84,8 @@ class CacheManager private constructor() {
         serializersModule = SerializersModule {
             contextual(AnySerializer)
         }
+        // Add explicit support for serializing polymorphic types
+        useArrayPolymorphism = true
     }
 
     // Coroutine scope for background operations
@@ -562,60 +567,88 @@ data class SerializableCacheEntry(
 object AnySerializer : KSerializer<Any> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Any") {
         element<String>("type")
-        element<JsonElement>("value")
+        element<String>("value")
     }
 
     override fun serialize(encoder: Encoder, value: Any) {
-        if (encoder !is kotlinx.serialization.json.JsonEncoder) {
-            throw SerializationException("This serializer can only be used with JSON")
-        }
-        
-        val jsonElement = when (value) {
-            is String -> JsonPrimitive(value)
-            is Number -> JsonPrimitive(value)
-            is Boolean -> JsonPrimitive(value)
-            is Map<*, *> -> {
-                val map = value.entries.associate { 
-                    it.key.toString() to (it.value?.let { v -> 
-                        when (v) {
-                            is String, is Number, is Boolean -> Json.encodeToJsonElement(v)
-                            else -> JsonPrimitive(v.toString())
-                        }
-                    } ?: JsonPrimitive("null"))
+        try {
+            // Create a simple structure with type and string representation
+            val type = value::class.java.simpleName
+            val stringValue = when (value) {
+                is String -> value
+                is Number -> value.toString()
+                is Boolean -> value.toString()
+                is Map<*, *> -> try {
+                    Json.encodeToString(value.mapKeys { it.key.toString() })
+                } catch (e: Exception) {
+                    "{}"
                 }
-                JsonObject(map)
+                is List<*> -> try {
+                    Json.encodeToString(value.map { it?.toString() ?: "null" })
+                } catch (e: Exception) {
+                    "[]"
+                }
+                else -> value.toString()
             }
-            else -> JsonPrimitive(value.toString())
+            
+            // Use a composite encoder to write the custom structure
+            val compositeOutput = encoder.beginStructure(descriptor)
+            compositeOutput.encodeStringElement(descriptor, 0, type)
+            compositeOutput.encodeStringElement(descriptor, 1, stringValue)
+            compositeOutput.endStructure(descriptor)
+        } catch (e: Exception) {
+            Timber.e(e, "Error serializing cache value: ${e.message}")
+            // Fallback: encode empty string
+            encoder.encodeString("")
         }
-        
-        encoder.encodeSerializableValue(JsonElement.serializer(), jsonElement)
     }
 
     override fun deserialize(decoder: Decoder): Any {
-        val jsonDecoder = decoder as? kotlinx.serialization.json.JsonDecoder 
-            ?: throw SerializationException("This serializer can only be used with JSON")
-        
-        val jsonElement = jsonDecoder.decodeSerializableValue(JsonElement.serializer())
-        
-        return when (jsonElement) {
-            is JsonPrimitive -> {
-                when {
-                    jsonElement.isString -> jsonElement.content
-                    jsonElement.content == "true" -> true
-                    jsonElement.content == "false" -> false
-                    jsonElement.content.toDoubleOrNull() != null -> {
-                        val content = jsonElement.content
-                        when {
-                            content.contains('.') -> content.toDouble()
-                            content.toLongOrNull() != null -> content.toLong()
-                            else -> content.toInt()
-                        }
-                    }
-                    else -> jsonElement.content
+        try {
+            val composite = decoder.beginStructure(descriptor)
+            
+            // Read the type and value elements
+            var type: String? = null
+            var valueStr: String? = null
+            
+            loop@ while (true) {
+                when (val index = composite.decodeElementIndex(descriptor)) {
+                    CompositeDecoder.DECODE_DONE -> break@loop
+                    0 -> type = composite.decodeStringElement(descriptor, 0)
+                    1 -> valueStr = composite.decodeStringElement(descriptor, 1)
+                    else -> throw SerializationException("Unknown index $index")
                 }
             }
-            is JsonObject -> jsonElement.toMap()
-            else -> jsonElement.toString()
+            
+            composite.endStructure(descriptor)
+            
+            // Default values if elements are missing
+            type = type ?: "String"
+            valueStr = valueStr ?: ""
+            
+            // Convert to appropriate type based on the stored type information
+            return when (type) {
+                "String" -> valueStr
+                "Integer", "Int" -> valueStr.toIntOrNull() ?: 0
+                "Long" -> valueStr.toLongOrNull() ?: 0L
+                "Double" -> valueStr.toDoubleOrNull() ?: 0.0
+                "Float" -> valueStr.toFloatOrNull() ?: 0.0f
+                "Boolean" -> valueStr.toBoolean()
+                "Map", "HashMap" -> try {
+                    Json.decodeFromString<Map<String, String>>(valueStr)
+                } catch (e: Exception) {
+                    mapOf<String, String>()
+                }
+                "List", "ArrayList" -> try {
+                    Json.decodeFromString<List<String>>(valueStr)
+                } catch (e: Exception) {
+                    listOf<String>()
+                }
+                else -> valueStr
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error deserializing cache value: ${e.message}")
+            return ""
         }
     }
 }
