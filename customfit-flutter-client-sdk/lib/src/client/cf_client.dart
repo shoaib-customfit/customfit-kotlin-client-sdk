@@ -64,7 +64,7 @@ class CFClient {
   final BackgroundStateMonitor backgroundStateMonitor;
 
   /// Feature config and flag listeners
-  final Map<String, List<void Function(dynamic)>> _configListeners = const {};
+  final Map<String, List<void Function(dynamic)>> _configListeners = {};
 
   // This field is intentionally unused in the current implementation
   // but will be used in future versions for feature flag listeners
@@ -76,7 +76,7 @@ class CFClient {
   final Set<AllFlagsListener> _allFlagsListeners = const {};
 
   /// Contexts, device/app info
-  final Map<String, EvaluationContext> _contexts = const {};
+  final Map<String, EvaluationContext> _contexts = {};
   // ignore: unused_field
   late DeviceContext _deviceContext;
   // ignore: unused_field
@@ -161,44 +161,24 @@ class CFClient {
 
   /// Setup connection status forwarding
   void _setupConnectionListeners() {
-    // Create a proper ConnectionStatusListener implementation
-    final listener = _ConnectionStatusListenerImpl(
-      (status, info) {
-        for (var lst in _connectionsListeners) {
-          lst(status, info);
-        }
-      },
+    connectionManager.addConnectionStatusListener(
+      _CustomConnectionStatusListener(onStatusChanged: (status, info) {
+        Logger.d('Connection status changed: $status');
+      }),
     );
-    connectionManager.addConnectionStatusListener(listener);
-  }
-
-  final List<void Function(ConnectionStatus, ConnectionInformation)>
-      _connectionsListeners = const [];
-  void addConnectionStatusListener(
-      void Function(ConnectionStatus, ConnectionInformation) lst) {
-    _connectionsListeners.add(lst);
-    final info = connectionManager.getConnectionInformation();
-    lst(info.status, info);
-  }
-
-  void removeConnectionStatusListener(
-      void Function(ConnectionStatus, ConnectionInformation) lst) {
-    _connectionsListeners.remove(lst);
   }
 
   /// Setup background and battery listeners
   void _setupBackgroundListeners() {
     backgroundStateMonitor.addAppStateListener(
-      _AppStateListenerImpl(
-        onStateChanged: (state) {
-          if (state == AppState.background) {
-            _pausePolling();
-          } else if (state == AppState.foreground) {
-            _resumePolling();
-            _checkSdkSettings();
-          }
-        },
-      ),
+      _CustomAppStateListener(onStateChanged: (state) {
+        if (state == AppState.background) {
+          _pausePolling();
+        } else if (state == AppState.foreground) {
+          _resumePolling();
+          _checkSdkSettings();
+        }
+      }),
     );
   }
 
@@ -369,67 +349,47 @@ class CFClient {
   }
 
   void _updateConfigMap(Map<String, dynamic> newConfigs) {
-    final updatedKeys = <String>[];
-
-    // Track which keys have changed - use a simple locking mechanism
-    // The lock is implemented as a single critical section without
-    // reassigning the final _configLock object
-
-    // Critical section - all operations in this section are atomic
-    // _configLock provides mutual exclusion
-
-    // Update config map
-    for (final key in newConfigs.keys) {
-      if (!_configMap.containsKey(key) || _configMap[key] != newConfigs[key]) {
-        updatedKeys.add(key);
-      }
-    }
-
-    // Clear and update the config map
+    // Critical section for thread safety
+    final oldConfig = Map<String, dynamic>.from(_configMap);
     _configMap.clear();
     _configMap.addAll(newConfigs);
 
-    // End of critical section
+    Logger.d('Config map updated with ${newConfigs.length} configs');
 
-    // Debug: Print the full updated config map in CFClient
-    Logger.d('===== CF CLIENT: FULL CONFIG MAP =====');
-    _configMap.forEach((key, value) {
-      Logger.d('$key: $value');
-    });
-    Logger.d('====================================');
-
-    // Log success
-    Logger.i('Configs updated successfully with ${newConfigs.length} entries');
-
-    // Notify listeners about changes
-    if (updatedKeys.isNotEmpty) {
-      _notifyConfigChanges(updatedKeys);
+    // Instead of handling notifications here, pass the config updates to ConfigManager
+    // to ensure listeners registered there are properly notified
+    if (configManager is ConfigManagerImpl) {
+      Logger.d('Delegating config update notification to ConfigManager');
+      (configManager as ConfigManagerImpl).updateConfigsFromClient(newConfigs);
+    } else {
+      Logger.e(
+          'ConfigManager is not of expected type, notifications may not work properly');
     }
   }
 
-  void _notifyConfigChanges(List<String> updatedKeys) {
-    for (final key in updatedKeys) {
-      final value = _configMap[key];
-      final listeners = _configListeners[key];
+  /// Add a config listener for a specific feature flag
+  void addConfigListener<T>(String key, void Function(T) listener) {
+    configManager.addConfigListener<T>(key, listener);
+  }
 
-      // Check if there's a variation value to notify
-      if (value is Map<String, dynamic> && value.containsKey('variation')) {
-        final variation = value['variation'];
+  /// Remove a config listener for a specific feature flag
+  void removeConfigListener(String key) {
+    configManager.clearConfigListeners(key);
+  }
 
-        // Notify all listeners for this key
-        if (listeners != null) {
-          for (final listener in listeners) {
-            try {
-              listener(variation);
-            } catch (e) {
-              ErrorHandler.handleException(
-                  e, 'Error notifying config change listener',
-                  source: _source, severity: ErrorSeverity.low);
-            }
-          }
-        }
-      }
-    }
+  /// Get a string value from config
+  String getString(String key, String defaultValue) {
+    return configManager.getString(key, defaultValue);
+  }
+
+  /// Get a boolean value from config
+  bool getBoolean(String key, bool defaultValue) {
+    return configManager.getBoolean(key, defaultValue);
+  }
+
+  /// Force a manual fetch of configs
+  Future<bool> fetchConfigs() async {
+    return await configManager.refreshConfigs();
   }
 
   Future<CFResult<void>> trackEvent(
@@ -517,25 +477,45 @@ class CFClient {
       );
     }
   }
+
+  /// Synchronizes fetching configuration and getting all flags, ensuring latest data
+  Future<Map<String, dynamic>> fetchAndGetAllFlags(
+      {String? lastModified}) async {
+    Logger.d('🔄 Starting synchronized fetch and get flags...');
+    try {
+      // Fetch the latest configuration
+      final success = await configManager.refreshConfigs();
+      if (!success) {
+        Logger.d(
+            '⚠️ Fetch config failed during synchronized fetch. Returning current flags.');
+        return configManager.getAllFlags();
+      }
+      Logger.d('✅ Fetch config succeeded, returning current flags map.');
+      return configManager.getAllFlags();
+    } catch (e) {
+      Logger.e('❌ Error during synchronized fetch: $e');
+      return configManager.getAllFlags();
+    }
+  }
 }
 
-/// Implementation of ConnectionStatusListener for callbacks
-class _ConnectionStatusListenerImpl implements ConnectionStatusListener {
-  final void Function(ConnectionStatus, ConnectionInformation) callback;
+// Custom listener implementations
+class _CustomConnectionStatusListener implements ConnectionStatusListener {
+  final void Function(ConnectionStatus, ConnectionInformation) onStatusChanged;
 
-  _ConnectionStatusListenerImpl(this.callback);
+  _CustomConnectionStatusListener({required this.onStatusChanged});
 
   @override
   void onConnectionStatusChanged(
       ConnectionStatus status, ConnectionInformation info) {
-    callback(status, info);
+    onStatusChanged(status, info);
   }
 }
 
-class _AppStateListenerImpl implements AppStateListener {
+class _CustomAppStateListener implements AppStateListener {
   final void Function(AppState) onStateChanged;
 
-  _AppStateListenerImpl({required this.onStateChanged});
+  _CustomAppStateListener({required this.onStateChanged});
 
   @override
   void onAppStateChanged(AppState state) {

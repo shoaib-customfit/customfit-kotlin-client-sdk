@@ -2,8 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/customfit_provider.dart';
-// Import main.dart to access global variables
-import '../main.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,22 +15,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _forceShowUI = false;
   bool _isRefreshing = false;
 
-  // Use provider values directly instead of local state
-  String get currentHeroText => context.read<CustomFitProvider>().heroText ?? '';
-
   @override
   void initState() {
     super.initState();
-
-    // Start a timer to periodically update the UI with the global value
-    // Listen to provider changes
-    context.read<CustomFitProvider>().addListener(() {
-      if (mounted) {
-        setState(() {
-          debugPrint('🔄 HomeScreen updating text to: ${context.read<CustomFitProvider>().heroText}');
-        });
-      }
-    });
 
     // Add a safety timeout - if loading takes more than 10 seconds, show UI anyway
     Future.delayed(const Duration(seconds: 10), () {
@@ -72,16 +57,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
-    // Use provider value directly
-    final heroText = context.read<CustomFitProvider>().heroText;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(heroText ?? ''),
+        title: Consumer<CustomFitProvider>(
+          builder: (context, provider, _) {
+            return Text(provider.heroText);
+          },
+        ),
         actions: [
           Consumer<CustomFitProvider>(
             builder: (context, provider, _) {
@@ -127,49 +111,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Add card to display current feature flag values
-                Card(
-                  margin: const EdgeInsets.only(bottom: 16.0),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Current Feature Flag Values:',
-                            style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            const Text('hero_text: ',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            Expanded(
-                              child: Text(
-                                // Use provider value directly
-                                context.read<CustomFitProvider>().heroText ?? '',
-                                style: const TextStyle(color: Colors.blue),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            const Text('enhanced_toast: ',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            Text(
-                              // Use the global variable instead of provider
-                              globalEnhancedToast.toString(),
-                              style: TextStyle(
-                                color: globalEnhancedToast
-                                    ? Colors.green
-                                    : Colors.red,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
                 ElevatedButton(
                   onPressed: () {
                     // Use more specific event name and properties with flutter prefix
@@ -185,11 +126,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
-                          globalEnhancedToast
+                          provider.enhancedToast
                               ? 'Enhanced toast feature enabled!'
                               : 'Button clicked!',
                         ),
-                        duration: globalEnhancedToast
+                        duration: provider.enhancedToast
                             ? const Duration(seconds: 3)
                             : const Duration(seconds: 1),
                       ),
@@ -236,20 +177,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           );
 
-                          // Update state with provider value
-                          setState(() {
-                            final provider = context.read<CustomFitProvider>();
-                            final heroText = provider.heroText;
-                          });
-
                           // Call the refresh method with flutter prefix
                           await provider.refreshFeatureFlags(
                               'flutter_config_manual_refresh');
 
                           setState(() {
                             _isRefreshing = false;
-                            final provider = context.read<CustomFitProvider>();
-                            final heroText = provider.heroText;
                           });
                         },
                   style: ElevatedButton.styleFrom(

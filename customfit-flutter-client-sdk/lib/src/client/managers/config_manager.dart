@@ -47,6 +47,9 @@ abstract class ConfigManager {
 
   /// Returns whether SDK functionality is currently enabled
   bool isSdkFunctionalityEnabled();
+
+  /// Update configs directly from client
+  void updateConfigsFromClient(Map<String, dynamic> newConfigs);
 }
 
 /// Implementation of ConfigManager
@@ -685,6 +688,13 @@ class ConfigManagerImpl implements ConfigManager {
   @override
   bool isSdkFunctionalityEnabled() {
     return _isSdkFunctionalityEnabled;
+  }
+
+  @override
+  void updateConfigsFromClient(Map<String, dynamic> newConfigs) {
+    Logger.d(
+        'Received config update from client with ${newConfigs.length} entries');
+    _updateConfigMap(newConfigs);
   }
 }
 

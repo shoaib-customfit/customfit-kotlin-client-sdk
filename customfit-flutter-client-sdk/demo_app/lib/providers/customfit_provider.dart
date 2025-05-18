@@ -6,7 +6,7 @@ class CustomFitProvider with ChangeNotifier {
   CFClient? _client;
   bool _isInitialized = false;
   Map<String, dynamic> _featureFlags = {};
-  String? _heroText;
+  String _heroText = 'CF Kotlin Flag Demo-18';
   bool _enhancedToast = false;
   bool _isOffline = false;
   String? _lastConfigChangeMessage;
@@ -22,7 +22,7 @@ class CustomFitProvider with ChangeNotifier {
 
   bool get isInitialized => _isInitialized;
   Map<String, dynamic> get featureFlags => _featureFlags;
-  String get heroText => _heroText ?? '';
+  String get heroText => _heroText;
   bool get enhancedToast => _enhancedToast;
 
   CustomFitProvider() {
@@ -37,14 +37,17 @@ class CustomFitProvider with ChangeNotifier {
     try {
       debugPrint('Initializing CustomFit provider...');
 
+      // Ensure the properties map is modifiable
+      final userProperties = <String, dynamic>{
+        'name': 'Demo User',
+        'platform': 'Flutter',
+      };
       final user = CFUser(
         userCustomerId: 'flutter_user_${DateTime.now().millisecondsSinceEpoch}',
-        properties: {
-          'name': 'Demo User',
-          'platform': 'Flutter',
-        },
+        properties: userProperties,
         anonymous: true,
       );
+      debugPrint('CFUser created with ID: ${user.userCustomerId}');
 
       // Create the CFConfig for the client
       final config = CFConfig.builder(
@@ -62,99 +65,73 @@ class CustomFitProvider with ChangeNotifier {
           .setNetworkConnectionTimeoutMs(10000)
           .setNetworkReadTimeoutMs(10000)
           .build();
+      debugPrint('CFConfig created successfully');
 
       _client = CFClient.create(config, user);
       debugPrint('CFClient created successfully');
 
-      // Add a listener for all flag changes
-      _client!.listenerManager.registerAllFlagsListener(
-        _CustomAllFlagsListener(
-          onFlagsChanged: (oldFlags, newFlags) {
-            debugPrint('🚩 Received flag update with ${newFlags.length} flags');
-            _processNewFlags(newFlags);
-          },
-        ),
-      );
-      debugPrint('✅ All flags listener registered successfully');
+      _isInitialized = true;
 
-      // Fetch initial flags
-      await _fetchAndProcessLatestFlags();
+      // Set up individual config listeners - similar to Kotlin implementation
+      _setupConfigListeners();
 
+      // Update initial values
+      _updateInitialValues();
+
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('❌ Failed to create CFClient or register listener: $e');
+      debugPrint('Stack trace: $stackTrace');
+      // Make sure UI still shows something even if client fails
       _isInitialized = true;
       notifyListeners();
-
-      // Set up periodic refresh of feature flags
-      Timer.periodic(const Duration(seconds: 5), (_) {
-        debugPrint('📋 Periodic UI refresh - current heroText = $_heroText');
-        _fetchAndProcessLatestFlags();
-      });
-    } catch (e) {
-      debugPrint('❌ Failed to create CFClient or register listener: $e');
     }
   }
 
-  void _processNewFlags(Map<String, dynamic> newFlags) {
-    _featureFlags = Map.from(newFlags);
+  void _updateInitialValues() {
+    if (_client == null) return;
 
-    // Process hero text flag
-    if (newFlags.containsKey('hero_text')) {
-      final value = newFlags['hero_text'];
-      if (value is Map<String, dynamic> && value.containsKey('variation')) {
-        final variation = value['variation'];
-        if (variation != null &&
-            variation is String &&
-            variation != _heroText) {
-          _heroText = variation;
-          // Update message when hero text changes
-          _lastConfigChangeMessage = "FLAG UPDATE: hero_text = $_heroText";
-          _lastMessageTime = DateTime.now();
-          notifyListeners(); // Notify UI of hero text change
-        }
-      } else if (value is String && value != _heroText) {
-        _heroText = value;
-        // Update message when hero text changes
-        _lastConfigChangeMessage = "FLAG UPDATE: hero_text = $_heroText";
-        _lastMessageTime = DateTime.now();
-        notifyListeners(); // Notify UI of hero text change
-      }
-    }
+    // Get initial values from config
+    _heroText = _client!.getString('hero_text', 'CF DEMO');
+    _enhancedToast = _client!.getBoolean('enhanced_toast', false);
 
-    // Process enhanced toast flag
-    if (newFlags.containsKey('enhanced_toast')) {
-      final value = newFlags['enhanced_toast'];
-      if (value is Map<String, dynamic> && value.containsKey('variation')) {
-        final variation = value['variation'];
-        if (variation != null &&
-            variation is bool &&
-            variation != _enhancedToast) {
-          _enhancedToast = variation;
-        }
-      } else if (value is bool && value != _enhancedToast) {
-        _enhancedToast = value;
-      }
-    }
+    debugPrint(
+        'Initial values: heroText=$_heroText, enhancedToast=$_enhancedToast');
+
+    _featureFlags = {
+      'hero_text': {'variation': _heroText},
+      'enhanced_toast': {'variation': _enhancedToast},
+    };
 
     notifyListeners();
   }
 
-  Future<void> _fetchAndProcessLatestFlags() async {
-    try {
-      debugPrint('🔄 Fetching latest configuration...');
-      // First try to fetch new config from server
-      try {
-        await _client!.configFetcher.fetchConfig();
-        debugPrint('✅ Fetched latest flags from server');
-      } catch (e) {
-        debugPrint('⚠️ Error fetching flags from server: $e');
-      }
+  void _setupConfigListeners() {
+    if (_client == null) return;
 
-      // Then get the latest flags from the client
-      final newFlags = await _client!.configManager.getAllFlags();
-      debugPrint('📊 Got flags: $newFlags');
-      _processNewFlags(newFlags);
-    } catch (e) {
-      debugPrint('⚠️ Error processing flags update: $e');
-    }
+    // Add listener for hero_text - similar to heroTextListener in Kotlin
+    _client!.addConfigListener<String>('hero_text', (newValue) {
+      debugPrint(
+          '🚩 hero_text config listener triggered with value: $newValue');
+      if (_heroText != newValue) {
+        _heroText = newValue;
+        _lastConfigChangeMessage = "FLAG UPDATE: hero_text = $_heroText";
+        _lastMessageTime = DateTime.now();
+        notifyListeners();
+      }
+    });
+
+    // Add listener for enhanced_toast - similar to enhancedToastListener in Kotlin
+    _client!.addConfigListener<bool>('enhanced_toast', (isEnabled) {
+      debugPrint(
+          '🚩 enhanced_toast config listener triggered with value: $isEnabled');
+      if (_enhancedToast != isEnabled) {
+        _enhancedToast = isEnabled;
+        notifyListeners();
+      }
+    });
+
+    debugPrint('✅ Config listeners set up successfully');
   }
 
   Future<void> toggleOfflineMode() async {
@@ -186,12 +163,12 @@ class CustomFitProvider with ChangeNotifier {
 
   /// Force a refresh of feature flags
   Future<bool> refreshFeatureFlags([String? eventName]) async {
-    if (!_isInitialized) return false;
+    if (!_isInitialized || _client == null) return false;
 
     debugPrint('Manually refreshing feature flags...');
 
     // Track the refresh event if an event name is provided
-    if (eventName != null && _client != null) {
+    if (eventName != null) {
       await trackEvent(eventName, properties: {
         'config_key': 'all',
         'refresh_source': 'user_action',
@@ -200,17 +177,13 @@ class CustomFitProvider with ChangeNotifier {
       });
     }
 
-    // If client exists, fetch and process latest flags
-    if (_client != null) {
-      await _fetchAndProcessLatestFlags();
+    // Fetch latest flags from server
+    final success = await _client!.fetchConfigs();
+    if (success) {
+      // Values will be updated through listeners
+      debugPrint('✅ Flags refreshed successfully');
     } else {
-      // If no client, update values manually to latest known version from server
-      _heroText = 'CF Kotlin Flag Demo-18';
-      _featureFlags = {
-        'hero_text': {'variation': _heroText},
-        'enhanced_toast': {'variation': _enhancedToast},
-      };
-      notifyListeners();
+      debugPrint('⚠️ Failed to refresh flags');
     }
 
     // Update the last message
@@ -218,27 +191,17 @@ class CustomFitProvider with ChangeNotifier {
     _lastMessageTime = DateTime.now();
     notifyListeners();
 
-    return true;
+    return success;
   }
 
   @override
   void dispose() {
     if (_isInitialized && _client != null) {
+      // Remove listeners when provider is disposed
+      _client!.removeConfigListener('hero_text');
+      _client!.removeConfigListener('enhanced_toast');
       _client!.shutdown();
     }
     super.dispose();
-  }
-}
-
-class _CustomAllFlagsListener implements AllFlagsListener {
-  final void Function(Map<String, dynamic>, Map<String, dynamic>)
-      onFlagsChanged;
-
-  _CustomAllFlagsListener({required this.onFlagsChanged});
-
-  @override
-  void onAllFlagsChanged(
-      Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags) {
-    onFlagsChanged(oldFlags, newFlags);
   }
 }
