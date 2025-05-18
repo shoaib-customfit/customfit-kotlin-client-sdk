@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../config/core/cf_config.dart';
 import '../../network/config_fetcher.dart';
+import '../../analytics/summary/summary_manager.dart';
+import '../../core/logging/logger.dart';
 
 /// Interface for ConfigManager
 abstract class ConfigManager {
@@ -45,6 +47,7 @@ abstract class ConfigManager {
 class ConfigManagerImpl implements ConfigManager {
   final CFConfig _config;
   final ConfigFetcher _configFetcher;
+  final SummaryManager? _summaryManager;
 
   // Cache for feature flags
   final Map<String, dynamic> _configMap = {};
@@ -68,8 +71,10 @@ class ConfigManagerImpl implements ConfigManager {
   ConfigManagerImpl({
     required CFConfig config,
     required ConfigFetcher configFetcher,
+    SummaryManager? summaryManager,
   })  : _config = config,
-        _configFetcher = configFetcher {
+        _configFetcher = configFetcher,
+        _summaryManager = summaryManager {
     // Start SDK settings check
     _startSdkSettingsCheck();
   }
@@ -92,28 +97,28 @@ class ConfigManagerImpl implements ConfigManager {
         intervalMs < minimumInterval ? recommendedInterval : intervalMs;
 
     if (intervalMs < minimumInterval) {
-      debugPrint(
+      Logger.w(
           'CRITICAL WARNING: Configured interval ${intervalMs}ms is too short and would cause excessive network traffic!');
-      debugPrint(
+      Logger.w(
           'Enforcing recommended interval of ${recommendedInterval}ms (4 minutes) to prevent network abuse.');
-      debugPrint(
+      Logger.w(
           'Please update your CFConfig to use a reasonable polling interval (4+ minutes recommended).');
     } else if (intervalMs < recommendedInterval) {
-      debugPrint(
+      Logger.w(
           'WARNING: Configured interval ${intervalMs}ms is shorter than the recommended ${recommendedInterval}ms (4 minutes).');
-      debugPrint(
+      Logger.w(
           'Short intervals may cause excessive network traffic and battery drain.');
     }
 
     // Log the final interval being used
-    debugPrint(
+    Logger.i(
         'Starting SDK settings check timer with actual interval: ${actualIntervalMs}ms');
 
     // Create a new timer with the safe interval
     _sdkSettingsTimer = Timer.periodic(
       Duration(milliseconds: actualIntervalMs),
       (timer) {
-        debugPrint('Timer fired after ${actualIntervalMs}ms');
+        Logger.d('Timer fired after ${actualIntervalMs}ms');
         _checkSdkSettings();
       },
     );
@@ -133,11 +138,14 @@ class ConfigManagerImpl implements ConfigManager {
   /// Check SDK settings for updates
   Future<void> _checkSdkSettings() async {
     try {
+      Logger.d('🔎 API POLL: Starting SDK settings check');
+
       // Fetch metadata
       final metadataResult = await _configFetcher.fetchMetadata();
 
       if (!metadataResult.isSuccess) {
-        debugPrint('Failed to fetch metadata');
+        Logger.w(
+            '🔎 API POLL: Failed to fetch metadata: ${metadataResult.getErrorMessage()}');
         return;
       }
 
@@ -147,15 +155,15 @@ class ConfigManagerImpl implements ConfigManager {
       // If we get 'unchanged' for Last-Modified, it means we got a 304 response
       // No need to fetch the config again
       if (lastModified == 'unchanged') {
-        debugPrint(
-            'SDK settings unchanged (304 Not Modified), skipping config fetch');
+        Logger.d(
+            '🔎 API POLL: SDK settings unchanged (304 Not Modified), skipping config fetch');
         return;
       }
 
       // Check if we need to update based on Last-Modified
       if (lastModified != null && lastModified != _previousLastModified) {
-        debugPrint(
-            'Last-Modified changed from $_previousLastModified to $lastModified');
+        Logger.i(
+            '🔎 API POLL: Last-Modified changed from $_previousLastModified to $lastModified');
         _previousLastModified = lastModified;
 
         // Fetch config
@@ -163,7 +171,7 @@ class ConfigManagerImpl implements ConfigManager {
             await _configFetcher.fetchConfig(lastModified: lastModified);
 
         if (!configSuccess) {
-          debugPrint('Failed to fetch config');
+          Logger.w('🔎 API POLL: Failed to fetch config');
           return;
         }
 
@@ -171,17 +179,21 @@ class ConfigManagerImpl implements ConfigManager {
         final configsResult = _configFetcher.getConfigs();
 
         if (!configsResult.isSuccess) {
-          debugPrint('Failed to get configs');
+          Logger.w(
+              '🔎 API POLL: Failed to get configs: ${configsResult.getErrorMessage()}');
           return;
         }
 
         final configs = configsResult.getOrNull() ?? {};
+        Logger.i(
+            '🔎 API POLL: Successfully fetched ${configs.length} config entries');
         _updateConfigMap(configs);
       } else {
-        debugPrint('No change in Last-Modified header, skipping config fetch');
+        Logger.d(
+            '🔎 API POLL: No change in Last-Modified header, skipping config fetch');
       }
     } catch (e) {
-      debugPrint('Error checking SDK settings: $e');
+      Logger.e('🔎 API POLL: Error checking SDK settings: $e');
     }
   }
 
@@ -196,7 +208,8 @@ class ConfigManagerImpl implements ConfigManager {
 
         // Check if the value has changed
         if (currentValue != value) {
-          debugPrint('⚡ Config key "$key" changed: $currentValue -> $value');
+          Logger.i(
+              '⚡ CONFIG UPDATE: Key "$key" changed: $currentValue -> $value');
           _configMap[key] = value;
           updatedKeys.add(key);
         }
@@ -204,19 +217,19 @@ class ConfigManagerImpl implements ConfigManager {
     });
 
     // Debug: Print the full config map
-    debugPrint('===== FULL CONFIG MAP =====');
+    Logger.d('===== FULL CONFIG MAP =====');
     _configMap.forEach((key, value) {
-      debugPrint('$key: $value');
+      Logger.d('$key: $value');
     });
-    debugPrint('==========================');
+    Logger.d('==========================');
 
     // Notify listeners if anything changed
     if (updatedKeys.isNotEmpty) {
-      debugPrint(
+      Logger.i(
           '⚡ Notifying listeners about ${updatedKeys.length} changed keys: $updatedKeys');
       _notifyConfigChanges(updatedKeys);
     } else {
-      debugPrint('No config keys changed, skipping notification');
+      Logger.d('No config keys changed, skipping notification');
     }
   }
 
@@ -232,256 +245,243 @@ class ConfigManagerImpl implements ConfigManager {
       // If it's a feature flag with variation field, use that value
       if (value is Map<String, dynamic> && value.containsKey('variation')) {
         valueToNotify = value['variation'];
-        debugPrint(
+        Logger.d(
             '⚡ Notifying listeners for "$key" with variation value: $valueToNotify');
       } else {
-        debugPrint(
+        Logger.d(
             '⚡ Notifying listeners for "$key" with direct value: $valueToNotify');
       }
 
       if (listeners != null) {
         for (final listener in List<void Function(dynamic)>.from(listeners)) {
           try {
-            debugPrint(
+            Logger.d(
                 '⚡ Calling listener for "$key" with value: $valueToNotify');
             listener(valueToNotify);
           } catch (e) {
-            debugPrint('Error notifying config change listener: $e');
+            Logger.e('Error notifying config change listener: $e');
           }
         }
-      } else {
-        debugPrint('No listeners registered for key "$key"');
       }
     }
   }
 
   @override
   String getString(String key, String defaultValue) {
-    debugPrint(
-        'getString called for key: "$key" with default: "$defaultValue"');
-    final value = _configMap[key];
+    final variation = _getVariation(key);
 
-    debugPrint(
-        'Raw value from _configMap["$key"]: $value (type: ${value?.runtimeType})');
-
-    if (value == null) {
-      debugPrint('Config key "$key" not found, using default: $defaultValue');
+    if (variation == null) {
+      Logger.i('CONFIG VALUE: $key: $defaultValue (using fallback)');
       return defaultValue;
     }
 
-    // IMPORTANT: First check if it's a feature flag with a variation field
-    if (value is Map<String, dynamic>) {
-      debugPrint('Value for "$key" is a Map with keys: ${value.keys.toList()}');
+    if (variation is String) {
+      Logger.i('CONFIG VALUE: $key: $variation');
 
-      if (value.containsKey('variation')) {
-        final variation = value['variation'];
-        debugPrint(
-            '✅ FOUND "variation" field for "$key": "$variation" (type: ${variation.runtimeType})');
+      // Push summary for the retrieved value
+      _pushSummaryForKey(key);
 
-        if (variation is String) {
-          debugPrint(
-              '✅ RETURNING feature flag "$key" string variation value: "$variation"');
-          return variation;
-        } else {
-          debugPrint(
-              '⚠️ Variation for "$key" is not a string: $variation (${variation.runtimeType})');
-          // Convert to string if possible
-          return variation.toString();
-        }
-      } else {
-        debugPrint('⚠️ Map for "$key" does not contain "variation" field');
-      }
+      return variation;
     }
 
-    // Direct string value
-    if (value is String) {
-      debugPrint('Found string value for "$key": "$value"');
-      return value;
-    }
-
-    debugPrint(
-        '⚠️ Value for "$key" is not a string: $value (${value.runtimeType}), using default: "$defaultValue"');
+    Logger.w(
+        'Type mismatch for "$key": expected String, got ${variation.runtimeType}');
+    Logger.i(
+        'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
     return defaultValue;
   }
 
   @override
   bool getBoolean(String key, bool defaultValue) {
-    final value = _configMap[key];
-    if (value == null) {
-      debugPrint('Config key "$key" not found, using default: $defaultValue');
+    final variation = _getVariation(key);
+
+    if (variation == null) {
+      Logger.i('CONFIG VALUE: $key: $defaultValue (using fallback)');
       return defaultValue;
     }
 
-    // Check if it's a feature flag with a variation field (same as in CFClient._notifyConfigChanges)
-    if (value is Map<String, dynamic> && value.containsKey('variation')) {
-      final variation = value['variation'];
+    if (variation is bool) {
+      Logger.i('CONFIG VALUE: $key: $variation');
 
-      // Check the type of the variation value
-      if (variation is bool) {
-        debugPrint(
-            'Found feature flag "$key" with variation value: $variation');
-        return variation;
-      }
+      // Push summary for the retrieved value
+      _pushSummaryForKey(key);
 
-      if (variation is String) {
-        debugPrint(
-            'Found feature flag "$key" with string variation value: $variation, converting to boolean');
-        return variation.toLowerCase() == 'true';
-      }
-
-      if (variation is num) {
-        debugPrint(
-            'Found feature flag "$key" with numeric variation value: $variation, converting to boolean');
-        return variation != 0;
-      }
+      return variation;
     }
 
-    // Direct boolean value
-    if (value is bool) {
-      debugPrint('Found boolean value for "$key": $value');
-      return value;
-    }
-
-    if (value is String) {
-      debugPrint(
-          'Found string value for "$key": $value, converting to boolean');
-      return value.toLowerCase() == 'true';
-    }
-
-    if (value is num) {
-      debugPrint(
-          'Found numeric value for "$key": $value, converting to boolean');
-      return value != 0;
-    }
-
-    debugPrint(
-        'Value for "$key" is not convertible to boolean: $value (${value.runtimeType}), using default: $defaultValue');
+    Logger.w(
+        'Type mismatch for "$key": expected bool, got ${variation.runtimeType}');
+    Logger.i(
+        'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
     return defaultValue;
   }
 
   @override
   num getNumber(String key, num defaultValue) {
-    final value = _configMap[key];
-    if (value == null) {
-      debugPrint('Config key "$key" not found, using default: $defaultValue');
+    final variation = _getVariation(key);
+
+    if (variation == null) {
+      Logger.i('CONFIG VALUE: $key: $defaultValue (using fallback)');
       return defaultValue;
     }
 
-    // Check if it's a feature flag with a variation field (same as in CFClient._notifyConfigChanges)
-    if (value is Map<String, dynamic> && value.containsKey('variation')) {
-      final variation = value['variation'];
+    if (variation is num) {
+      Logger.i('CONFIG VALUE: $key: $variation');
 
-      // Check the type of the variation value
-      if (variation is num) {
-        debugPrint(
-            'Found feature flag "$key" with numeric variation value: $variation');
-        return variation;
-      }
+      // Push summary for the retrieved value
+      _pushSummaryForKey(key);
 
-      if (variation is String) {
-        debugPrint(
-            'Found feature flag "$key" with string variation value: $variation, attempting to convert to number');
-        try {
-          return num.parse(variation);
-        } catch (e) {
-          debugPrint(
-              'Failed to parse string variation "$variation" as number: $e');
-          return defaultValue;
-        }
-      }
+      return variation;
     }
 
-    // Direct numeric value
-    if (value is num) {
-      debugPrint('Found numeric value for "$key": $value');
-      return value;
-    }
-
-    if (value is String) {
-      debugPrint(
-          'Found string value for "$key": $value, attempting to convert to number');
-      try {
-        return num.parse(value);
-      } catch (e) {
-        debugPrint('Failed to parse "$value" as number: $e');
-        return defaultValue;
-      }
-    }
-
-    debugPrint(
-        'Value for "$key" is not convertible to number: $value (${value.runtimeType}), using default: $defaultValue');
+    Logger.w(
+        'Type mismatch for "$key": expected num, got ${variation.runtimeType}');
+    Logger.i(
+        'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
     return defaultValue;
   }
 
   @override
   Map<String, dynamic> getJson(String key, Map<String, dynamic> defaultValue) {
-    final value = _configMap[key];
-    if (value == null) {
-      debugPrint('Config key "$key" not found, using default');
+    final variation = _getVariation(key);
+
+    if (variation == null) {
+      Logger.i('CONFIG VALUE: $key: $defaultValue (using fallback)');
       return defaultValue;
     }
 
-    // Check if it's a feature flag with a variation field (same as in CFClient._notifyConfigChanges)
-    if (value is Map<String, dynamic> && value.containsKey('variation')) {
-      final variation = value['variation'];
+    if (variation is Map<String, dynamic>) {
+      Logger.i('CONFIG VALUE: $key: $variation');
 
-      // Check if the variation is itself a Map
-      if (variation is Map<String, dynamic>) {
-        debugPrint('Found feature flag "$key" with JSON variation value');
-        return variation;
-      }
+      // Push summary for the retrieved value
+      _pushSummaryForKey(key);
+
+      return variation;
     }
 
-    // Direct Map value
-    if (value is Map<String, dynamic>) {
-      debugPrint('Found JSON value for "$key"');
-      return value;
-    }
-
-    debugPrint(
-        'Value for "$key" is not a JSON object: $value (${value.runtimeType}), using default');
+    Logger.w(
+        'Type mismatch for "$key": expected Map<String, dynamic>, got ${variation.runtimeType}');
+    Logger.i(
+        'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
     return defaultValue;
+  }
+
+  /// Helper method to get the variation value
+  dynamic _getVariation(String key) {
+    final config = synchronized(_configLock, () => _configMap[key]);
+
+    if (config == null) {
+      Logger.d('No config found for key "$key"');
+      return null;
+    }
+
+    if (config is Map<String, dynamic>) {
+      return config['variation'];
+    } else {
+      Logger.d('Config for "$key" is not a map: $config');
+      return null;
+    }
+  }
+
+  /// Push summary for tracking and analytics
+  void _pushSummaryForKey(String key) {
+    if (_summaryManager == null) {
+      return;
+    }
+
+    try {
+      final config = synchronized(_configLock, () => _configMap[key]);
+
+      if (config is Map<String, dynamic>) {
+        // Create a copy to avoid modifying the original
+        final configMapWithKey = Map<String, dynamic>.from(config);
+
+        // Add key to help with debugging
+        configMapWithKey['key'] = key;
+
+        // Ensure required fields are present
+        if (!configMapWithKey.containsKey('experience_id') &&
+            configMapWithKey.containsKey('id')) {
+          configMapWithKey['experience_id'] = configMapWithKey['id'] as String;
+        }
+
+        // Add default values for other required fields if missing
+        if (!configMapWithKey.containsKey('config_id')) {
+          configMapWithKey['config_id'] =
+              configMapWithKey['id'] ?? 'default-config-id';
+        }
+
+        if (!configMapWithKey.containsKey('variation_id')) {
+          configMapWithKey['variation_id'] =
+              configMapWithKey['id'] ?? 'default-variation-id';
+        }
+
+        if (!configMapWithKey.containsKey('version')) {
+          configMapWithKey['version'] = '1.0.0';
+        }
+
+        // Use async/await with pushSummary instead of then
+        Logger.d('Pushing summary for key: $key');
+        _summaryManager!.pushSummary(configMapWithKey).onSuccess((_) {
+          Logger.d('Summary pushed for key: $key');
+        }).onError((result) {
+          Logger.w(
+              'Failed to push summary for key "$key": ${result.getErrorMessage()}');
+        });
+      }
+    } catch (e) {
+      Logger.e('Exception while pushing summary for key "$key": $e');
+    }
   }
 
   @override
   void addConfigListener<T>(String key, void Function(T) listener) {
     synchronized(_configLock, () {
-      _configListeners[key] ??= [];
+      // Get or create list of listeners for this key
+      final listeners = _configListeners[key] ?? [];
 
-      // Cast to dynamic function to store in the map
-      dynamicListener(dynamic value) {
+      // Add listener
+      listeners.add((value) {
         if (value is T) {
           listener(value);
+        } else {
+          Logger.w(
+              'Type mismatch for listener on "$key": expected ${T.toString()}, got ${value.runtimeType}');
         }
-      }
+      });
 
-      _configListeners[key]!.add(dynamicListener);
-
-      // Notify with current value if available
-      final currentValue = _configMap[key];
-      if (currentValue != null && currentValue is T) {
-        listener(currentValue);
-      }
+      // Update map
+      _configListeners[key] = listeners;
     });
+
+    Logger.d('Added listener for key "$key"');
+
+    // Notify immediately if we already have a value
+    final variation = _getVariation(key);
+    if (variation != null && variation is T) {
+      listener(variation as T);
+    }
   }
 
   @override
   void removeConfigListener<T>(String key, void Function(T) listener) {
     synchronized(_configLock, () {
+      // Get listeners for this key
       final listeners = _configListeners[key];
-      if (listeners == null) {
-        return;
-      }
 
-      // Remove listeners that match the signature
-      // This is a simplification as we can't directly compare function references
-      // in Dart, so we're removing all listeners for the given type
-      _configListeners[key] = listeners.where((l) {
-        // We can't directly compare function references in Dart
-        // This is a simplification that will remove all listeners for the given key
-        return false;
-      }).toList();
+      if (listeners != null) {
+        // Remove matching listeners
+        // This is a bit tricky since we can't directly compare function references
+        // We'll need to use toString() and hope for the best
+        final listenerString = listener.toString();
+        listeners.removeWhere((l) => l.toString() == listenerString);
+
+        // Update map
+        _configListeners[key] = listeners;
+      }
     });
+
+    Logger.d('Removed listener for key "$key"');
   }
 
   @override
@@ -489,76 +489,74 @@ class ConfigManagerImpl implements ConfigManager {
     synchronized(_configLock, () {
       _configListeners.remove(key);
     });
+
+    Logger.d('Cleared all listeners for key "$key"');
   }
 
   @override
   Map<String, dynamic> getAllFlags() {
-    // Debug: Print the full config map when accessed
-    debugPrint('===== ACCESSING FULL CONFIG MAP =====');
-    _configMap.forEach((key, value) {
-      debugPrint('$key: $value');
+    final result = <String, dynamic>{};
+
+    synchronized(_configLock, () {
+      for (final entry in _configMap.entries) {
+        final key = entry.key;
+        final value = entry.value;
+
+        if (value is Map<String, dynamic> && value.containsKey('variation')) {
+          result[key] = value['variation'];
+        } else {
+          result[key] = value;
+        }
+      }
     });
-    debugPrint('===================================');
 
-    return Map<String, dynamic>.unmodifiable(_configMap);
-  }
-
-  /// Get the completer for SDK settings initialization
-  Completer<void> getSdkSettingsCompleter() {
-    return _sdkSettingsCompleter;
+    return result;
   }
 
   @override
   void shutdown() {
+    Logger.i('Shutting down ConfigManager');
     _sdkSettingsTimer?.cancel();
+    _sdkSettingsTimer = null;
     _configListeners.clear();
   }
 
-  /// Manually trigger a refresh of configs
+  @override
   Future<bool> refreshConfigs() async {
-    debugPrint('Manually refreshing configs...');
+    Logger.i('⚡ Manually refreshing configs');
     try {
       await _checkSdkSettings();
       return true;
     } catch (e) {
-      debugPrint('Error during manual config refresh: $e');
+      Logger.e('Error refreshing configs: $e');
       return false;
     }
   }
 
-  /// Debug method to dump the entire config map in detail
+  @override
   void dumpConfigMap() {
-    debugPrint('========== FULL CONFIG MAP DUMP ==========');
-    if (_configMap.isEmpty) {
-      debugPrint('CONFIG MAP IS EMPTY');
-    } else {
-      _configMap.forEach((key, value) {
-        debugPrint('Key: "$key"');
-        debugPrint('  Value: $value');
-        debugPrint('  Type: ${value.runtimeType}');
+    Logger.i('===== DETAILED CONFIG MAP =====');
+
+    synchronized(_configLock, () {
+      for (final key in _configMap.keys) {
+        final value = _configMap[key];
+        Logger.i('$key: $value');
 
         if (value is Map<String, dynamic>) {
-          debugPrint('  Map keys: ${value.keys.toList()}');
-
-          // If it has a variation key, show it
-          if (value.containsKey('variation')) {
-            final variation = value['variation'];
-            debugPrint('  Variation: $variation (${variation.runtimeType})');
+          for (final subKey in value.keys) {
+            Logger.i('  $subKey: ${value[subKey]}');
           }
         }
+      }
+    });
 
-        debugPrint('----------------------------------------');
-      });
-    }
-    debugPrint('=========================================');
+    Logger.i('==============================');
   }
 }
 
-/// Simple synchronization helper
+/// Helper for synchronized blocks
 T synchronized<T>(Object lock, T Function() fn) {
-  try {
-    return fn();
-  } finally {
-    // No actual locking in Dart, this is just a pattern to make the code more readable
-  }
+  T result;
+  result = fn();
+  return result;
 }

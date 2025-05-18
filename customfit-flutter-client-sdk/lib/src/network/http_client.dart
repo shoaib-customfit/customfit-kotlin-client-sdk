@@ -9,6 +9,7 @@ import '../core/error/error_category.dart';
 import '../core/error/error_handler.dart';
 import '../core/error/error_severity.dart';
 import '../constants/cf_constants.dart';
+import '../core/logging/logger.dart';
 
 /// HTTP client implementation mirroring Kotlin's HttpClient
 class HttpClient {
@@ -39,27 +40,27 @@ class HttpClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
-          debugPrint('==== CF API REQUEST ====');
-          debugPrint('URL: \\${options.uri}');
-          debugPrint('Method: \\${options.method}');
-          debugPrint('Headers: \\${options.headers}');
-          debugPrint('Payload: \\${options.data}');
-          debugPrint('=======================');
+          Logger.d('==== CF API REQUEST ====');
+          Logger.d('URL: ${options.uri}');
+          Logger.d('Method: ${options.method}');
+          Logger.d('Headers: ${options.headers}');
+          Logger.d('Payload: ${options.data}');
+          Logger.d('=======================');
           return handler.next(options);
         },
         onResponse: (response, handler) {
-          debugPrint('==== CF API RESPONSE ====');
-          debugPrint('Status: \\${response.statusCode}');
-          debugPrint('Data: \\${response.data}');
-          debugPrint('========================');
+          Logger.d('==== CF API RESPONSE ====');
+          Logger.d('Status: ${response.statusCode}');
+          Logger.d('Data: ${response.data}');
+          Logger.d('========================');
           return handler.next(response);
         },
         onError: (DioError e, handler) {
-          debugPrint('==== CF API ERROR ====');
-          debugPrint('URL: \\${e.requestOptions.uri}');
-          debugPrint('Error: \\${e.error}');
-          debugPrint('Response: \\${e.response}');
-          debugPrint('======================');
+          Logger.e('==== CF API ERROR ====');
+          Logger.e('URL: ${e.requestOptions.uri}');
+          Logger.e('Error: ${e.error}');
+          Logger.e('Response: ${e.response}');
+          Logger.e('======================');
           return handler.next(e);
         },
       ),
@@ -73,11 +74,11 @@ class HttpClient {
       responseHeader: true,
       responseBody: true,
       error: true,
-      logPrint: (log) => debugPrint('HTTP: $log'),
+      logPrint: (log) => Logger.d('HTTP: $log'),
     ));
 
-    debugPrint(
-        'HttpClient initialized with connectTimeout=$_connectionTimeoutMs, readTimeout=$_readTimeoutMs');
+    Logger.i(
+        'HttpClient initialized with connectTimeout=$_connectionTimeoutMs ms, readTimeout=$_readTimeoutMs ms');
   }
 
   /// Update connection timeout
@@ -85,7 +86,7 @@ class HttpClient {
     if (timeoutMs <= 0) throw ArgumentError('Timeout must be > 0');
     _connectionTimeoutMs = timeoutMs;
     _dio.options.connectTimeout = Duration(milliseconds: timeoutMs);
-    debugPrint('Updated connection timeout to $timeoutMs ms');
+    Logger.i('Updated connection timeout to $timeoutMs ms');
   }
 
   /// Update read timeout
@@ -93,14 +94,14 @@ class HttpClient {
     if (timeoutMs <= 0) throw ArgumentError('Timeout must be > 0');
     _readTimeoutMs = timeoutMs;
     _dio.options.receiveTimeout = Duration(milliseconds: timeoutMs);
-    debugPrint('Updated read timeout to $timeoutMs ms');
+    Logger.i('Updated read timeout to $timeoutMs ms');
   }
 
   /// GET request for metadata (Last-Modified, ETag)
   Future<CFResult<Map<String, String>>> fetchMetadata(String url,
       {String? lastModified, String? etag}) async {
     try {
-      debugPrint('GET $url for metadata');
+      Logger.i('GET $url for metadata');
 
       // Add caching headers to avoid unnecessary network calls
       final headers = {
@@ -113,10 +114,12 @@ class HttpClient {
           lastModified.isNotEmpty &&
           lastModified != 'unchanged') {
         headers['If-Modified-Since'] = lastModified;
+        Logger.d('Using If-Modified-Since: $lastModified');
       }
 
       if (etag != null && etag.isNotEmpty && etag != 'unchanged') {
         headers['If-None-Match'] = etag;
+        Logger.d('Using If-None-Match: $etag');
       }
 
       final options = Options(
@@ -126,11 +129,12 @@ class HttpClient {
             status != null && (status >= 200 && status < 300 || status == 304),
       );
 
+      Logger.d('🔎 API HTTP: GET metadata for $url');
       final resp = await _dio.get(url, options: options);
 
       // Handle 304 Not Modified (return the same headers)
       if (resp.statusCode == 304) {
-        debugPrint('Metadata unchanged (304 Not Modified)');
+        Logger.i('🔎 API HTTP: Metadata unchanged (304 Not Modified)');
         return CFResult.success({
           CFConstants.http.headerLastModified: lastModified ?? 'unchanged',
           CFConstants.http.headerEtag: etag ?? 'unchanged',
@@ -145,11 +149,11 @@ class HttpClient {
               headers.value('Last-Modified') ?? '',
           CFConstants.http.headerEtag: headers.value('ETag') ?? '',
         };
-        debugPrint('Got metadata headers: $resultHeaders');
+        Logger.i('🔎 API HTTP: Got metadata headers: $resultHeaders');
         return CFResult.success(resultHeaders);
       } else {
         final msg = 'Failed GET metadata $url: ${resp.statusCode}';
-        debugPrint(msg);
+        Logger.w('🔎 API HTTP: $msg');
         ErrorHandler.handleError(msg,
             source: _SOURCE,
             category: ErrorCategory.network,
@@ -159,7 +163,7 @@ class HttpClient {
       }
     } catch (e) {
       final errorMsg = 'Error GET metadata $url: ${e.toString()}';
-      debugPrint(errorMsg);
+      Logger.e('🔎 API HTTP: $errorMsg');
       ErrorHandler.handleException(e, errorMsg,
           source: _SOURCE, severity: ErrorSeverity.high);
       return CFResult.error(errorMsg,
@@ -170,14 +174,16 @@ class HttpClient {
   /// GET request for a JSON object
   Future<CFResult<Map<String, dynamic>>> fetchJson(String url) async {
     try {
-      debugPrint('GET $url');
+      Logger.i('GET $url');
       final resp = await _dio.get(url);
       if (resp.statusCode == 200) {
         final data = resp.data;
         if (data is Map<String, dynamic>) {
+          Logger.i('🔎 API HTTP: Successfully fetched JSON from $url');
           return CFResult.success(data);
         } else {
           final msg = 'GET $url JSON not object';
+          Logger.w('🔎 API HTTP: $msg - Response data is not a JSON object');
           ErrorHandler.handleError(msg,
               source: _SOURCE,
               category: ErrorCategory.serialization,
@@ -186,6 +192,7 @@ class HttpClient {
         }
       } else {
         final msg = 'Failed GET $url: ${resp.statusCode}';
+        Logger.w('🔎 API HTTP: $msg');
         ErrorHandler.handleError(msg,
             source: _SOURCE,
             category: ErrorCategory.network,
@@ -194,6 +201,7 @@ class HttpClient {
             code: resp.statusCode ?? 0, category: ErrorCategory.network);
       }
     } catch (e) {
+      Logger.e('🔎 API HTTP: Error GET $url: ${e.toString()}');
       ErrorHandler.handleException(e, 'Error GET $url',
           source: _SOURCE, severity: ErrorSeverity.high);
       return CFResult.error('Network error GET $url: ${e.toString()}',
@@ -205,7 +213,19 @@ class HttpClient {
   Future<CFResult<bool>> postJson(String url, String payload) async {
     const sep = '===== API RESPONSE =====';
     try {
-      debugPrint('POST $url');
+      Logger.i('POST $url');
+
+      // Log payload size
+      Logger.i('POST request payload size: ${payload.length} bytes');
+
+      // Log based on endpoint type
+      if (url.contains("summary")) {
+        Logger.i('📊 SUMMARY HTTP: POST request');
+      } else if (url.contains("cfe") || url.contains("events")) {
+        Logger.i('🔔 TRACK HTTP: POST request to event API');
+        Logger.i('🔔 TRACK HTTP: Request body size: ${payload.length} bytes');
+      }
+
       final resp = await _dio.post(
         url,
         data: payload,
@@ -213,29 +233,57 @@ class HttpClient {
           CFConstants.http.headerContentType: CFConstants.http.contentTypeJson
         }),
       );
-      debugPrint(sep);
-      debugPrint('Status: ${resp.statusCode}');
+
+      Logger.d(sep);
+      Logger.d('Status: ${resp.statusCode}');
+
       if (resp.statusCode == 200 || resp.statusCode == 202) {
-        debugPrint(resp.data.toString());
+        // Log based on endpoint type
+        if (url.contains("summary")) {
+          Logger.i('📊 SUMMARY HTTP: Response code: ${resp.statusCode}');
+          Logger.i('📊 SUMMARY HTTP: Summary successfully sent to server');
+        } else if (url.contains("cfe") || url.contains("events")) {
+          Logger.i('🔔 TRACK HTTP: Response code: ${resp.statusCode}');
+          Logger.i('🔔 TRACK HTTP: Events successfully sent to server');
+        }
+
+        Logger.d(resp.data.toString());
         return CFResult.success(true);
       } else {
         final body = resp.data?.toString() ?? 'No error body';
         final msg = 'Error POST $url: ${resp.statusCode}';
+
+        // Log based on endpoint type
+        if (url.contains("summary")) {
+          Logger.w('📊 SUMMARY HTTP: Error code: ${resp.statusCode}');
+          Logger.w('📊 SUMMARY HTTP: Error body: $body');
+        } else if (url.contains("cfe") || url.contains("events")) {
+          Logger.w('🔔 TRACK HTTP: Error code: ${resp.statusCode}');
+          Logger.w('🔔 TRACK HTTP: Error body: $body');
+        }
+
         ErrorHandler.handleError('$msg – $body',
             source: _SOURCE,
             category: ErrorCategory.network,
             severity: ErrorSeverity.high);
-        debugPrint('Error: $body');
+        Logger.e('Error: $body');
         return CFResult.error(msg,
             code: resp.statusCode ?? 0, category: ErrorCategory.network);
       }
     } catch (e) {
+      // Log based on endpoint type
+      if (url.contains("summary")) {
+        Logger.e('📊 SUMMARY HTTP: Exception: ${e.toString()}');
+      } else if (url.contains("cfe") || url.contains("events")) {
+        Logger.e('🔔 TRACK HTTP: Exception: ${e.toString()}');
+      }
+
       ErrorHandler.handleException(e, 'Error POST $url',
           source: _SOURCE, severity: ErrorSeverity.high);
       return CFResult.error('Network error POST $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     } finally {
-      debugPrint(sep);
+      Logger.d(sep);
     }
   }
 
@@ -248,39 +296,78 @@ class HttpClient {
   }) async {
     const sep = '===== API RESPONSE =====';
     try {
-      debugPrint('POST $url');
+      Logger.i('POST $url');
+
+      // Determine if this is a tracking or summary request
+      bool isTracking = url.contains("events") || url.contains("cfe");
+      bool isSummary = url.contains("summary");
+
+      if (isTracking) {
+        Logger.i('🔔 TRACK HTTP: POST request to: $url');
+        if (data != null) {
+          Logger.i(
+              '🔔 TRACK HTTP: Request body size: ${data.toString().length} bytes');
+        }
+      } else if (isSummary) {
+        Logger.i('📊 SUMMARY HTTP: POST request to: $url');
+      }
+
       final resp = await _dio.post(
         url,
         data: data,
         queryParameters: queryParameters,
-        options: options ??
-            Options(headers: {
-              CFConstants.http.headerContentType:
-                  CFConstants.http.contentTypeJson
-            }),
+        options: options,
       );
-      debugPrint(sep);
-      debugPrint('Status: ${resp.statusCode}');
+
+      Logger.d(sep);
+      Logger.d('Status: ${resp.statusCode}');
+
       if (resp.statusCode == 200 || resp.statusCode == 202) {
-        debugPrint(resp.data.toString());
+        if (isTracking) {
+          Logger.i('🔔 TRACK HTTP: Response code: ${resp.statusCode}');
+          Logger.i('🔔 TRACK HTTP: Events successfully sent to server');
+        } else if (isSummary) {
+          Logger.i('📊 SUMMARY HTTP: Response code: ${resp.statusCode}');
+          Logger.i('📊 SUMMARY HTTP: Summary successfully sent to server');
+        }
+
         return CFResult.success(resp.data);
       } else {
         final body = resp.data?.toString() ?? 'No error body';
         final msg = 'Error POST $url: ${resp.statusCode}';
+
+        if (isTracking) {
+          Logger.w('🔔 TRACK HTTP: Error code: ${resp.statusCode}');
+          Logger.w('🔔 TRACK HTTP: Error body: $body');
+        } else if (isSummary) {
+          Logger.w('📊 SUMMARY HTTP: Error code: ${resp.statusCode}');
+          Logger.w('📊 SUMMARY HTTP: Error body: $body');
+        }
+
         ErrorHandler.handleError('$msg – $body',
             source: _SOURCE,
             category: ErrorCategory.network,
             severity: ErrorSeverity.high);
+        Logger.e('Error: $body');
         return CFResult.error(msg,
             code: resp.statusCode ?? 0, category: ErrorCategory.network);
       }
     } catch (e) {
+      bool isTracking = url.contains("events") || url.contains("cfe");
+      bool isSummary = url.contains("summary");
+
+      if (isTracking) {
+        Logger.e('🔔 TRACK HTTP: Exception: ${e.toString()}');
+      } else if (isSummary) {
+        Logger.e('📊 SUMMARY HTTP: Exception: ${e.toString()}');
+      }
+
       ErrorHandler.handleException(e, 'Error POST $url',
           source: _SOURCE, severity: ErrorSeverity.high);
       return CFResult.error('Network error POST $url: ${e.toString()}',
           exception: e, category: ErrorCategory.network);
     } finally {
-      debugPrint(sep);
+      Logger.d(sep);
     }
   }
 
