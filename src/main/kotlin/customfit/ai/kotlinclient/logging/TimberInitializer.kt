@@ -2,6 +2,8 @@ package customfit.ai.kotlinclient.logging
 
 import customfit.ai.kotlinclient.constants.CFConstants
 import org.slf4j.LoggerFactory
+import java.text.SimpleDateFormat
+import java.util.Date
 
 /**
  * A Timber-like logging interface that uses SLF4J underneath.
@@ -9,6 +11,14 @@ import org.slf4j.LoggerFactory
  */
 object Timber {
     private val logger = LoggerFactory.getLogger(CFConstants.General.LOGGER_NAME)
+    private val timestamp = { SimpleDateFormat("HH:mm:ss.SSS").format(Date()) }
+    
+    // Add direct console output for API_POLL logs
+    private fun directConsoleOutput(message: String) {
+        if (message.contains("API POLL")) {
+            println("[${timestamp()}] 📡 $message")
+        }
+    }
     
     /**
      * Log a debug message
@@ -17,6 +27,7 @@ object Timber {
         if (logger.isDebugEnabled) {
             logger.debug(message)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -26,6 +37,7 @@ object Timber {
         if (logger.isDebugEnabled) {
             logger.debug(message, throwable)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -35,6 +47,7 @@ object Timber {
         if (logger.isInfoEnabled) {
             logger.info(message)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -44,6 +57,7 @@ object Timber {
         if (logger.isInfoEnabled) {
             logger.info(message, throwable)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -53,6 +67,7 @@ object Timber {
         if (logger.isWarnEnabled) {
             logger.warn(message)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -60,7 +75,9 @@ object Timber {
      */
     fun warn(messageProducer: () -> Any?) {
         if (logger.isWarnEnabled) {
-            logger.warn(messageProducer().toString())
+            val message = messageProducer().toString()
+            logger.warn(message)
+            directConsoleOutput(message)
         }
     }
     
@@ -71,6 +88,7 @@ object Timber {
         if (logger.isWarnEnabled) {
             logger.warn(message, throwable)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -80,6 +98,7 @@ object Timber {
         if (logger.isErrorEnabled) {
             logger.error(message)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -89,6 +108,7 @@ object Timber {
         if (logger.isErrorEnabled) {
             logger.error(message, throwable)
         }
+        directConsoleOutput(message)
     }
     
     /**
@@ -96,7 +116,9 @@ object Timber {
      */
     fun e(throwable: Throwable, messageProducer: () -> Any?) {
         if (logger.isErrorEnabled) {
-            logger.error(messageProducer().toString(), throwable)
+            val message = messageProducer().toString()
+            logger.error(message, throwable)
+            directConsoleOutput(message)
         }
     }
 } 

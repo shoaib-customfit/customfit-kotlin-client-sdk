@@ -59,7 +59,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
             withContext(Dispatchers.IO) {
                 var connection: HttpURLConnection? = null
                 try {
-                    Timber.d("Making $method request to $url with timeouts: connect=${connectionTimeout.get()}ms, read=${readTimeout.get()}ms")
+                    Timber.d("API CALL: $method request to $url")
                     connection = URL(url).openConnection() as HttpURLConnection
                     connection.requestMethod = method
                     connection.connectTimeout = connectionTimeout.get()
@@ -70,13 +70,11 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
 
                     headers.forEach { (key, value) -> 
                         connection.setRequestProperty(key, value)
-                        Timber.d("Request header: $key = $value") 
                     }
 
                     if (body != null) {
                         connection.doOutput = true
                         connection.outputStream.use { it.write(body.toByteArray()) }
-                        Timber.d("Request body: ${if (body.length > 500) body.substring(0, 500) + "..." else body}")
                     }
 
                     val response = responseHandler(connection)
@@ -84,7 +82,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     return@withContext response
                 } catch (e: Exception) {
                     // Use our robust error handling system
-                    Timber.e("Network error: ${e.javaClass.simpleName} - ${e.message}")
+                    Timber.e("API ERROR: ${e.javaClass.simpleName} - ${e.message}")
                     val category = ErrorHandler.handleException(
                         e, 
                         "Error making $method request to $url", 
@@ -102,6 +100,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
      */
     suspend fun fetchMetadata(url: String): CFResult<Map<String, String>> =
             performRequest(url, "GET") { conn ->
+                Timber.d("EXECUTING GET METADATA REQUEST")
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     val metadata = conn.headerFields.let { headers ->
                         mapOf(
@@ -111,9 +110,11 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     }
                     // Since we're using GET instead of HEAD, we need to read the response to ensure the connection is released
                     conn.inputStream.bufferedReader().readText()
+                    Timber.d("GET METADATA SUCCESSFUL: $metadata")
                     CFResult.success(metadata)
                 } else {
                     val message = "Failed to fetch metadata from $url: ${conn.responseCode}"
+                    Timber.w("GET METADATA FAILED: $message")
                     ErrorHandler.handleError(
                         message, 
                         SOURCE, 
@@ -128,15 +129,18 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
      */
     suspend fun fetchJson(url: String): CFResult<JsonObject> =
             performRequest(url, "GET") { conn ->
+                Timber.d("EXECUTING GET JSON REQUEST")
                 if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                     try {
                         val responseText = conn.inputStream.bufferedReader().readText()
                         // Parse using kotlinx.serialization and cast to JsonObject
                         val jsonElement = Json.parseToJsonElement(responseText)
                         if (jsonElement is JsonObject) {
+                            Timber.d("GET JSON SUCCESSFUL")
                             CFResult.success(jsonElement)
                         } else {
                             val message = "Parsed JSON from $url is not an object"
+                            Timber.w("GET JSON FAILED: $message")
                             ErrorHandler.handleError(
                                 message, 
                                 SOURCE, 
@@ -145,6 +149,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                             CFResult.error(message, category = ErrorHandler.ErrorCategory.SERIALIZATION)
                         }
                     } catch (e: Exception) {
+                        Timber.e("GET JSON FAILED: ${e.message}")
                         ErrorHandler.handleException(
                             e, 
                             "Error parsing JSON response from $url", 
@@ -155,6 +160,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                     }
                 } else {
                     val message = "Failed to fetch JSON from $url: ${conn.responseCode}"
+                    Timber.w("GET JSON FAILED: $message")
                     ErrorHandler.handleError(
                         message, 
                         SOURCE, 
@@ -169,25 +175,22 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
      */
     suspend fun postJson(url: String, payload: String): CFResult<Boolean> =
             performRequest(url, "POST", mapOf(CFConstants.Http.HEADER_CONTENT_TYPE to CFConstants.Http.CONTENT_TYPE_JSON), payload) { conn ->
+                Timber.d("EXECUTING POST JSON REQUEST")
                 val responseCode = conn.responseCode
-
-                // Detailed logging with common format
-                val separator = "================ API RESPONSE (${url.substringAfterLast("/")}) ================"
-                Timber.i(separator)
-                Timber.i("Status Code: $responseCode")
 
                 try {
                     if (responseCode == HttpURLConnection.HTTP_OK ||
                                     responseCode == HttpURLConnection.HTTP_ACCEPTED
                     ) {
                         val responseBody = conn.inputStream.bufferedReader().readText()
-                        Timber.i(responseBody)
+                        Timber.d("POST JSON SUCCESSFUL")
                         CFResult.success(true)
                     } else {
                         val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
                         
                         // Use our error handling system
                         val message = "API error response: ${conn.responseCode}"
+                        Timber.w("POST JSON FAILED: $message - $errorBody")
                         ErrorHandler.handleError(
                             "$message - $errorBody", 
                             SOURCE, 
@@ -199,6 +202,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         CFResult.error(message, code = conn.responseCode, category = ErrorHandler.ErrorCategory.NETWORK)
                     }
                 } catch (e: Exception) {
+                    Timber.e("POST JSON FAILED: ${e.message}")
                     ErrorHandler.handleException(
                         e, 
                         "Failed to read API response", 
@@ -206,10 +210,58 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         ErrorHandler.ErrorSeverity.HIGH
                     )
                     CFResult.error("Failed to read API response", e, category = ErrorHandler.ErrorCategory.NETWORK)
-                } finally {
-                    Timber.i(separator)
                 }
             } ?: CFResult.error("Network error posting JSON to $url", category = ErrorHandler.ErrorCategory.NETWORK)
 
+    /**
+     * Performs a HEAD request to efficiently check for metadata changes
+     * Only fetches headers without downloading the full response body
+     */
+    suspend fun makeHeadRequest(url: String): CFResult<Map<String, String>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                Timber.i("API POLL: HEAD request to $url")
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.requestMethod = "HEAD"
+                connection.connectTimeout = CFConstants.Network.CONNECTION_TIMEOUT_MS
+                connection.readTimeout = CFConstants.Network.READ_TIMEOUT_MS
+                Timber.d("EXECUTING HEAD REQUEST")
+                
+                // Apply retry and timeout logic if needed
+                val responseCode = connection.responseCode
+                
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    // Extract headers
+                    val headers = mutableMapOf<String, String>()
+                    
+                    // Get Last-Modified header which is crucial for caching
+                    connection.getHeaderField(CFConstants.Http.HEADER_LAST_MODIFIED)?.let {
+                        headers[CFConstants.Http.HEADER_LAST_MODIFIED] = it
+                    }
+                    
+                    // Get ETag header for additional caching support
+                    connection.getHeaderField(CFConstants.Http.HEADER_ETAG)?.let {
+                        headers[CFConstants.Http.HEADER_ETAG] = it
+                    }
+                    
+                    Timber.i("API POLL: HEAD request successful - Last-Modified: ${headers[CFConstants.Http.HEADER_LAST_MODIFIED]}, ETag: ${headers[CFConstants.Http.HEADER_ETAG]}")
+                    return@withContext CFResult.success(headers)
+                } else {
+                    Timber.w("API POLL: HEAD request failed with code: $responseCode")
+                    return@withContext CFResult.error(
+                        "HEAD request failed with code: $responseCode",
+                        category = ErrorHandler.ErrorCategory.NETWORK
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e("API POLL: HEAD request exception: ${e.message}")
+                return@withContext CFResult.error(
+                    "HEAD request failed with exception: ${e.message}",
+                    e,
+                    category = ErrorHandler.ErrorCategory.NETWORK
+                )
+            }
+        }
+    }
 
 }

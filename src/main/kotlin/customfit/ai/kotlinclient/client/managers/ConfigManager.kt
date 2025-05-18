@@ -8,6 +8,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.concurrent.atomic.AtomicBoolean
+import customfit.ai.kotlinclient.logging.Timber
 
 /**
  * Interface for managing config and feature flag functionality
@@ -42,6 +46,9 @@ interface ConfigManager {
     
     /** Shutdown and clean up resources */
     fun shutdown()
+    
+    /** Force config refresh regardless of Last-Modified header */
+    suspend fun forceRefresh()
 }
 
 /**
@@ -56,10 +63,29 @@ class ConfigManagerImpl(
     
     private val configMap: MutableMap<String, Any> = ConcurrentHashMap()
     private var previousLastModified: String? = null
+    private var previousETag: String? = null
     private var sdkSettingsTimer: java.util.Timer? = null
     private val timerMutex = kotlinx.coroutines.sync.Mutex()
     
+    // Add a mutex to prevent concurrent SDK settings checks
+    private val sdkSettingsCheckMutex = kotlinx.coroutines.sync.Mutex()
+    
+    // Store the current SDK settings
+    private var currentSdkSettings: customfit.ai.kotlinclient.core.model.SdkSettings? = null
+    
+    // Track whether SDK functionality is currently enabled
+    private val isSdkFunctionalityEnabled = AtomicBoolean(true)
+    
+    // Track if a settings check is in progress
+    private val isCheckingSettings = AtomicBoolean(false)
+    
     override fun getAllFlags(): Map<String, Any> {
+        // If SDK functionality is disabled, return an empty map
+        if (!isSdkFunctionalityEnabled.get()) {
+            Timber.d("getAllFlags: SDK functionality is disabled, returning empty map")
+            return emptyMap()
+        }
+        
         val result = mutableMapOf<String, Any>()
         configMap.forEach { (key, configData) ->
             val data = configData as? Map<*, *>
@@ -72,13 +98,19 @@ class ConfigManagerImpl(
     }
     
     override fun <T> getConfigValue(key: String, fallbackValue: T, typeCheck: (Any) -> Boolean): T {
+        // If SDK functionality is disabled, return the fallback value
+        if (!isSdkFunctionalityEnabled.get()) {
+            Timber.d("getConfigValue: SDK functionality is disabled, returning fallback for key '$key'")
+            return fallbackValue
+        }
+        
         val config = configMap[key]
         if (config == null) {
-            customfit.ai.kotlinclient.logging.Timber.warn { "No config found for key '$key'" }
+            Timber.warn { "No config found for key '$key'" }
             return fallbackValue
         }
         if (config !is Map<*, *>) {
-            customfit.ai.kotlinclient.logging.Timber.warn { "Config for '$key' is not a map: $config" }
+            Timber.warn { "Config for '$key' is not a map: $config" }
             return fallbackValue
         }
         val variation = config["variation"]
@@ -87,68 +119,195 @@ class ConfigManagerImpl(
                     try {
                         variation as T
                     } catch (e: ClassCastException) {
-                        customfit.ai.kotlinclient.logging.Timber.warn {
+                        Timber.warn {
                             "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}"
                         }
                         fallbackValue
                     }
                 } else {
-                    customfit.ai.kotlinclient.logging.Timber.warn { "No valid variation for '$key': $variation" }
+                    Timber.warn { "No valid variation for '$key': $variation" }
                     fallbackValue
                 }
         return result
     }
     
     override suspend fun checkSdkSettings() {
-        customfit.ai.kotlinclient.utils.CoroutineUtils.withCircuitBreaker(
-                operationKey = "sdk_settings_fetch",
-                failureThreshold = 3,
-                resetTimeoutMs = 30_000,
-                fallback = Unit
-        ) {
-            customfit.ai.kotlinclient.utils.CoroutineUtils.withTiming("checkSdkSettings") {
-                customfit.ai.kotlinclient.utils.CoroutineUtils.withTimeoutOrNull(customfit.ai.kotlinclient.constants.CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
-                    customfit.ai.kotlinclient.utils.CoroutineUtils.withRetry(
-                            maxAttempts = 3,
-                            initialDelayMs = 100,
-                            maxDelayMs = 1000,
-                            retryOn = { it !is kotlinx.coroutines.CancellationException }
-                    ) {
-                        val sdkSettingsUrl = "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${CFConstants.Api.SDK_SETTINGS_PATH_PATTERN.format(cfConfig.dimensionId)}"
-                        val metadataResult = configFetcher.fetchMetadata(sdkSettingsUrl)
-                        
-                        if (metadataResult !is CFResult.Success) {
-                            customfit.ai.kotlinclient.logging.Timber.warn { "Failed to fetch SDK settings metadata" }
-                            return@withRetry Unit
-                        }
-                        
-                        val metadata = metadataResult.data
-                        val currentLastModified = metadata["Last-Modified"] ?: return@withRetry Unit
-
-                        if (currentLastModified != previousLastModified) {
-                            customfit.ai.kotlinclient.logging.Timber.i(
-                                    "SDK settings changed: Previous=$previousLastModified, Current=$currentLastModified"
-                            )
-                            val configResult = configFetcher.fetchConfig(currentLastModified)
+        // Use a mutex to prevent concurrent SDK settings checks
+        if (!sdkSettingsCheckMutex.tryLock()) {
+            Timber.d("Skipping SDK settings check because another check is in progress")
+            return
+        }
+        
+        try {
+            // Set the flag to indicate that a check is in progress
+            isCheckingSettings.set(true)
+            
+            val timestamp = SimpleDateFormat("HH:mm:ss.SSS").format(Date())
+            Timber.d("Starting SDK settings check at $timestamp")
+            
+            customfit.ai.kotlinclient.utils.CoroutineUtils.withCircuitBreaker(
+                    operationKey = "sdk_settings_fetch",
+                    failureThreshold = 3,
+                    resetTimeoutMs = 30_000,
+                    fallback = Unit
+            ) {
+                customfit.ai.kotlinclient.utils.CoroutineUtils.withTiming("checkSdkSettings") {
+                    customfit.ai.kotlinclient.utils.CoroutineUtils.withTimeoutOrNull(customfit.ai.kotlinclient.constants.CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
+                        customfit.ai.kotlinclient.utils.CoroutineUtils.withRetry(
+                                maxAttempts = 3,
+                                initialDelayMs = 100,
+                                maxDelayMs = 1000,
+                                retryOn = { it !is kotlinx.coroutines.CancellationException }
+                        ) {
+                            val sdkSettingsUrl = "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${CFConstants.Api.SDK_SETTINGS_PATH_PATTERN.format(cfConfig.dimensionId)}"
                             
-                            if (configResult !is CFResult.Success) {
-                                customfit.ai.kotlinclient.logging.Timber.warn {
-                                    "Failed to fetch config with last-modified: $currentLastModified"
-                                }
+                            // Add more detailed logging for SDK settings API call
+                            Timber.i("API POLL: Checking SDK settings at URL: $sdkSettingsUrl")
+                            
+                            // First try a lightweight HEAD request to check if there are changes
+                            val metadataResult = configFetcher.fetchMetadata(sdkSettingsUrl)
+                            
+                            if (metadataResult !is CFResult.Success) {
+                                Timber.w("SDK settings metadata fetch failed: ${metadataResult}")
+                                customfit.ai.kotlinclient.logging.Timber.warn { "Failed to fetch SDK settings metadata" }
                                 return@withRetry Unit
                             }
                             
-                            val newConfigs = configResult.data
-                            updateConfigMap(newConfigs)
-                            previousLastModified = currentLastModified
-                        } else {
-                            customfit.ai.kotlinclient.logging.Timber.d("No change in SDK settings")
+                            val metadata = metadataResult.data
+                            
+                            // Add more detailed logging about the received metadata
+                            Timber.i("API POLL: Received metadata - Last-Modified: ${metadata[CFConstants.Http.HEADER_LAST_MODIFIED]}, ETag: ${metadata[CFConstants.Http.HEADER_ETAG]}")
+                            
+                            // Use metadata for conditional fetching
+                            val currentLastModified = metadata["Last-Modified"]
+                            val currentETag = metadata["ETag"]
+                            
+                            if (currentLastModified == null && currentETag == null) {
+                                Timber.d("No Last-Modified or ETag headers in response")
+                                return@withRetry Unit
+                            }
+                            
+                            // *** IMPORTANT DEBUG SECTION ***
+                            Timber.d("Last-Modified comparison: Current=$currentLastModified, Previous=$previousLastModified")
+                            Timber.d("ETag comparison: Current=$currentETag, Previous=$previousETag")
+                            
+                            // Check if either Last-Modified or ETag has changed
+                            val hasLastModifiedChanged = currentLastModified != null && currentLastModified != previousLastModified
+                            val hasETagChanged = currentETag != null && currentETag != previousETag
+                            val hasMetadataChanged = hasLastModifiedChanged || hasETagChanged
+                            
+                            // Only fetch full settings if:
+                            // 1. This is the first check (no SDK settings yet)
+                            // 2. Metadata has changed
+                            val needsFullSettingsFetch = currentSdkSettings == null || hasMetadataChanged
+                            
+                            Timber.d("Will fetch full settings? $needsFullSettingsFetch")
+                            
+                            var sdkSettings = currentSdkSettings
+                            
+                            // If we need to fetch the full settings, make a GET request
+                            if (needsFullSettingsFetch) {
+                                // Use the GET request to get the full settings
+                                Timber.i("API POLL: Fetching full SDK settings with GET: $sdkSettingsUrl")
+                                val settingsResult = configFetcher.fetchSdkSettingsWithMetadata(sdkSettingsUrl)
+                                
+                                if (settingsResult !is CFResult.Success) {
+                                    Timber.w("SDK settings fetch failed: ${settingsResult}")
+                                    customfit.ai.kotlinclient.logging.Timber.warn { "Failed to fetch SDK settings" }
+                                    return@withRetry Unit
+                                }
+                                
+                                // Use the fresh metadata and settings from the GET request
+                                val (freshMetadata, freshSettings) = settingsResult.data
+                                
+                                // Add more detailed logging about the received metadata
+                                Timber.i("API POLL: Received metadata - Last-Modified: ${freshMetadata[CFConstants.Http.HEADER_LAST_MODIFIED]}, ETag: ${freshMetadata[CFConstants.Http.HEADER_ETAG]}")
+                                
+                                // Store the settings
+                                if (freshSettings != null) {
+                                    sdkSettings = freshSettings
+                                    currentSdkSettings = freshSettings
+                                    
+                                    // Check if account is enabled or SDK should be skipped
+                                    val accountEnabled = freshSettings.cf_account_enabled
+                                    val skipSdk = freshSettings.cf_skip_sdk
+                                    
+                                    if (!accountEnabled) {
+                                        Timber.w("Account is disabled (cf_account_enabled=false). SDK functionality will be limited.")
+                                        isSdkFunctionalityEnabled.set(false)
+                                    } else if (skipSdk) {
+                                        Timber.w("SDK should be skipped (cf_skip_sdk=true). SDK functionality will be limited.")
+                                        isSdkFunctionalityEnabled.set(false)
+                                    } else {
+                                        // Account is enabled and SDK should not be skipped
+                                        isSdkFunctionalityEnabled.set(true)
+                                    }
+                                }
+                            } else {
+                                // No need to fetch full settings, just use the metadata from HEAD
+                                Timber.i("API POLL: Using existing SDK settings, no change detected")
+                            }
+                            
+                            Timber.d("Will fetch new config? $hasMetadataChanged")
+
+                            if (hasMetadataChanged) {
+                                Timber.i("API POLL: Metadata changed - fetching new config")
+                                customfit.ai.kotlinclient.logging.Timber.i(
+                                        "SDK settings changed: Previous Last-Modified=$previousLastModified, Current=$currentLastModified, Previous ETag=$previousETag, Current ETag=$currentETag"
+                                )
+                                
+                                // Only fetch configs if SDK functionality is enabled
+                                if (isSdkFunctionalityEnabled.get()) {
+                                    Timber.i("API POLL: Fetching new config due to metadata change")
+                                    val configResult = configFetcher.fetchConfig(currentLastModified, currentETag)
+                                    
+                                    if (configResult !is CFResult.Success) {
+                                        Timber.w("Config fetch failed: ${configResult}")
+                                        customfit.ai.kotlinclient.logging.Timber.warn {
+                                            "Failed to fetch config with last-modified: $currentLastModified, etag: $currentETag"
+                                        }
+                                        return@withRetry Unit
+                                    }
+                                    
+                                    val newConfigs = configResult.data
+                                    Timber.i("API POLL: Successfully fetched ${newConfigs.size} config entries")
+                                    Timber.d("Config keys: ${newConfigs.keys}")
+                                    Timber.d("Hero text if present: ${(newConfigs["hero_text"] as? Map<*, *>)?.get("variation")}")
+                                    
+                                    // Update config map with new values
+                                    updateConfigMap(newConfigs)
+                                } else {
+                                    Timber.i("API POLL: Skipping config fetch because SDK functionality is disabled")
+                                }
+                                
+                                // Store both metadata values for future comparisons regardless of SDK functionality status
+                                previousLastModified = currentLastModified
+                                previousETag = currentETag
+                            } else {
+                                Timber.i("API POLL: Metadata unchanged - skipping config fetch")
+                            }
                         }
                     }
+                            ?: customfit.ai.kotlinclient.logging.Timber.warn { "SDK settings check timed out" }
                 }
-                        ?: customfit.ai.kotlinclient.logging.Timber.warn { "SDK settings check timed out" }
             }
+            
+            val endTimestamp = SimpleDateFormat("HH:mm:ss.SSS").format(Date())
+            Timber.d("Completed SDK settings check at $endTimestamp")
+        } finally {
+            // Reset the flag to indicate that the check is complete
+            isCheckingSettings.set(false)
+            
+            // Release the mutex to allow other checks to proceed
+            sdkSettingsCheckMutex.unlock()
         }
+    }
+    
+    override suspend fun forceRefresh() {
+        Timber.d("Forcing config refresh by resetting metadata tracking")
+        previousLastModified = null
+        previousETag = null
+        checkSdkSettings()
     }
     
     override fun startPeriodicSdkSettingsCheck(intervalMs: Long, initialCheck: Boolean) {
@@ -159,6 +318,9 @@ class ConfigManagerImpl(
                 timerMutex.withLock {
                     // Cancel existing timer if any
                     sdkSettingsTimer?.cancel()
+                    
+                    // Log the actual interval we're using
+                    Timber.i("Starting periodic settings check with interval: $intervalMs ms")
 
                     // Create a new timer
                     sdkSettingsTimer =
@@ -169,6 +331,12 @@ class ConfigManagerImpl(
                                     period = intervalMs
                             ) {
                                 clientScope.launch {
+                                    // Skip this check if another one is already in progress
+                                    if (isCheckingSettings.get()) {
+                                        Timber.d("Skipping periodic SDK settings check because another check is already in progress")
+                                        return@launch
+                                    }
+                                    
                                     customfit.ai.kotlinclient.utils.CoroutineUtils.withErrorHandling(
                                             errorMessage = "Periodic SDK settings check failed"
                                     ) {
@@ -204,6 +372,9 @@ class ConfigManagerImpl(
         timerMutex.withLock {
             // Cancel existing timer if any
             sdkSettingsTimer?.cancel()
+            
+            // Log the actual interval being used
+            Timber.i("Restarting periodic settings check with interval: $intervalMs ms")
 
             // Create a new timer with updated interval
             sdkSettingsTimer =
@@ -214,6 +385,12 @@ class ConfigManagerImpl(
                             period = intervalMs
                     ) {
                         clientScope.launch {
+                            // Skip this check if another one is already in progress
+                            if (isCheckingSettings.get()) {
+                                Timber.d("Skipping periodic SDK settings check because another check is already in progress")
+                                return@launch
+                            }
+                            
                             customfit.ai.kotlinclient.utils.CoroutineUtils.withErrorHandling(
                                     errorMessage = "Periodic SDK settings check failed"
                             ) {
@@ -294,6 +471,12 @@ class ConfigManagerImpl(
     }
     
     override fun notifyListeners(key: String, variation: Any) {
+        // Don't notify listeners if SDK functionality is disabled
+        if (!isSdkFunctionalityEnabled.get()) {
+            customfit.ai.kotlinclient.logging.Timber.d("notifyListeners: SDK functionality is disabled, skipping listener notifications for '$key'")
+            return
+        }
+        
         // Delegate to listener manager
         listenerManager.notifyConfigListeners(key, variation)
         

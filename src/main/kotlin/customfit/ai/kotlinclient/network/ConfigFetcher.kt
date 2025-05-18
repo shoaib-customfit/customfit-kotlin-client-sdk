@@ -48,9 +48,10 @@ class ConfigFetcher(
      * Fetches configuration from the API with improved error handling
      *
      * @param lastModified Optional last-modified header value for conditional requests
+     * @param etag Optional ETag header value for conditional requests
      * @return CFResult containing configuration map or error details
      */
-    suspend fun fetchConfig(lastModified: String? = null): CFResult<Map<String, Any>> {
+    suspend fun fetchConfig(lastModified: String? = null, etag: String? = null): CFResult<Map<String, Any>> {
         // Don't fetch if in offline mode
         if (isOffline()) {
             Timber.d("Not fetching config because client is in offline mode")
@@ -76,13 +77,22 @@ class ConfigFetcher(
                 }
                 val payload = Json.encodeToString(jsonObject)
 
+                Timber.i("API POLL: Fetching config from URL: $url")
                 Timber.d("Config fetch payload: $payload")
 
                 val headers = mutableMapOf<String, String>(
                     CFConstants.Http.HEADER_CONTENT_TYPE to CFConstants.Http.CONTENT_TYPE_JSON
                 )
+                
+                // Add conditional request headers if available
                 lastModified?.let {
                     headers[CFConstants.Http.HEADER_IF_MODIFIED_SINCE] = it
+                    Timber.i("API POLL: Using If-Modified-Since: $it")
+                }
+                
+                etag?.let {
+                    headers[CFConstants.Http.HEADER_IF_NONE_MATCH] = it
+                    Timber.i("API POLL: Using If-None-Match: $it")
                 }
 
                 // Use the updated HttpClient that returns CFResult
@@ -117,6 +127,8 @@ class ConfigFetcher(
                     )
                 }
                 
+                Timber.i("API POLL: Successfully fetched config, response size: ${responseBody.length} bytes")
+                
                 // Process configuration response
                 return@withLock processConfigResponse(responseBody)
             } catch (e: Exception) {
@@ -124,6 +136,8 @@ class ConfigFetcher(
                     is SerializationException -> ErrorHandler.ErrorCategory.SERIALIZATION
                     else -> ErrorHandler.ErrorCategory.INTERNAL
                 }
+                
+                Timber.e("API POLL: Error fetching configuration: ${e.message}")
                 
                 ErrorHandler.handleException(
                     e,
@@ -247,6 +261,28 @@ class ConfigFetcher(
                 lastFetchTime = System.currentTimeMillis()
             }
             
+            // Log config details with both keys and values
+            Timber.d("Config keys: ${finalConfigMap.keys}")
+            
+            // Print each config key and its variation value only
+            finalConfigMap.forEach { (key, value) ->
+                when (value) {
+                    is Map<*, *> -> {
+                        val variation = value["variation"]
+                        Timber.d("$key: $variation")
+                    }
+                    else -> {
+                        Timber.d("$key: $value")
+                    }
+                }
+            }
+            
+            // Keep existing hero_text debug logging for backward compatibility
+            val heroText = (finalConfigMap["hero_text"] as? Map<String, Any>)?.get("variation") as? String
+            if (heroText != null) {
+                Timber.d("Hero text if present: $heroText")
+            }
+            
             return CFResult.success(finalConfigMap)
         } catch (e: Exception) {
             ErrorHandler.handleException(
@@ -296,6 +332,7 @@ class ConfigFetcher(
 
     /**
      * Fetches metadata from a URL with improved error handling
+     * Optimized to use HEAD requests first to minimize bandwidth usage
      *
      * @param url The URL to fetch metadata from
      * @return CFResult containing metadata headers or error details
@@ -310,8 +347,26 @@ class ConfigFetcher(
         }
 
         try {
-            return httpClient.fetchMetadata(url)
+            // First try a lightweight HEAD request
+            Timber.i("API POLL: Fetch metadata strategy - First trying HEAD request: $url")
+            val headResult = httpClient.makeHeadRequest(url)
+            
+            if (headResult is CFResult.Success) {
+                Timber.i("API POLL: HEAD request successful, using result: ${headResult.data}")
+                return headResult
+            } else {
+                // If HEAD fails, fall back to the original GET method
+                Timber.i("API POLL: HEAD request failed, falling back to GET: $url")
+                val getResult = httpClient.fetchMetadata(url)
+                if (getResult is CFResult.Success) {
+                    Timber.i("API POLL: Fallback GET successful: ${getResult.data}")
+                } else {
+                    Timber.w("API POLL: Both HEAD and GET failed for $url")
+                }
+                return getResult
+            }
         } catch (e: Exception) {
+            Timber.e("API POLL: Exception during metadata fetch attempts: ${e.message}")
             ErrorHandler.handleException(
                 e,
                 "Error fetching metadata from $url",
@@ -324,6 +379,111 @@ class ConfigFetcher(
                 e,
                 category = ErrorHandler.ErrorCategory.NETWORK
             )
+        }
+    }
+
+    /**
+     * Fetches complete SDK settings from a URL, including both metadata headers and the full settings object
+     * This is preferred over fetchMetadata when you need to process the actual settings content
+     *
+     * @param url The URL to fetch SDK settings from
+     * @return CFResult containing both headers and parsed SdkSettings object, or error details
+     */
+    suspend fun fetchSdkSettingsWithMetadata(url: String): CFResult<Pair<Map<String, String>, customfit.ai.kotlinclient.core.model.SdkSettings?>> {
+        if (isOffline()) {
+            Timber.d("Not fetching SDK settings because client is in offline mode")
+            return CFResult.error(
+                "Client is in offline mode",
+                category = ErrorHandler.ErrorCategory.NETWORK
+            )
+        }
+
+        try {
+            // Always use GET for this method since we need the full response body
+            Timber.i("API POLL: Fetching full SDK settings with GET: $url")
+            
+            val result = httpClient.performRequest(url, "GET", emptyMap(), null) { conn ->
+                val responseCode = conn.responseCode
+                if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                    // Extract headers
+                    val headers = mutableMapOf<String, String>()
+                    headers[CFConstants.Http.HEADER_LAST_MODIFIED] = conn.getHeaderField("Last-Modified") ?: ""
+                    headers[CFConstants.Http.HEADER_ETAG] = conn.getHeaderField("ETag") ?: ""
+                    
+                    // Read the response body
+                    val body = conn.inputStream.bufferedReader().readText()
+                    Timber.i("API POLL: SDK settings response received, size: ${body.length} bytes")
+                    
+                    // Return both headers and body
+                    Pair(headers, body)
+                } else {
+                    Timber.w("API POLL: Failed to fetch SDK settings from $url: $responseCode")
+                    null
+                }
+            }
+            
+            if (result == null) {
+                return CFResult.error(
+                    "Failed to fetch SDK settings",
+                    category = ErrorHandler.ErrorCategory.NETWORK
+                )
+            }
+            
+            val (headers, body) = result
+            
+            // Parse the body into SdkSettings
+            val sdkSettings = parseSdkSettings(body)
+            
+            if (sdkSettings != null) {
+                Timber.i("API POLL: SDK settings parsed successfully, account enabled: ${sdkSettings.cf_account_enabled}")
+            } else {
+                Timber.w("API POLL: Failed to parse SDK settings response")
+            }
+            
+            return CFResult.success(Pair(headers, sdkSettings))
+        } catch (e: Exception) {
+            Timber.e("API POLL: Exception during SDK settings fetch: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Error fetching SDK settings from $url",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            
+            return CFResult.error(
+                "Error fetching SDK settings: ${e.message}",
+                e,
+                category = ErrorHandler.ErrorCategory.NETWORK
+            )
+        }
+    }
+    
+    /**
+     * Parse SDK settings JSON into a simplified SdkSettings object
+     * Only extracts the essential fields needed for core functionality
+     *
+     * @param jsonString The JSON string to parse
+     * @return SdkSettings object if successful, null otherwise
+     */
+    private fun parseSdkSettings(jsonString: String): customfit.ai.kotlinclient.core.model.SdkSettings? {
+        return try {
+            val jsonObject = Json.parseToJsonElement(jsonString).jsonObject
+            
+            // Extract only the essential boolean values we need with fallbacks
+            val cfAccountEnabled = jsonObject["cf_account_enabled"]?.jsonPrimitive?.booleanOrNull ?: true
+            val cfSkipSdk = jsonObject["cf_skip_sdk"]?.jsonPrimitive?.booleanOrNull ?: false
+            
+            // Log that we're using a simplified version
+            Timber.d("Parsing SDK settings with simplified model (only essential fields)")
+            
+            // Create and return simplified SdkSettings object with just the fields we need
+            customfit.ai.kotlinclient.core.model.SdkSettings(
+                cf_account_enabled = cfAccountEnabled,
+                cf_skip_sdk = cfSkipSdk
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse SDK settings: ${e.message}")
+            null
         }
     }
 

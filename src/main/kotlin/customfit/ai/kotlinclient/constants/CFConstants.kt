@@ -165,5 +165,8 @@ object CFConstants {
         
         /** If-Modified-Since header name */
         const val HEADER_IF_MODIFIED_SINCE = "If-Modified-Since"
+        
+        /** If-None-Match header name for ETag-based conditional requests */
+        const val HEADER_IF_NONE_MATCH = "If-None-Match"
     }
 } 

@@ -20,7 +20,9 @@ fun main(args: Array<String>) {
 
         val config =
                 CFConfig.Builder(clientKey)
-                        .sdkSettingsCheckIntervalMs(5_000L) // 5 seconds for quick testing
+                        .sdkSettingsCheckIntervalMs(20_000L)
+                        .backgroundPollingIntervalMs(20_000L)
+                        .reducedPollingIntervalMs(20_000L)
                         .summariesFlushTimeSeconds(3) // 3 seconds for summaries flush time
                         .summariesFlushIntervalMs(3_000L) // 3 seconds for summaries flush interval
                         .eventsFlushTimeSeconds(3) // 3 seconds for events flush time
@@ -55,100 +57,55 @@ fun main(args: Array<String>) {
         println("\n[${timestamp()}] Initializing CFClient with test config...")
         val cfClient = CFClient.init(config, user)
 
+        // Add custom output to see SDK events
+        println("[${timestamp()}] Debug logging enabled - watch for SDK settings checks in logs")
+
         println("[${timestamp()}] Waiting for initial SDK settings check...")
         cfClient.awaitSdkSettingsCheck() // Wait for the initial fetch to complete
         println("[${timestamp()}] Initial SDK settings check complete.")
 
-        // Test a feature flag
-        val initialValue = cfClient.getString("shoaib-1", "default-value")
-        println("[${timestamp()}] Initial value of shoaib-1: $initialValue")
+        // Print values for all requested config keys
+        println("\n[${timestamp()}] --- REQUESTED CONFIG KEYS AND VALUES ---")
+        val configKeys = listOf("enhanced_toast", "shoaib-2", "shoaib-1", "hero_text", "enhanced-toast")
+        configKeys.forEach { key ->
+            val value = cfClient.getString(key, "default-value")
+            println("[${timestamp()}] $key: $value")
+        }
 
-        // Track some events to test summary flush
-        println("[${timestamp()}] Testing event tracking with summaries...")
-        cfClient.trackEvent("login_event", mapOf("source" to "app"))
-        cfClient.trackEvent("page_view", mapOf("page" to "home", "duration" to 30))
-        cfClient.trackEvent("button_click", mapOf("button_id" to "submit", "page" to "checkout"))
+        // Comment out event tracking to reduce POST calls
+        println("\n[${timestamp()}] Testing event tracking is disabled to reduce POST requests...")
+        // cfClient.trackEvent("login_event", mapOf("source" to "app"))
+        // cfClient.trackEvent("page_view", mapOf("page" to "home", "duration" to 30))
+        // cfClient.trackEvent("button_click", mapOf("button_id" to "submit", "page" to "checkout"))
 
         // Register a listener to detect changes in real-time
         val flagListener: (String) -> Unit = { newValue ->
-            println("[${timestamp()}] CHANGE DETECTED: shoaib-1 updated to: $newValue")
+            println("[${timestamp()}] CHANGE DETECTED: hero_text updated to: $newValue")
         }
-        cfClient.addConfigListener<String>("shoaib-1", flagListener)
+        cfClient.addConfigListener<String>("hero_text", flagListener)
 
-        // Run normal check cycles
+        // Run normal check cycles with auto-refresh
         println("\n[${timestamp()}] --- PHASE 1: Normal SDK Settings Checks ---")
-        for (i in 1..5) {
+        for (i in 1..30) {
             println("\n[${timestamp()}] Check cycle $i...")
 
-            // Track an event in each cycle
-            cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 1))
+            // Comment out cycle event tracking
+            // cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 1))
 
-            // Wait for next check
+            // Wait for next check - only wait 1 second to see more frequent updates
             println("[${timestamp()}] Waiting for SDK settings check...")
-            Thread.sleep(config.sdkSettingsCheckIntervalMs + 1000)
+            Thread.sleep(3000)
 
             // Get current value
-            val currentValue = cfClient.getString("shoaib-1", "default-value")
+            val currentValue = cfClient.getString("hero_text", "default-value")
             println("[${timestamp()}] Value after check cycle $i: $currentValue")
         }
 
-        // Force a metadata refresh using reflection
-        println("\n[${timestamp()}] --- PHASE 2: Forcing Metadata Refresh ---")
-        println(
-                "[${timestamp()}] Attempting to reset previousLastModified field using reflection..."
-        )
-
-        try {
-            val previousLastModifiedField =
-                    CFClient::class.java.getDeclaredField("previousLastModified")
-            previousLastModifiedField.isAccessible = true
-            val previousValue = previousLastModifiedField.get(cfClient)
-            println("[${timestamp()}] Current previousLastModified value: $previousValue")
-
-            // Track events during forced refresh
-            cfClient.trackEvent("forced_refresh", mapOf("timestamp" to System.currentTimeMillis()))
-
-            // Set to null to force a refresh on next check
-            previousLastModifiedField.set(cfClient, null)
-            println("[${timestamp()}] Reset previousLastModified to null")
-
-            // Wait for the next check cycle
-            println("[${timestamp()}] Waiting for forced refresh check cycle...")
-            Thread.sleep(config.sdkSettingsCheckIntervalMs + 1000)
-
-            // Get current value
-            val currentValue = cfClient.getString("shoaib-1", "default-value")
-            println("[${timestamp()}] Value after forced refresh: $currentValue")
-
-            // Check if previousLastModified has been updated
-            val newValue = previousLastModifiedField.get(cfClient)
-            println("[${timestamp()}] New previousLastModified value: $newValue")
-        } catch (e: Exception) {
-            println("[${timestamp()}] Failed to access previousLastModified field: ${e.message}")
-            e.printStackTrace()
-        }
-
-        // Continue normal checking for a few more cycles
-        println("\n[${timestamp()}] --- PHASE 3: Continuing Normal Checks ---")
-        for (i in 4..5) {
-            println("\n[${timestamp()}] Check cycle $i...")
-
-            // Track an event in each cycle
-            cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 3))
-
-            // Wait for next check
-            println("[${timestamp()}] Waiting for SDK settings check...")
-            Thread.sleep(config.sdkSettingsCheckIntervalMs + 1000)
-
-            // Get current value
-            val currentValue = cfClient.getString("shoaib-1", "default-value")
-            println("[${timestamp()}] Value after check cycle $i: $currentValue")
-        }
-
+      
         // Clean up
         cfClient.shutdown()
 
-        println("\n[${timestamp()}] Test completed after 5 check cycles")
+        println("\n[${timestamp()}] Test completed after all check cycles")
         println("[${timestamp()}] Test complete. Press Enter to exit...")
         readLine()
     }

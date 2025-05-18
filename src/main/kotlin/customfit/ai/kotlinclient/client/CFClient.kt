@@ -775,6 +775,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         }
     }
     
+    /**
+     * Force a refresh of the configuration.
+     * This will force the SDK to fetch new configuration regardless of the Last-Modified header.
+     */
+    suspend fun forceRefresh() {
+        CoroutineUtils.withErrorHandling(errorMessage = "Force refresh failed") {
+            configManager.forceRefresh()
+        }
+        .onFailure { e ->
+            Timber.e(e, "Force refresh failed: ${e.message}")
+        }
+    }
+    
     companion object {
         private const val SOURCE = "CFClient"
         

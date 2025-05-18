@@ -1,10 +1,13 @@
 package com.example.myapplication
 
 import android.app.Application
+import android.os.StrictMode
 import android.util.Log
 import customfit.ai.kotlinclient.client.CFClient
 import customfit.ai.kotlinclient.config.core.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
+import java.net.InetAddress
+import java.net.UnknownHostException
 
 class MyApplication : Application() {
     
@@ -15,6 +18,35 @@ class MyApplication : Application() {
     
     override fun onCreate() {
         super.onCreate()
+        
+        // Enable StrictMode to allow network on main thread (only for debugging)
+        val policy = StrictMode.ThreadPolicy.Builder()
+            .permitAll()
+            .build()
+        StrictMode.setThreadPolicy(policy)
+        
+        // Test connectivity
+        try {
+            Thread {
+                Log.d("CF_SDK", "Testing DNS resolution for sdk.customfit.ai...")
+                try {
+                    val address = InetAddress.getByName("sdk.customfit.ai")
+                    Log.d("CF_SDK", "DNS resolution successful: ${address.hostAddress}")
+                } catch (e: Exception) {
+                    Log.e("CF_SDK", "DNS resolution failed: ${e.message}")
+                }
+                
+                // Test Google as reference
+                try {
+                    val googleAddress = InetAddress.getByName("www.google.com")
+                    Log.d("CF_SDK", "Google DNS resolution: ${googleAddress.hostAddress}")
+                } catch (e: Exception) {
+                    Log.e("CF_SDK", "Google DNS resolution failed: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e("CF_SDK", "Failed to test connectivity: ${e.message}")
+        }
         
         // Initialize CF Client
         try {
@@ -28,6 +60,8 @@ class MyApplication : Application() {
                 .eventsFlushTimeSeconds(30)          // 30 seconds for events flush time
                 .eventsFlushIntervalMs(30_000L)      // 30 seconds for events flush interval
                 .debugLoggingEnabled(true)
+                .networkConnectionTimeoutMs(30_000)  // 30 seconds connection timeout
+                .networkReadTimeoutMs(30_000)        // 30 seconds read timeout
                 .build()
                 
             // Create a user
