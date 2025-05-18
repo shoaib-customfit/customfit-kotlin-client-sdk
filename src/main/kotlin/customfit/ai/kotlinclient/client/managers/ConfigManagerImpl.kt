@@ -131,6 +131,7 @@ class ConfigManagerImpl(
                     try {
                         // Log the actual config value
                         Timber.i("CONFIG VALUE: $key: $variation")
+                        @Suppress("UNCHECKED_CAST")
                         variation as T
                     } catch (e: ClassCastException) {
                         Timber.warn {
@@ -257,8 +258,6 @@ class ConfigManagerImpl(
                                 
                             Timber.d("Will fetch full settings? $needsFullSettingsFetch")
                                 
-                            var sdkSettings = currentSdkSettings
-                                
                             // If we need to fetch the full settings, make a GET request
                             if (needsFullSettingsFetch) {
                                 // Use the GET request to get the full settings
@@ -279,7 +278,6 @@ class ConfigManagerImpl(
                                     
                                 // Store the settings
                                 if (freshSettings != null) {
-                                    sdkSettings = freshSettings
                                     currentSdkSettings = freshSettings
                                         
                                     // Check if account is enabled or SDK should be skipped
@@ -405,7 +403,7 @@ class ConfigManagerImpl(
                     // Create a new timer
                     sdkSettingsTimer =
                         kotlin.concurrent.fixedRateTimer(
-                            "SdkSettingsCheck",
+                            "SDKTimer-${java.util.UUID.randomUUID()}",
                             daemon = true,
                             initialDelay = actualIntervalMs,
                             period = actualIntervalMs
@@ -492,7 +490,7 @@ class ConfigManagerImpl(
             // Create a new timer with updated interval
             sdkSettingsTimer =
                 kotlin.concurrent.fixedRateTimer(
-                    "SdkSettingsCheck",
+                    "SDKTimer-${java.util.UUID.randomUUID()}",
                     daemon = true,
                     initialDelay = actualIntervalMs,
                     period = actualIntervalMs

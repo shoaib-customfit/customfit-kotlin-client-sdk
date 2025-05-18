@@ -566,8 +566,9 @@ object AnySerializer : KSerializer<Any> {
     }
 
     override fun serialize(encoder: Encoder, value: Any) {
-        val jsonEncoder = encoder as? kotlinx.serialization.json.JsonEncoder 
-            ?: throw SerializationException("This serializer can only be used with JSON")
+        if (encoder !is kotlinx.serialization.json.JsonEncoder) {
+            throw SerializationException("This serializer can only be used with JSON")
+        }
         
         val jsonElement = when (value) {
             is String -> JsonPrimitive(value)

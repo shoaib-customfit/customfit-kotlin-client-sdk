@@ -83,7 +83,7 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                 } catch (e: Exception) {
                     // Use our robust error handling system
                     Timber.e("API ERROR: ${e.javaClass.simpleName} - ${e.message}")
-                    val category = ErrorHandler.handleException(
+                    ErrorHandler.handleException(
                         e, 
                         "Error making $method request to $url", 
                         SOURCE,

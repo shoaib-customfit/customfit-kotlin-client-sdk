@@ -48,11 +48,8 @@ data class EventData(
          * Validates the properties map, removing invalid entries
          */
         private fun validateProperties(properties: Map<String, Any>): Map<String, Any> {
-            val validatedProps = properties.filterValues { it != null }
-            
-            if (validatedProps.size != properties.size) {
-                Timber.w("Removed ${properties.size - validatedProps.size} null property values from event")
-            }
+            // For type safety, just cast the properties map directly since we know it's Map<String, Any>
+            val validatedProps = properties
             
             // Log warning for very large property maps
             if (validatedProps.size > 50) {

@@ -241,9 +241,10 @@ class ConfigFetcher(
                     experienceObject?.let { flattenedMap.putAll(jsonObjectToMap(it)) }
 
                     // Store the flattened map, ensuring Any? values are handled or filtered if needed
+                    val filteredMap = flattenedMap.filterValues { it != null }
+                    // Safely cast to the desired type
                     @Suppress("UNCHECKED_CAST")
-                    finalConfigMap[key] =
-                            flattenedMap.filterValues { it != null } as Map<String, Any>
+                    finalConfigMap[key] = filteredMap as Map<String, Any>
                 } catch (e: Exception) {
                     ErrorHandler.handleException(
                         e,
@@ -312,7 +313,9 @@ class ConfigFetcher(
         return jsonArray.map { jsonElementToValue(it) }
     }
 
-    /** Recursively converts a JsonElement to a Kotlin primitive, Map, or List. */
+    /**
+     * Recursively converts a JsonElement to a Kotlin primitive, Map, or List.
+     */
     private fun jsonElementToValue(element: JsonElement?): Any? {
         return when (element) {
             is JsonNull -> null
@@ -324,7 +327,10 @@ class ConfigFetcher(
                         element.doubleOrNull != null -> element.double // Then Double
                         else -> element.content // Fallback
                     }
-            is JsonObject -> jsonObjectToMap(element)
+            is JsonObject -> {
+                @Suppress("UNCHECKED_CAST")
+                jsonObjectToMap(element)
+            }
             is JsonArray -> jsonArrayToList(element)
             null -> null
         }
