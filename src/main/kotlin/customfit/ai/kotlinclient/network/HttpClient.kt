@@ -176,17 +176,44 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
     suspend fun postJson(url: String, payload: String): CFResult<Boolean> =
             performRequest(url, "POST", mapOf(CFConstants.Http.HEADER_CONTENT_TYPE to CFConstants.Http.CONTENT_TYPE_JSON), payload) { conn ->
                 Timber.d("EXECUTING POST JSON REQUEST")
+                
+                // Log the request details based on endpoint type
+                if (url.contains("summary")) {
+                    Timber.i("📊 SUMMARY HTTP: POST request")
+                } else if (url.contains("cfe")) {
+                    Timber.i("🔔 🔔 TRACK HTTP: POST request to event API")
+                    Timber.i("🔔 🔔 TRACK HTTP: Request body size: ${payload.length} bytes")
+                }
+                
                 val responseCode = conn.responseCode
+                val responseMessage = conn.responseMessage
 
                 try {
                     if (responseCode == HttpURLConnection.HTTP_OK ||
                                     responseCode == HttpURLConnection.HTTP_ACCEPTED
                     ) {
-                        val responseBody = conn.inputStream.bufferedReader().readText()
+                        
+                        // Log the response details based on endpoint type
+                        if (url.contains("summary")) {
+                            Timber.i("📊 SUMMARY HTTP: Response code: $responseCode $responseMessage")                         
+                        } else if (url.contains("cfe")) {
+                            Timber.i("🔔 🔔 TRACK HTTP: Response code: $responseCode $responseMessage")
+                            Timber.i("🔔 🔔 TRACK HTTP: Events successfully sent to server")
+                        }
+                        
                         Timber.d("POST JSON SUCCESSFUL")
                         CFResult.success(true)
                     } else {
                         val errorBody = conn.errorStream?.bufferedReader()?.readText() ?: "No error body"
+                        
+                        // Log the error details based on endpoint type
+                        if (url.contains("summary")) {
+                            Timber.w("📊 SUMMARY HTTP: Error code: $responseCode $responseMessage")
+                            Timber.w("📊 SUMMARY HTTP: Error body: $errorBody")
+                        } else if (url.contains("cfe")) {
+                            Timber.w("🔔 TRACK HTTP: Error code: $responseCode $responseMessage")
+                            Timber.w("🔔 TRACK HTTP: Error body: $errorBody")
+                        }
                         
                         // Use our error handling system
                         val message = "API error response: ${conn.responseCode}"
@@ -202,6 +229,12 @@ class HttpClient(private val cfConfig: CFConfig? = null) {
                         CFResult.error(message, code = conn.responseCode, category = ErrorHandler.ErrorCategory.NETWORK)
                     }
                 } catch (e: Exception) {
+                    if (url.contains("summary")) {
+                        Timber.e("📊 SUMMARY HTTP: Exception: ${e.message}")
+                    } else if (url.contains("cfe")) {
+                        Timber.e("🔔 TRACK HTTP: Exception: ${e.message}")
+                    }
+                    
                     Timber.e("POST JSON FAILED: ${e.message}")
                     ErrorHandler.handleException(
                         e, 

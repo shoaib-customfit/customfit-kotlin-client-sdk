@@ -140,6 +140,9 @@ class SummaryManager(
             return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
+        // Log the config being processed
+        Timber.i("📊 SUMMARY: Processing summary for config: ${configMap["key"] ?: "unknown"}")
+        
         // Validate required fields are present
         val experienceId = configMap["experience_id"] as? String ?: run {
             val message = "Missing mandatory 'experience_id' in config"
@@ -149,6 +152,7 @@ class SummaryManager(
                 ErrorHandler.ErrorCategory.VALIDATION,
                 ErrorHandler.ErrorSeverity.MEDIUM
             )
+            Timber.w("📊 SUMMARY: Missing mandatory field 'experience_id', summary not tracked")
             return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
@@ -170,17 +174,24 @@ class SummaryManager(
                 ErrorHandler.ErrorCategory.VALIDATION,
                 ErrorHandler.ErrorSeverity.MEDIUM
             )
+            Timber.w("📊 SUMMARY: Missing mandatory fields: ${missingFields.joinToString(", ")}, summary not tracked")
             return CFResult.error(message, category = ErrorHandler.ErrorCategory.VALIDATION)
         }
 
         scope.launch {
             try {
-                trackMutex.withLock {
+                val shouldProcess = trackMutex.withLock {
                     if (summaryTrackMap.containsKey(experienceId)) {
-                        Timber.d("Experience already processed: $experienceId")
-                        return@launch
+                        Timber.d("📊 SUMMARY: Experience already processed: $experienceId")
+                        false
+                    } else {
+                        summaryTrackMap[experienceId] = true
+                        true
                     }
-                    summaryTrackMap[experienceId] = true
+                }
+                
+                if (!shouldProcess) {
+                    return@launch
                 }
 
                 val configSummary = CFConfigRequestSummary(
@@ -196,7 +207,10 @@ class SummaryManager(
                     rule_id = configMap["rule_id"] as? String
                 )
 
+                Timber.i("📊 SUMMARY: Created summary for experience: $experienceId, config: $configId")
+                
                 if (!summaries.offer(configSummary)) {
+                    Timber.w("📊 SUMMARY: Queue full, forcing flush for new entry")
                     ErrorHandler.handleError(
                         "Summary queue full, forcing flush for new entry",
                         SOURCE,
@@ -205,6 +219,7 @@ class SummaryManager(
                     )
                     flushSummaries()
                     if (!summaries.offer(configSummary)) {
+                        Timber.e("📊 SUMMARY: Failed to queue summary after flush")
                         ErrorHandler.handleError(
                             "Failed to queue summary after flush",
                             SOURCE,
@@ -213,13 +228,15 @@ class SummaryManager(
                         )
                     }
                 } else {
-                    Timber.d("Summary added to queue: $configSummary")
+                    Timber.i("📊 SUMMARY: Added to queue: experience=$experienceId, queue size=${summaries.size}")
                     // Check if queue size threshold is reached
                     if (summaries.size >= summariesQueueSize) {
+                        Timber.i("📊 SUMMARY: Queue size threshold reached (${summaries.size}/${summariesQueueSize}), triggering flush")
                         flushSummaries()
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "📊 SUMMARY: Error processing summary for experience: $experienceId")
                 ErrorHandler.handleException(
                     e,
                     "Error processing summary for experience: $experienceId",
@@ -239,7 +256,7 @@ class SummaryManager(
      */
     suspend fun flushSummaries(): CFResult<Int> {
         if (summaries.isEmpty()) {
-            Timber.d("No summaries to flush")
+            Timber.d("📊 SUMMARY: No summaries to flush")
             return CFResult.success(0)
         }
         
@@ -247,16 +264,23 @@ class SummaryManager(
         summaries.drainTo(summariesToFlush)
         
         if (summariesToFlush.isEmpty()) {
+            Timber.d("📊 SUMMARY: No summaries to flush after drain")
             return CFResult.success(0)
         }
+        
+        Timber.i("📊 SUMMARY: Flushing ${summariesToFlush.size} summaries to server")
         
         return try {
             val result = sendSummaryToServer(summariesToFlush)
             result.onSuccess {
-                Timber.i("Flushed ${summariesToFlush.size} summaries successfully")
+                Timber.i("📊 SUMMARY: Successfully flushed ${summariesToFlush.size} summaries to server")
+            }
+            result.onError { error ->
+                Timber.w("📊 SUMMARY: Failed to flush summaries: ${error.error}")
             }
             result.map { summariesToFlush.size }
         } catch (e: Exception) {
+            Timber.e(e, "📊 SUMMARY: Unexpected error during summary flush")
             ErrorHandler.handleException(
                 e,
                 "Unexpected error during summary flush",
@@ -300,6 +324,7 @@ class SummaryManager(
             else 
                 ErrorHandler.ErrorCategory.INTERNAL
                 
+            Timber.e(e, "📊 SUMMARY: Error creating summary payload for ${summaries.size} summaries")
             ErrorHandler.handleException(
                 e,
                 "Error creating summary payload",
@@ -310,6 +335,7 @@ class SummaryManager(
             // Re-queue summaries on serialization error
             summaries.forEach { 
                 if (!this.summaries.offer(it)) {
+                    Timber.w("📊 SUMMARY: Failed to re-queue summary after serialization error")
                     ErrorHandler.handleError(
                         "Failed to re-queue summary after serialization error",
                         SOURCE,
@@ -327,6 +353,16 @@ class SummaryManager(
         }
 
         val url = "https://api.customfit.ai/v1/config/request/summary?cfenc=${cfConfig.clientKey}"
+        
+        // Log detailed summary information before HTTP call
+        Timber.i("📊 SUMMARY HTTP: Preparing to send ${summaries.size} summaries")
+        
+        summaries.forEachIndexed { index, summary ->
+            Timber.d("📊 SUMMARY HTTP: Summary #${index+1}: experience_id=${summary.experience_id}, config_id=${summary.config_id}")
+        }
+        
+        Timber.i("📊 SUMMARY: Sending ${summaries.size} summaries to server")
+        
         return try {
             var success = false
             withRetry(
@@ -335,16 +371,23 @@ class SummaryManager(
                 maxDelayMs = cfConfig.retryMaxDelayMs,
                 backoffMultiplier = cfConfig.retryBackoffMultiplier
             ) {
+                Timber.d("📊 SUMMARY: Attempting to send summaries to")
                 val result = httpClient.postJson(url, jsonPayload)
+                
                 if (result !is CFResult.Success) {
+                    Timber.w("📊 SUMMARY: Server returned error, retrying...")
                     throw Exception("Failed to send summaries - server returned error")
                 }
+                
+                Timber.i("📊 SUMMARY: Server accepted summaries")
                 success = true
             }
             
             if (success) {
+                Timber.i("📊 SUMMARY: Successfully sent ${summaries.size} summaries to server")
                 CFResult.success(true)
             } else {
+                Timber.w("📊 SUMMARY: Failed to send summaries after ${cfConfig.maxRetryAttempts} attempts")
                 handleSendFailure(summaries)
                 CFResult.error(
                     "Failed to send summaries after ${cfConfig.maxRetryAttempts} attempts",
@@ -352,6 +395,7 @@ class SummaryManager(
                 )
             }
         } catch (e: Exception) {
+            Timber.e(e, "📊 SUMMARY: Error sending summaries to server")
             ErrorHandler.handleException(
                 e,
                 "Error sending summaries to server",

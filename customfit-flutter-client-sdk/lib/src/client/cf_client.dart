@@ -287,7 +287,7 @@ class CFClient {
 
     // Complete the completer to signal initialization is done
     if (!_sdkSettingsCompleter.isCompleted) {
-      _sdkSettingsCompleter.complete();
+    _sdkSettingsCompleter.complete();
     }
 
     // Log that future checks will be handled by ConfigManager

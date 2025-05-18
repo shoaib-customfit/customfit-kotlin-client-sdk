@@ -43,6 +43,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Modular implementation of the CustomFit client SDK
@@ -79,7 +81,8 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         configFetcher,
         clientScope,
         listenerManager,
-        cfConfig
+        cfConfig,
+        summaryManager
     )
 
     init {
@@ -574,6 +577,56 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
                 "Failed to build event properties",
                 e,
                 category = ErrorHandler.ErrorCategory.VALIDATION
+            )
+        }
+    }
+    
+    /**
+     * Manually flushes the events queue to the server
+     * Useful for immediately sending tracked events without waiting for the automatic flush
+     * 
+     * @return CFResult containing the number of events flushed or error details
+     */
+    fun flushEvents(): CFResult<Int> {
+        return try {
+            var result: CFResult<Int>? = null
+            val latch = CountDownLatch(1)
+            
+            // Use clientScope to perform the flush operation
+            clientScope.launch {
+                CoroutineUtils.withErrorHandling(errorMessage = "Error flushing events") {
+                    result = eventTracker.flushEvents()
+                    latch.countDown()
+                }
+                .onFailure { e ->
+                    Timber.e(e, "Failed to flush events: ${e.message}")
+                    result = CFResult.error(
+                        "Failed to flush events",
+                        e,
+                        category = ErrorHandler.ErrorCategory.INTERNAL
+                    )
+                    latch.countDown()
+                }
+            }
+            
+            // Wait for the operation to complete with a reasonable timeout
+            latch.await(5, TimeUnit.SECONDS)
+            
+            result ?: CFResult.error(
+                "Event flush operation timed out",
+                category = ErrorHandler.ErrorCategory.INTERNAL
+            )
+        } catch (e: Exception) {
+            ErrorHandler.handleException(
+                e,
+                "Unexpected error flushing events",
+                SOURCE,
+                ErrorHandler.ErrorSeverity.HIGH
+            )
+            CFResult.error(
+                "Failed to flush events",
+                e,
+                category = ErrorHandler.ErrorCategory.INTERNAL
             )
         }
     }

@@ -58,7 +58,8 @@ class ConfigManagerImpl(
     private val configFetcher: ConfigFetcher,
     private val clientScope: CoroutineScope,
     private val listenerManager: ListenerManager,
-    private val cfConfig: customfit.ai.kotlinclient.config.core.CFConfig
+    private val cfConfig: customfit.ai.kotlinclient.config.core.CFConfig,
+    private val summaryManager: customfit.ai.kotlinclient.analytics.summary.SummaryManager
 ) : ConfigManager {
     
     private val configMap: MutableMap<String, Any> = ConcurrentHashMap()
@@ -107,27 +108,73 @@ class ConfigManagerImpl(
         val config = configMap[key]
         if (config == null) {
             Timber.warn { "No config found for key '$key'" }
+            // Log the fallback value being used
+            Timber.i("CONFIG VALUE: $key: $fallbackValue (using fallback)")
             return fallbackValue
         }
         if (config !is Map<*, *>) {
             Timber.warn { "Config for '$key' is not a map: $config" }
+            // Log the fallback value being used
+            Timber.i("CONFIG VALUE: $key: $fallbackValue (using fallback)")
             return fallbackValue
         }
         val variation = config["variation"]
         val result =
                 if (variation != null && typeCheck(variation)) {
                     try {
+                        // Log the actual config value
+                        Timber.i("CONFIG VALUE: $key: $variation")
                         variation as T
                     } catch (e: ClassCastException) {
                         Timber.warn {
                             "Type mismatch for '$key': expected ${fallbackValue!!::class.simpleName}, got ${variation::class.simpleName}"
                         }
+                        // Log the fallback value being used
+                        Timber.i("CONFIG VALUE: $key: $fallbackValue (using fallback due to type mismatch)")
                         fallbackValue
                     }
                 } else {
                     Timber.warn { "No valid variation for '$key': $variation" }
+                    // Log the fallback value being used
+                    Timber.i("CONFIG VALUE: $key: $fallbackValue (using fallback)")
                     fallbackValue
                 }
+                
+        // Push summary for tracking and analytics with required fields
+        try {
+            @Suppress("UNCHECKED_CAST")
+            val configMapWithKey = HashMap<String, Any>(config as Map<String, Any>)
+            
+            // Add key to help with debugging
+            configMapWithKey["key"] = key
+            
+            // Ensure required fields are present
+            if (!configMapWithKey.containsKey("experience_id") && configMapWithKey.containsKey("id")) {
+                configMapWithKey["experience_id"] = configMapWithKey["id"] as String
+            }
+            
+            // Add default values for other required fields if missing
+            if (!configMapWithKey.containsKey("config_id")) {
+                configMapWithKey["config_id"] = configMapWithKey["id"] ?: "default-config-id"
+            }
+            
+            if (!configMapWithKey.containsKey("variation_id")) {
+                configMapWithKey["variation_id"] = configMapWithKey["id"] ?: "default-variation-id"
+            }
+            
+            if (!configMapWithKey.containsKey("version")) {
+                configMapWithKey["version"] = "1.0.0"
+            }
+            
+            val summaryResult = summaryManager.pushSummary(configMapWithKey)
+            summaryResult.onError { error ->
+                Timber.w("Failed to push summary for key '$key': ${error.error}")
+            }
+            Timber.d("Summary pushed for key: $key")
+        } catch (e: Exception) {
+            Timber.e(e, "Exception while pushing summary for key '$key'")
+        }
+                
         return result
     }
     
@@ -145,35 +192,35 @@ class ConfigManagerImpl(
             val timestamp = SimpleDateFormat("HH:mm:ss.SSS").format(Date())
             Timber.d("Starting SDK settings check at $timestamp")
             
-            customfit.ai.kotlinclient.utils.CoroutineUtils.withCircuitBreaker(
-                    operationKey = "sdk_settings_fetch",
-                    failureThreshold = 3,
-                    resetTimeoutMs = 30_000,
-                    fallback = Unit
-            ) {
-                customfit.ai.kotlinclient.utils.CoroutineUtils.withTiming("checkSdkSettings") {
-                    customfit.ai.kotlinclient.utils.CoroutineUtils.withTimeoutOrNull(customfit.ai.kotlinclient.constants.CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
-                        customfit.ai.kotlinclient.utils.CoroutineUtils.withRetry(
-                                maxAttempts = 3,
-                                initialDelayMs = 100,
-                                maxDelayMs = 1000,
-                                retryOn = { it !is kotlinx.coroutines.CancellationException }
-                        ) {
-                            val sdkSettingsUrl = "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${CFConstants.Api.SDK_SETTINGS_PATH_PATTERN.format(cfConfig.dimensionId)}"
+        customfit.ai.kotlinclient.utils.CoroutineUtils.withCircuitBreaker(
+                operationKey = "sdk_settings_fetch",
+                failureThreshold = 3,
+                resetTimeoutMs = 30_000,
+                fallback = Unit
+        ) {
+            customfit.ai.kotlinclient.utils.CoroutineUtils.withTiming("checkSdkSettings") {
+                customfit.ai.kotlinclient.utils.CoroutineUtils.withTimeoutOrNull(customfit.ai.kotlinclient.constants.CFConstants.Network.SDK_SETTINGS_TIMEOUT_MS.toLong()) {
+                    customfit.ai.kotlinclient.utils.CoroutineUtils.withRetry(
+                            maxAttempts = 3,
+                            initialDelayMs = 100,
+                            maxDelayMs = 1000,
+                            retryOn = { it !is kotlinx.coroutines.CancellationException }
+                    ) {
+                        val sdkSettingsUrl = "${CFConstants.Api.SDK_SETTINGS_BASE_URL}${CFConstants.Api.SDK_SETTINGS_PATH_PATTERN.format(cfConfig.dimensionId)}"
                             
                             // Add more detailed logging for SDK settings API call
                             Timber.i("API POLL: Checking SDK settings at URL: $sdkSettingsUrl")
                             
                             // First try a lightweight HEAD request to check if there are changes
-                            val metadataResult = configFetcher.fetchMetadata(sdkSettingsUrl)
-                            
-                            if (metadataResult !is CFResult.Success) {
+                        val metadataResult = configFetcher.fetchMetadata(sdkSettingsUrl)
+                        
+                        if (metadataResult !is CFResult.Success) {
                                 Timber.w("SDK settings metadata fetch failed: ${metadataResult}")
-                                customfit.ai.kotlinclient.logging.Timber.warn { "Failed to fetch SDK settings metadata" }
-                                return@withRetry Unit
-                            }
-                            
-                            val metadata = metadataResult.data
+                            customfit.ai.kotlinclient.logging.Timber.warn { "Failed to fetch SDK settings metadata" }
+                            return@withRetry Unit
+                        }
+                        
+                        val metadata = metadataResult.data
                             
                             // Add more detailed logging about the received metadata
                             Timber.i("API POLL: Received metadata - Last-Modified: ${metadata[CFConstants.Http.HEADER_LAST_MODIFIED]}, ETag: ${metadata[CFConstants.Http.HEADER_ETAG]}")
@@ -266,24 +313,24 @@ class ConfigManagerImpl(
                                         customfit.ai.kotlinclient.logging.Timber.warn {
                                             "Failed to fetch config with last-modified: $currentLastModified, etag: $currentETag"
                                         }
-                                        return@withRetry Unit
-                                    }
-                                    
-                                    val newConfigs = configResult.data
+                                return@withRetry Unit
+                            }
+                            
+                            val newConfigs = configResult.data
                                     Timber.i("API POLL: Successfully fetched ${newConfigs.size} config entries")
                                     Timber.d("Config keys: ${newConfigs.keys}")
                                     Timber.d("Hero text if present: ${(newConfigs["hero_text"] as? Map<*, *>)?.get("variation")}")
                                     
                                     // Update config map with new values
-                                    updateConfigMap(newConfigs)
+                            updateConfigMap(newConfigs)
                                 } else {
                                     Timber.i("API POLL: Skipping config fetch because SDK functionality is disabled")
                                 }
                                 
                                 // Store both metadata values for future comparisons regardless of SDK functionality status
-                                previousLastModified = currentLastModified
+                            previousLastModified = currentLastModified
                                 previousETag = currentETag
-                            } else {
+                        } else {
                                 Timber.i("API POLL: Metadata unchanged - skipping config fetch")
                             }
                         }
@@ -460,13 +507,19 @@ class ConfigManagerImpl(
             configMap.putAll(configs)
         }
 
+        // Log all updated keys and their new values
+        if (updatedKeys.isNotEmpty()) {
+            Timber.i("--- UPDATED CONFIG VALUES ---")
         for (key in updatedKeys) {
             val config = configs[key] as? Map<*, *>
             val variation = config?.get("variation")
             if (variation != null) {
+                    Timber.i("CONFIG UPDATE: $key: $variation")
                 notifyListeners(key, variation)
+                }
             }
         }
+        
         customfit.ai.kotlinclient.logging.Timber.i("Configs updated successfully with ${configs.size} entries")
     }
     

@@ -2,7 +2,9 @@ package customfit.ai
 
 import customfit.ai.kotlinclient.client.CFClient
 import customfit.ai.kotlinclient.config.core.CFConfig
+import customfit.ai.kotlinclient.core.error.CFResult
 import customfit.ai.kotlinclient.core.model.CFUser
+import customfit.ai.kotlinclient.logging.Timber
 import java.text.SimpleDateFormat
 import java.util.Date
 import kotlinx.coroutines.runBlocking
@@ -13,6 +15,8 @@ fun main(args: Array<String>) {
         val timestamp = { SimpleDateFormat("HH:mm:ss.SSS").format(Date()) }
 
         println("[${timestamp()}] Starting CustomFit SDK Test")
+        // Test direct logging with Timber
+        Timber.i("🔔 DIRECT TEST: Logging test via Timber")
 
         // Configure with a short settings check interval
         val clientKey =
@@ -64,13 +68,7 @@ fun main(args: Array<String>) {
         cfClient.awaitSdkSettingsCheck() // Wait for the initial fetch to complete
         println("[${timestamp()}] Initial SDK settings check complete.")
 
-        // Print values for all requested config keys
-        println("\n[${timestamp()}] --- REQUESTED CONFIG KEYS AND VALUES ---")
-        val configKeys = listOf("enhanced_toast", "shoaib-2", "shoaib-1", "hero_text", "enhanced-toast")
-        configKeys.forEach { key ->
-            val value = cfClient.getString(key, "default-value")
-            println("[${timestamp()}] $key: $value")
-        }
+       
 
         // Comment out event tracking to reduce POST calls
         println("\n[${timestamp()}] Testing event tracking is disabled to reduce POST requests...")
@@ -86,15 +84,31 @@ fun main(args: Array<String>) {
 
         // Run normal check cycles with auto-refresh
         println("\n[${timestamp()}] --- PHASE 1: Normal SDK Settings Checks ---")
-        for (i in 1..30) {
+        for (i in 1..3) {
             println("\n[${timestamp()}] Check cycle $i...")
 
-            // Comment out cycle event tracking
-            // cfClient.trackEvent("cycle_event", mapOf("cycle" to i, "phase" to 1))
+            // Track event-i for each cycle and explicitly flush
+            println("[${timestamp()}] About to track event-$i for cycle $i")
+            val trackResult = cfClient.trackEvent("event-$i", mapOf("source" to "app"))
+            println("[${timestamp()}] Result of tracking event-$i: ${trackResult is CFResult.Success}")
+            println("[${timestamp()}] Tracked event-$i for cycle $i")
+            
+            // Force a flush of event queue to ensure events are sent immediately
+            println("[${timestamp()}] About to flush event queue")
+            val flushResult = cfClient.flushEvents()
+            println("[${timestamp()}] Raw flush result: $flushResult")
+            when (flushResult) {
+                is CFResult.Success -> {
+                    println("[${timestamp()}] Explicitly flushed ${flushResult.data} events")
+                }
+                is CFResult.Error -> {
+                    println("[${timestamp()}] Failed to flush events: ${flushResult.error}")
+                }
+            }
 
             // Wait for next check - only wait 1 second to see more frequent updates
             println("[${timestamp()}] Waiting for SDK settings check...")
-            Thread.sleep(3000)
+            Thread.sleep(5000)
 
             // Get current value
             val currentValue = cfClient.getString("hero_text", "default-value")

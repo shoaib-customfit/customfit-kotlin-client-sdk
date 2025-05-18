@@ -107,11 +107,25 @@ class EventTracker(
 
     /**
      * Tracks an event with improved error handling
+     * Always flushes summaries before tracking a new event
      */
     fun trackEvent(eventName: String, properties: Map<String, Any> = emptyMap()): CFResult<EventData> {
         try {
+            // Using Timber for consistent logging
+            Timber.i("🔔 🔔 TRACK: Tracking event: $eventName with properties: $properties")
+            
+            // Always flush summaries first before tracking a new event
+            scope.launch {
+                Timber.i("🔔 🔔 TRACK: Flushing summaries before tracking event: $eventName")
+                summaryManager.flushSummaries()
+                    .onError { error ->
+                        Timber.w("🔔 🔔 TRACK: Failed to flush summaries before tracking event: ${error.error}")
+                    }
+            }
+            
             if (eventName.isBlank()) {
                 val message = "Event name cannot be blank"
+                Timber.w("🔔 TRACK: Invalid event - $message")
                 ErrorHandler.handleError(
                     message,
                     SOURCE,
@@ -133,6 +147,7 @@ class EventTracker(
 
             // Handle queue management with proper error tracking
             if (eventQueue.size >= eventsQueueSize) {
+                Timber.w("🔔 TRACK: Event queue is full (size = $eventsQueueSize), dropping oldest event")
                 ErrorHandler.handleError(
                     "Event queue is full (size = $eventsQueueSize), dropping oldest event",
                     SOURCE,
@@ -143,6 +158,7 @@ class EventTracker(
             }
 
             if (!eventQueue.offer(event)) {
+                Timber.w("🔔 TRACK: Event queue full, forcing flush for event: ${event.event_customer_id}")
                 ErrorHandler.handleError(
                     "Event queue full, forcing flush for event: $event",
                     SOURCE,
@@ -153,6 +169,7 @@ class EventTracker(
                 
                 if (!eventQueue.offer(event)) {
                     val message = "Failed to queue event after flush"
+                    Timber.e("🔔 TRACK: $message: ${event.event_customer_id}")
                     ErrorHandler.handleError(
                         "$message: $event",
                         SOURCE,
@@ -162,8 +179,9 @@ class EventTracker(
                     return CFResult.error(message, category = ErrorHandler.ErrorCategory.INTERNAL)
                 }
             } else {
-                Timber.d("Event added to queue: $event")
+                Timber.i("🔔 TRACK: Event added to queue: ${event.event_customer_id}, queue size=${eventQueue.size}")
                 if (eventQueue.size >= eventsQueueSize) {
+                    Timber.i("🔔 TRACK: Queue size threshold reached (${eventQueue.size}/${eventsQueueSize}), triggering flush")
                     scope.launch { flushEvents() }
                 }
             }
@@ -265,12 +283,15 @@ class EventTracker(
 
     /**
      * Flushes events to the server with improved error handling
+     * Note: Summaries are already flushed in trackEvent, but we ensure they're flushed here as well
      */
     suspend fun flushEvents(): CFResult<Int> {
         try {
-            // First flush summaries
+            // Always ensure summaries are flushed first
+            Timber.i("🔔 🔔 TRACK: Beginning event flush process")
             summaryManager.flushSummaries()
                 .onError { error ->
+                    Timber.w("🔔 🔔 TRACK: Failed to flush summaries before flushing events: ${error.error}")
                     ErrorHandler.handleError(
                         "Failed to flush summaries before flushing events: ${error.error}",
                         SOURCE,
@@ -281,7 +302,7 @@ class EventTracker(
             
             // Check if queue is empty
             if (eventQueue.isEmpty()) {
-                Timber.d("No events to flush")
+                Timber.d("🔔 TRACK: No events to flush")
                 return CFResult.success(0)
             }
             
@@ -290,14 +311,21 @@ class EventTracker(
             eventQueue.drainTo(eventsToFlush)
             
             if (eventsToFlush.isNotEmpty()) {
+                Timber.i("🔔 TRACK: Flushing ${eventsToFlush.size} events to server")
+                
+                eventsToFlush.forEachIndexed { index, event ->
+                    Timber.d("🔔 TRACK: Event #${index+1}: ${event.event_customer_id}")
+                }
+                
                 val result = sendTrackEvents(eventsToFlush)
                 
                 return result.fold(
                     onSuccess = {
-                        Timber.i("Flushed ${eventsToFlush.size} events successfully")
+                        Timber.i("🔔 TRACK: Flushed ${eventsToFlush.size} events successfully")
                         CFResult.success(eventsToFlush.size)
                     },
                     onError = { error ->
+                        Timber.w("🔔 TRACK: Failed to flush events: ${error.error}")
                         CFResult.error(
                             "Failed to flush events: ${error.error}",
                             error.exception,
@@ -307,6 +335,7 @@ class EventTracker(
                     }
                 )
             } else {
+                Timber.d("🔔 TRACK: No events to flush after drain")
                 return CFResult.success(0)
             }
         } catch (e: Exception) {
@@ -327,6 +356,13 @@ class EventTracker(
      * Sends tracked events to the server with improved error handling
      */
     private suspend fun sendTrackEvents(events: List<EventData>): CFResult<Boolean> {
+        Timber.i("🔔 TRACK HTTP: Preparing to send ${events.size} events")
+        
+        // Log detailed event information before HTTP call
+        events.forEachIndexed { index, event ->
+            Timber.d("🔔 TRACK HTTP: Event #${index+1}: ${event.event_customer_id}, properties=${event.properties.keys.joinToString()}")
+        }
+        
         // First create the JSON payload
         val jsonPayload = try {
             val jsonObject = buildJsonObject {
@@ -355,6 +391,7 @@ class EventTracker(
             }
             Json.encodeToString(jsonObject)
         } catch (e: Exception) {
+            Timber.e("🔔 TRACK HTTP: Error creating event payload for ${events.size} events")
             ErrorHandler.handleException(
                 e,
                 "Failed to serialize event payload",
@@ -367,8 +404,13 @@ class EventTracker(
                 category = ErrorHandler.ErrorCategory.SERIALIZATION
             )
         }
+        
+        Timber.i("🔔 TRACK HTTP: Event payload size: ${jsonPayload.length} bytes")
 
         // Then send the events with retry
+        val url = "https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}"
+        Timber.i("🔔 TRACK HTTP: POST request to: $url")
+        
         try {
             return withRetry(
                 maxAttempts = cfConfig.maxRetryAttempts,
@@ -376,16 +418,22 @@ class EventTracker(
                 maxDelayMs = cfConfig.retryMaxDelayMs,
                 backoffMultiplier = cfConfig.retryBackoffMultiplier
             ) {
-                val result = httpClient.postJson("https://api.customfit.ai/v1/cfe?cfenc=${cfConfig.clientKey}", jsonPayload)
+                Timber.d("🔔 TRACK HTTP: Attempting to send events")
+                val result = httpClient.postJson(url, jsonPayload)
                 
                 result.fold(
-                    onSuccess = { CFResult.success(true) },
+                    onSuccess = { 
+                        Timber.i("🔔 TRACK HTTP: Events successfully sent to server")
+                        CFResult.success(true) 
+                    },
                     onError = { error ->
+                        Timber.w("🔔 TRACK HTTP: Server returned error: ${error.error}")
                         throw Exception("Failed to send event: ${error.error}", error.exception)
                     }
                 )
             }
         } catch (e: Exception) {
+            Timber.e("🔔 TRACK HTTP: Failed to send events after ${cfConfig.maxRetryAttempts} attempts: ${e.message}")
             ErrorHandler.handleException(
                 e,
                 "Failed to send events after retries",
@@ -394,22 +442,37 @@ class EventTracker(
             )
             
             // Re-queue the events if sending failed after all retries
+            Timber.w("🔔 TRACK HTTP: Failed to send ${events.size} events, attempting to re-queue")
+            
             var requeueFailed = false
+            var requeueFailCount = 0
+            
             events.forEach { event ->
                 if (!eventQueue.offer(event)) {
                     requeueFailed = true
+                    requeueFailCount++
+                    Timber.e("🔔 TRACK: Failed to re-queue event ${event.event_customer_id} after send failure")
                     ErrorHandler.handleError(
                         "Failed to re-queue event after send failure: $event",
                         SOURCE,
                         ErrorHandler.ErrorCategory.INTERNAL,
                         ErrorHandler.ErrorSeverity.HIGH
                     )
+                } else {
+                    Timber.i("🔔 TRACK: Successfully re-queued event ${event.event_customer_id}")
                 }
             }
             
+            val errorMessage = if (requeueFailed) {
+                "Failed to send events and $requeueFailCount event(s) could not be requeued" 
+            } else {
+                "Failed to send events but all ${events.size} were requeued"
+            }
+            
+            Timber.w("🔔 TRACK: $errorMessage")
+            
             return CFResult.error(
-                if (requeueFailed) "Failed to send events and some could not be requeued" 
-                else "Failed to send events but all were requeued",
+                errorMessage,
                 e,
                 category = ErrorHandler.ErrorCategory.NETWORK
             )
@@ -439,3 +502,4 @@ class EventTracker(
         else -> JsonPrimitive(value.toString())
     }
 }
+
