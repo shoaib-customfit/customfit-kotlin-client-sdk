@@ -114,7 +114,8 @@ class ConfigManagerImpl implements ConfigManager {
 
     Logger.i('Loading configuration from cache...');
 
-    final cacheResult = await _configCache.getCachedConfig();
+    // Try to get cached config, allow expired entries if needed
+    final cacheResult = await _configCache.getCachedConfig(allowExpired: true);
 
     if (cacheResult.configMap != null) {
       Logger.i(
@@ -206,6 +207,7 @@ class ConfigManagerImpl implements ConfigManager {
 
       final headers = metadataResult.getOrNull() ?? {};
       final lastModified = headers['Last-Modified'];
+      final etag = headers['ETag'];
 
       // If we get 'unchanged' for Last-Modified, it means we got a 304 response
       // No need to fetch the config again
@@ -235,33 +237,40 @@ class ConfigManagerImpl implements ConfigManager {
               '🔎 API POLL: Failed to fetch SDK settings: ${sdkSettingsResult.getErrorMessage()}');
         }
 
-        // Fetch config
-        final configSuccess =
-            await _configFetcher.fetchConfig(lastModified: lastModified);
+        // Only fetch configs if SDK functionality is enabled
+        if (_isSdkFunctionalityEnabled) {
+          // Fetch config
+          final configSuccess =
+              await _configFetcher.fetchConfig(lastModified: lastModified);
 
-        if (!configSuccess) {
-          Logger.w('🔎 API POLL: Failed to fetch config');
-          return;
+          if (!configSuccess) {
+            Logger.w('🔎 API POLL: Failed to fetch config');
+            return;
+          }
+
+          // Get configs
+          final configsResult = _configFetcher.getConfigs();
+
+          if (!configsResult.isSuccess) {
+            Logger.w(
+                '🔎 API POLL: Failed to get configs: ${configsResult.getErrorMessage()}');
+            return;
+          }
+
+          final configs = configsResult.getOrNull() ?? {};
+          Logger.i(
+              '🔎 API POLL: Successfully fetched ${configs.length} config entries');
+
+          // Use the enhanced ConfigCache with proper cache policy
+          await _configCache.cacheConfig(configs, lastModified, etag,
+              policy: CachePolicy.configCache);
+
+          // Update config map with new values
+          _updateConfigMap(configs);
+        } else {
+          Logger.i(
+              '🔎 API POLL: Skipping config fetch because SDK functionality is disabled');
         }
-
-        // Get configs
-        final configsResult = _configFetcher.getConfigs();
-
-        if (!configsResult.isSuccess) {
-          Logger.w(
-              '🔎 API POLL: Failed to get configs: ${configsResult.getErrorMessage()}');
-          return;
-        }
-
-        final configs = configsResult.getOrNull() ?? {};
-        Logger.i(
-            '🔎 API POLL: Successfully fetched ${configs.length} config entries');
-
-        // Cache the successful response
-        await _configCache.cacheConfig(configs, lastModified, null);
-
-        // Update config map with new values
-        _updateConfigMap(configs);
       } else {
         Logger.d(
             '🔎 API POLL: No change in Last-Modified header, skipping config fetch');
