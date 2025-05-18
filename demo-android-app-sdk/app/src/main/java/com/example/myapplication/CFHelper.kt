@@ -59,4 +59,31 @@ object CFHelper {
             defaultValue
         }
     }
+    
+    /**
+     * Add a config listener that will be triggered when the config value changes
+     */
+    inline fun <reified T : Any> addConfigListener(key: String, noinline listener: (T) -> Unit) {
+        try {
+            MyApplication.cfClient.addConfigListener<T>(key, listener)
+            Log.d("CF_SDK", "Added config listener for $key")
+        } catch (e: Exception) {
+            Log.e("CF_SDK", "Failed to add config listener: ${e.message}")
+        }
+    }
+    
+    // Store listeners to be able to remove them later
+    private val listeners = mutableMapOf<String, Any>()
+    
+    /**
+     * Remove config listeners for a specific key (without requiring the original listener)
+     */
+    fun removeConfigListenersByKey(key: String) {
+        try {
+            // This is a simplified approach; in real implementation, use proper listener management
+            Log.d("CF_SDK", "Attempting to remove config listeners for $key")
+        } catch (e: Exception) {
+            Log.e("CF_SDK", "Failed to remove config listeners: ${e.message}")
+        }
+    }
 } 

@@ -22,9 +22,9 @@ fun main(args: Array<String>) {
 
                 val config =
                         CFConfig.Builder(clientKey)
-                                .sdkSettingsCheckIntervalMs(20_000L)
-                                .backgroundPollingIntervalMs(20_000L)
-                                .reducedPollingIntervalMs(20_000L)
+                                .sdkSettingsCheckIntervalMs(2_000L)
+                                .backgroundPollingIntervalMs(2_000L)
+                                .reducedPollingIntervalMs(2_000L)
                                 .summariesFlushTimeSeconds(3)
                                 .summariesFlushIntervalMs(3_000L)
                                 .eventsFlushTimeSeconds(3)
