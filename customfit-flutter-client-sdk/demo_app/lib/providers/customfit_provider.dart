@@ -64,6 +64,7 @@ class CustomFitProvider with ChangeNotifier {
           .setEventsFlushIntervalMs(30000)
           .setNetworkConnectionTimeoutMs(10000)
           .setNetworkReadTimeoutMs(10000)
+          .setLogLevel('debug')
           .build();
       debugPrint('CFConfig created successfully');
 

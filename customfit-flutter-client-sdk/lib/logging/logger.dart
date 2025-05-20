@@ -14,17 +14,30 @@ class Logger {
 
   /// Enhanced console output with emoji indicators
   static void _directConsoleOutput(String message) {
+    String formattedMessage;
+
     if (message.contains('API POLL')) {
-      developer.log('📡 $message', name: _logPrefix, level: 500);
+      formattedMessage = '📡 $message';
+      developer.log(formattedMessage, name: _logPrefix, level: 500);
+      // Always print to terminal for better visibility
+      print('$_logPrefix: $formattedMessage');
     } else if (message.contains('SUMMARY')) {
-      developer.log('📊 $message', name: _logPrefix, level: 500);
+      formattedMessage = '📊 $message';
+      developer.log(formattedMessage, name: _logPrefix, level: 500);
+      print('$_logPrefix: $formattedMessage');
     } else if (message.contains('CONFIG VALUE') ||
         message.contains('CONFIG UPDATE')) {
-      developer.log('🔧 $message', name: _logPrefix, level: 500);
+      formattedMessage = '🔧 $message';
+      developer.log(formattedMessage, name: _logPrefix, level: 500);
+      print('$_logPrefix: $formattedMessage');
     } else if (message.contains('TRACK') || message.contains('🔔')) {
-      developer.log('🔔 $message', name: _logPrefix, level: 500);
+      formattedMessage = '🔔 $message';
+      developer.log(formattedMessage, name: _logPrefix, level: 500);
+      print('$_logPrefix: $formattedMessage');
     } else {
-      developer.log(message, name: _logPrefix, level: 500);
+      formattedMessage = message;
+      developer.log(formattedMessage, name: _logPrefix, level: 500);
+      print('$_logPrefix: $formattedMessage');
     }
   }
 
@@ -32,9 +45,8 @@ class Logger {
   static void d(String message) {
     if (enabled && debugEnabled) {
       developer.log(message, name: _logPrefix, level: 500);
-      if (kDebugMode) {
-        _directConsoleOutput(message);
-      }
+      // Always print debug logs to terminal
+      print('$_logPrefix [DEBUG]: $message');
     }
   }
 
@@ -42,9 +54,7 @@ class Logger {
   static void i(String message) {
     if (enabled) {
       developer.log(message, name: _logPrefix, level: 800);
-      if (kDebugMode) {
-        _directConsoleOutput(message);
-      }
+      print('$_logPrefix [INFO]: $message');
     }
   }
 
@@ -52,9 +62,7 @@ class Logger {
   static void w(String message) {
     if (enabled) {
       developer.log(message, name: _logPrefix, level: 900);
-      if (kDebugMode) {
-        _directConsoleOutput(message);
-      }
+      print('$_logPrefix [WARN]: $message');
     }
   }
 
@@ -62,9 +70,7 @@ class Logger {
   static void e(String message) {
     if (enabled) {
       developer.log(message, name: _logPrefix, level: 1000);
-      if (kDebugMode) {
-        _directConsoleOutput(message);
-      }
+      print('$_logPrefix [ERROR]: $message');
     }
   }
 
@@ -76,8 +82,9 @@ class Logger {
           '$message\nError: $error${stackTrace != null ? '\nStackTrace: $stackTrace' : ''}';
       developer.log(errorMsg,
           name: _logPrefix, level: 1000, error: error, stackTrace: stackTrace);
-      if (kDebugMode) {
-        _directConsoleOutput('ERROR: $message');
+      print('$_logPrefix [EXCEPTION]: $message\nError: $error');
+      if (stackTrace != null) {
+        print('StackTrace: $stackTrace');
       }
     }
   }
