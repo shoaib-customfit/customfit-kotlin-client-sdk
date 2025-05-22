@@ -1,5 +1,14 @@
 import Foundation
 
+// Import all necessary modules for EventTracker
+// Core SDK components
+// Config and user management
+// Network and HTTP
+// Analytics and events
+// Error handling and utilities
+// Constants and results
+// Circuit breaker pattern
+
 /// Manages tracking and sending of analytics events
 public class EventTracker {
     
@@ -369,7 +378,7 @@ public class EventTracker {
         lastFlushTime = Date()
         
         // Drain the queue
-        var eventsToFlush = [EventData]()
+        var eventsToFlush: [EventData] = []
         eventQueue.drainTo(&eventsToFlush)
         
         if eventsToFlush.isEmpty {
@@ -384,6 +393,9 @@ public class EventTracker {
         
         Logger.info("🔔 TRACK: Flushing \(eventsToFlush.count) events")
         
+        // Add Kotlin-style beginning log
+        Logger.info("🔔 🔔 TRACK: Beginning event flush process")
+        
         // Make sure summaries are flushed first if any
         let summaryResult = summaryManager.flushSummaries()
         
@@ -392,7 +404,7 @@ public class EventTracker {
             // Summary flush successful, proceed with events
             break
             
-        case .error(let message, let error, _, let category):
+        case .error(let message, _, _, let category):
             // Log summary flush error but continue with event flush
             Logger.warning("🔔 TRACK: Failed to flush summaries before events: \(message)")
             ErrorHandler.handleError(
@@ -654,17 +666,32 @@ public class EventTracker {
     /// - Returns: Result indicating success or failure
     private func sendEvents(events: [EventData]) -> CFResult<Bool> {
         do {
+            // Add Kotlin-style HTTP preparation logs
+            Logger.info("🔔 TRACK HTTP: Preparing to send \(events.count) events")
+            
+            // Log each event like Kotlin does
+            for (index, event) in events.enumerated() {
+                Logger.info("🔔 TRACK HTTP: Event #\(index+1): \(event.name), properties=\(event.properties.keys.joined(separator: ","))")
+            }
+            
             // Build payload
             let eventRequestData = buildEventApiPayload(events: events)
             
             // Serialize to JSON
             let jsonData = try JSONSerialization.data(withJSONObject: eventRequestData, options: [])
             
+            // Add Kotlin-style payload size log
+            Logger.info("🔔 TRACK HTTP: Event payload size: \(jsonData.count) bytes")
+            
             // Create URL
             let eventsUrl = "\(CFConstants.Api.BASE_API_URL)\(CFConstants.Api.EVENTS_PATH)?cfenc=\(config.clientKey)"
             guard let url = URL(string: eventsUrl) else {
                 return CFResult.createError(message: "Invalid events URL: \(eventsUrl)", category: .validation)
             }
+            
+            // Add Kotlin-style URL log
+            Logger.info("🔔 TRACK HTTP: POST request to: \(eventsUrl)")
+            Logger.info("🔔 TRACK HTTP: Attempting to send events")
             
             // Create circuit breaker
             let circuitBreaker = CircuitBreaker.getOrCreate(name: "events-api")
@@ -696,6 +723,10 @@ public class EventTracker {
             // Process the result
             if case .success = resultValue {
                 circuitBreaker.recordSuccess()
+                
+                // Add Kotlin-style success logs
+                Logger.info("🔔 TRACK HTTP: Events successfully sent to server")
+                Logger.info("🔔 TRACK: Flushed \(events.count) events successfully")
             } else {
                 circuitBreaker.recordFailure()
             }

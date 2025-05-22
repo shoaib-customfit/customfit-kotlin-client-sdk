@@ -172,23 +172,41 @@ public class CFConfig {
     /// - Parameter token: Client key token
     /// - Returns: Extracted dimension ID or nil
     private func extractDimensionIdFromToken(_ token: String) -> String? {
-        guard !token.isEmpty else { return nil }
+        guard !token.isEmpty else { 
+            Logger.debug("JWT: Token is empty")
+            return nil 
+        }
         
         do {
             // Split the token by periods
             let parts = token.components(separatedBy: ".")
-            guard parts.count >= 2 else { return nil }
+            Logger.debug("JWT: Token parts count: \(parts.count)")
+            guard parts.count >= 2 else { 
+                Logger.debug("JWT: Token doesn't have enough parts")
+                return nil 
+            }
             
             // Base64 decode the payload part
             let payload = parts[1]
+            Logger.debug("JWT: Payload part: \(payload.prefix(50))...")
             let paddedPayload = padBase64String(payload)
+            Logger.debug("JWT: Padded payload: \(paddedPayload.prefix(50))...")
             
-            guard let data = Data(base64Encoded: paddedPayload) else { return nil }
-            guard let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            guard let data = Data(base64Encoded: paddedPayload) else { 
+                Logger.debug("JWT: Failed to base64 decode payload")
+                return nil 
+            }
+            guard let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { 
+                Logger.debug("JWT: Failed to parse JSON from payload")
+                return nil 
+            }
             
-            return jsonObject["dimension_id"] as? String
+            Logger.debug("JWT: Parsed JSON keys: \(jsonObject.keys)")
+            let dimensionId = jsonObject["dimension_id"] as? String
+            Logger.debug("JWT: Extracted dimension_id: \(dimensionId ?? "nil")")
+            return dimensionId
         } catch {
-            print("Error extracting dimension ID: \(error)")
+            Logger.debug("JWT: Error extracting dimension ID: \(error)")
             return nil
         }
     }

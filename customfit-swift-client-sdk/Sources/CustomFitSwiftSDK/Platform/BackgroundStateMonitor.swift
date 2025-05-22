@@ -162,15 +162,16 @@ public class DefaultBackgroundStateMonitor: BackgroundStateMonitor {
         UIDevice.current.isBatteryMonitoringEnabled = true
         
         // Start battery check timer
-        DispatchQueue.main.async {
-            self.batteryCheckTimer = Timer.scheduledTimer(
-                withTimeInterval: 60.0, // Check every minute
-                repeats: true
-            ) { [weak self] _ in
-                self?.updateBatteryState()
-            }
-            RunLoop.current.add(self.batteryCheckTimer!, forMode: .common)
+        batteryCheckTimer = Timer.scheduledTimer(
+            withTimeInterval: 60.0, // Check every minute
+            repeats: true
+        ) { [weak self] _ in
+            self?.updateBatteryState()
         }
+        
+        // For command-line apps, we don't need to add to run loop
+        // The timer will work as long as the main thread doesn't block
+        Logger.debug("Background state monitoring: Timer created for command-line compatibility")
         #endif
         
         isMonitoring = true

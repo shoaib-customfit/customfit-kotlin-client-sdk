@@ -406,6 +406,7 @@ public class HttpClient {
             }
         }
         
+        Logger.info("EXECUTING POST JSON REQUEST")
         task.resume()
     }
     
@@ -565,6 +566,7 @@ public class HttpClient {
             }
         }
         
+        Logger.info("EXECUTING HEAD REQUEST")
         task.resume()
     }
     
@@ -733,6 +735,10 @@ public class HttpClient {
     ) {
         Logger.debug("API CALL: \(method) request to \(url.absoluteString)")
         
+        // Extract endpoint from URL for metrics
+        let endpoint = url.lastPathComponent
+        let startTime = Date().timeIntervalSince1970 * 1000
+        
         var request = URLRequest(url: url)
         request.httpMethod = method
         
@@ -742,8 +748,66 @@ public class HttpClient {
         
         addHeaders(to: &request, headers: headers)
         
-        let task = session.dataTask(with: request) { data, response, error in
-            completion(data, response as? HTTPURLResponse, error)
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            // Calculate request duration
+            let endTime = Date().timeIntervalSince1970 * 1000
+            let duration = Int64(endTime - startTime)
+            
+            if let error = error {
+                Logger.error("API ERROR: \(error.localizedDescription)")
+                ErrorHandler.handleError(
+                    message: "Error making \(method) request to \(url.absoluteString): \(error.localizedDescription)",
+                    source: HttpClient.SOURCE,
+                    category: .network,
+                    severity: .high
+                )
+                
+                self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
+                
+                completion(nil, nil, error)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                Logger.error("API ERROR: Invalid response")
+                
+                self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
+                
+                completion(nil, nil, NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid response"]))
+                return
+            }
+            
+            if httpResponse.statusCode == 200 {
+                guard let data = data else {
+                    Logger.error("API ERROR: Empty response data")
+                    
+                    self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
+                    
+                    completion(nil, httpResponse, NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Empty response data"]))
+                    return
+                }
+                
+                Logger.debug("API CALL: \(method) request to \(url.absoluteString) successful")
+                
+                self.recordMetrics(endpoint: endpoint, duration: duration, success: true)
+                
+                completion(data, httpResponse, nil)
+            } else {
+                let errorMessage = data != nil ? String(data: data!, encoding: .utf8) ?? "No error body" : "No error body"
+                Logger.warning("API ERROR: \(method) request to \(url.absoluteString) failed with code: \(httpResponse.statusCode)")
+                ErrorHandler.handleError(
+                    message: "API error response: \(httpResponse.statusCode) - \(errorMessage)",
+                    source: HttpClient.SOURCE,
+                    category: .network,
+                    severity: .high
+                )
+                
+                self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
+                
+                completion(nil, httpResponse, NSError(domain: "", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage]))
+            }
         }
         
         task.resume()

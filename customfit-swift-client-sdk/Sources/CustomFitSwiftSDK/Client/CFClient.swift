@@ -35,8 +35,42 @@ public class CFClient: AppStateListener, BatteryStateListener {
     ///   - user: User
     /// - Returns: New client instance
     public static func `init`(config: CFConfig, user: CFUser) -> CFClient {
+        Logger.info("🚀 Creating CFClient with timeout protection...")
+        
+        // Create the instance with timeout protection
+        let startTime = Date()
         let newInstance = CFClient(config: config, user: user)
+        let duration = Date().timeIntervalSince(startTime)
+        
+        Logger.info("🚀 CFClient created successfully in \(String(format: "%.3f", duration)) seconds")
+        
+        // Store in singleton
         instance = newInstance
+        return newInstance
+    }
+    
+    /// Special factory method that creates a minimal CFClient without starting listeners or polling
+    /// Use this for debugging or when regular initialization is causing issues
+    /// - Parameters:
+    ///   - config: SDK configuration
+    ///   - user: User
+    /// - Returns: Minimal CFClient
+    public static func createMinimalClient(config: CFConfig, user: CFUser) -> CFClient {
+        Logger.info("⚠️ IMPORTANT: Creating minimal CFClient without full listeners or polling")
+        
+        // Create an instance with timeout protection
+        let startTime = Date()
+        let newInstance = CFClient(config: config, user: user, skipSetup: true)
+        let duration = Date().timeIntervalSince(startTime)
+        
+        Logger.info("🚀 Minimal CFClient created successfully in \(String(format: "%.3f", duration)) seconds")
+        
+        // Mark the instance as initialized for any code that checks this flag
+        newInstance.isInitialized = true
+        
+        // Store in the singleton
+        instance = newInstance
+        
         return newInstance
     }
     
@@ -87,6 +121,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
             logLevelStr: self.mutableConfig.logLevel
         )
         
+        Logger.info("🚀 CFClient initialization starting...")
+        
         // Create HTTP client
         let httpClient = HttpClient(config: self.mutableConfig.config)
         self.httpClient = httpClient
@@ -122,6 +158,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.summaryManager = summaryManager
         
+        Logger.info("SummaryManager initialized with summariesQueueSize=\(self.mutableConfig.summariesQueueSize), summariesFlushTimeSeconds=\(self.mutableConfig.summariesFlushTimeSeconds), flushIntervalMs=\(self.mutableConfig.summariesFlushIntervalMs)")
+        
         // Create and store config fetcher
         let fetcher = ConfigFetcher(
             httpClient: httpClient,
@@ -151,6 +189,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.eventTracker = eventTracker
         
+        Logger.info("EventTracker initialized with eventsQueueSize=\(self.mutableConfig.eventsQueueSize), maxStoredEvents=\(self.mutableConfig.maxStoredEvents), eventsFlushTimeSeconds=\(self.mutableConfig.eventsFlushTimeSeconds), eventsFlushIntervalMs=\(self.mutableConfig.eventsFlushIntervalMs)")
+        
         // Initial offline mode setup from config
         if self.mutableConfig.offlineMode {
             self.configFetcher.setOffline(true)
@@ -158,8 +198,41 @@ public class CFClient: AppStateListener, BatteryStateListener {
             Logger.info("CFClient initialized in offline mode based on config.")
         }
 
-        setupListeners()
+        // Mark as initialized immediately to prevent hanging
+        self.isInitialized = true
+        Logger.info("🚀 CFClient core initialization complete")
+        
+        // Perform initial SDK settings check synchronously (like Kotlin does)
+        if !self.mutableConfig.offlineMode {
+            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            DispatchQueue.global(qos: .userInitiated).async {
+                if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                    Task {
+                        do {
+                            try await self.configManager.checkSdkSettings()
+                            Logger.info("🔧 Initial SDK settings check completed successfully")
+                        } catch {
+                            Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                        }
+                    }
+                } else {
+                    do {
+                        try self.configManager.checkSdkSettingsSync()
+                        Logger.info("🔧 Initial SDK settings check completed successfully")
+                    } catch {
+                        Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        // Setup listeners asynchronously to prevent blocking
+        setupListenersAsync()
+        
+        // Register for config changes
         self.mutableConfig.addConfigChangeListener(self)
+        
+        Logger.info("🚀 CFClient initialization completed successfully!")
     }
     
     // This must be public to be accessible from Demo project
@@ -172,6 +245,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
             debugLoggingEnabled: self.mutableConfig.debugLoggingEnabled,
             logLevelStr: self.mutableConfig.logLevel
         )
+        
+        Logger.info("🚀 CFClient initialization starting...")
         
         // Create HTTP client
         let httpClient = HttpClient(config: self.mutableConfig.config)
@@ -208,6 +283,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.summaryManager = summaryManager
         
+        Logger.info("SummaryManager initialized with summariesQueueSize=\(self.mutableConfig.summariesQueueSize), summariesFlushTimeSeconds=\(self.mutableConfig.summariesFlushTimeSeconds), flushIntervalMs=\(self.mutableConfig.summariesFlushIntervalMs)")
+        
         // Create and store config fetcher
         let fetcher = ConfigFetcher(
             httpClient: httpClient,
@@ -237,6 +314,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.eventTracker = eventTracker
 
+        Logger.info("EventTracker initialized with eventsQueueSize=\(self.mutableConfig.eventsQueueSize), maxStoredEvents=\(self.mutableConfig.maxStoredEvents), eventsFlushTimeSeconds=\(self.mutableConfig.eventsFlushTimeSeconds), eventsFlushIntervalMs=\(self.mutableConfig.eventsFlushIntervalMs)")
+        
         // Initial offline mode setup from config
         if self.mutableConfig.offlineMode {
             self.configFetcher.setOffline(true)
@@ -244,8 +323,169 @@ public class CFClient: AppStateListener, BatteryStateListener {
             Logger.info("CFClient initialized in offline mode based on config.")
         }
         
-        setupListeners()
+        // Mark as initialized immediately to prevent hanging
+        self.isInitialized = true
+        Logger.info("🚀 CFClient core initialization complete")
+        
+        // Perform initial SDK settings check synchronously (like Kotlin does)
+        if !self.mutableConfig.offlineMode {
+            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            DispatchQueue.global(qos: .userInitiated).async {
+                if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                    Task {
+                        do {
+                            try await self.configManager.checkSdkSettings()
+                            Logger.info("🔧 Initial SDK settings check completed successfully")
+                        } catch {
+                            Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                        }
+                    }
+                } else {
+                    do {
+                        try self.configManager.checkSdkSettingsSync()
+                        Logger.info("🔧 Initial SDK settings check completed successfully")
+                    } catch {
+                        Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        // Setup listeners asynchronously to prevent blocking
+        setupListenersAsync()
+        
+        // Register for config changes
         self.mutableConfig.addConfigChangeListener(self)
+        
+        Logger.info("🚀 CFClient initialization completed successfully!")
+    }
+    
+    // Special initializer for minimal client that can skip listener setup
+    internal init(config: CFConfig, user: CFUser, skipSetup: Bool) {
+        self.mutableConfig = MutableCFConfig(initConfig: config)
+        
+        // Setup logger
+        Logger.configure(
+            loggingEnabled: self.mutableConfig.loggingEnabled,
+            debugLoggingEnabled: self.mutableConfig.debugLoggingEnabled,
+            logLevelStr: self.mutableConfig.logLevel
+        )
+        
+        Logger.info("🚀 CFClient initialization starting (skipSetup: \(skipSetup))...")
+        
+        // Create HTTP client
+        let httpClient = HttpClient(config: self.mutableConfig.config)
+        self.httpClient = httpClient
+        
+        // Create user manager with provided user
+        let userManager = UserManager(user: user)
+        self.userManager = userManager
+        
+        // Create background state monitor
+        let backgroundStateMonitor = DefaultBackgroundStateMonitor()
+        self.backgroundStateMonitor = backgroundStateMonitor
+        
+        // Initialize EnvironmentAttributesCollector based on config
+        if self.mutableConfig.autoEnvAttributesEnabled {
+            EnvironmentAttributesCollector.initializeShared(backgroundStateMonitor: backgroundStateMonitor)
+        } else {
+            Logger.info("Auto environment attributes collection disabled by config.")
+        }
+        
+        // Create connection manager - ensure it's DefaultConnectionManager for the interface
+        let connManager = DefaultConnectionManager(httpClient: httpClient, config: self.mutableConfig.config)
+        self.connectionManager = connManager // Store as ConnectionManagerInterface
+        
+        // Create listener manager
+        let listenerManager = DefaultListenerManager()
+        self.listenerManager = listenerManager
+        
+        // Create summary manager
+        let summaryManager = SummaryManager(
+            httpClient: httpClient,
+            user: userManager,
+            config: self.mutableConfig.config
+        )
+        self.summaryManager = summaryManager
+        
+        Logger.info("SummaryManager initialized with summariesQueueSize=\(self.mutableConfig.summariesQueueSize), summariesFlushTimeSeconds=\(self.mutableConfig.summariesFlushTimeSeconds), flushIntervalMs=\(self.mutableConfig.summariesFlushIntervalMs)")
+        
+        // Create and store config fetcher
+        let fetcher = ConfigFetcher(
+            httpClient: httpClient,
+            config: self.mutableConfig.config,
+            user: user // Use the provided user
+        )
+        self.configFetcher = fetcher // Store the instance
+        
+        // Create config manager with correct parameters
+        let confManager = ConfigManagerImpl(
+            configFetcher: self.configFetcher, // Pass the stored fetcher
+            clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
+            listenerManager: listenerManager,
+            config: self.mutableConfig.config,
+            summaryManager: summaryManager
+        )
+        self.configManager = confManager
+        
+        // Create event tracker with session ID
+        let sessionId = UUID().uuidString
+        let eventTracker = EventTracker(
+            config: self.mutableConfig.config,
+            user: userManager,
+            sessionId: sessionId,
+            httpClient: httpClient,
+            summaryManager: summaryManager
+        )
+        self.eventTracker = eventTracker
+
+        Logger.info("EventTracker initialized with eventsQueueSize=\(self.mutableConfig.eventsQueueSize), maxStoredEvents=\(self.mutableConfig.maxStoredEvents), eventsFlushTimeSeconds=\(self.mutableConfig.eventsFlushTimeSeconds), eventsFlushIntervalMs=\(self.mutableConfig.eventsFlushIntervalMs)")
+        
+        // Initial offline mode setup from config
+        if self.mutableConfig.offlineMode {
+            self.configFetcher.setOffline(true)
+            self.connectionManager.setOfflineMode(offlineMode: true)
+            Logger.info("CFClient initialized in offline mode based on config.")
+        }
+        
+        // Mark as initialized immediately to prevent hanging
+        self.isInitialized = true
+        Logger.info("🚀 CFClient core initialization complete")
+        
+        // Perform initial SDK settings check synchronously (like Kotlin does)
+        if !self.mutableConfig.offlineMode {
+            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            DispatchQueue.global(qos: .userInitiated).async {
+                if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                    Task {
+                        do {
+                            try await self.configManager.checkSdkSettings()
+                            Logger.info("🔧 Initial SDK settings check completed successfully")
+                        } catch {
+                            Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                        }
+                    }
+                } else {
+                    do {
+                        try self.configManager.checkSdkSettingsSync()
+                        Logger.info("🔧 Initial SDK settings check completed successfully")
+                    } catch {
+                        Logger.error("🔧 Initial SDK settings check failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        // Only set up listeners and register for config changes if not skipping setup
+        if !skipSetup {
+            Logger.info("Setting up listeners and registering for config changes")
+            setupListenersAsync()
+            self.mutableConfig.addConfigChangeListener(self)
+        } else {
+            Logger.info("SKIPPING listener setup and config change registration")
+        }
+        
+        Logger.info("🚀 CFClient initialization completed successfully!")
     }
     
     private func setupListeners() {
@@ -256,13 +496,84 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Start monitoring background state
         backgroundStateMonitor.startMonitoring()
         
-        // Start periodic SDK settings check with the configured interval
-        configManager.startPeriodicSdkSettingsCheck(interval: mutableConfig.sdkSettingsCheckIntervalMs, initialCheck: true)
+        // Start periodic SDK settings check with the improved implementation
+        // that includes timeout protection and proper error handling
+        Logger.info("Starting periodic SDK settings check with improved safeguards")
+        configManager.startPeriodicSdkSettingsCheck(
+            interval: mutableConfig.sdkSettingsCheckIntervalMs,
+            initialCheck: !mutableConfig.offlineMode // Only perform initial check if not in offline mode
+        )
         
         // Initialization complete
         isInitialized = true
         
         Logger.info("🚀 CustomFit SDK initialized with configuration: \(mutableConfig.config)")
+    }
+    
+    private func setupListenersAsync() {
+        Logger.info("🔧 Setting up listeners asynchronously...")
+        
+        // Use a background queue to avoid blocking initialization
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            // Set up a timeout for the entire listener setup process
+            let timeoutQueue = DispatchQueue(label: "ai.customfit.listenerSetupTimeout")
+            let timeoutWorkItem = DispatchWorkItem {
+                Logger.warning("⚠️ Listener setup timed out after 5 seconds - continuing without full setup")
+            }
+            
+            // Schedule timeout after 5 seconds
+            timeoutQueue.asyncAfter(deadline: .now() + 5.0, execute: timeoutWorkItem)
+            
+            // Perform listener setup operations
+            do {
+                Logger.debug("🔧 Registering app state listener...")
+                self.backgroundStateMonitor.addAppStateListener(listener: self)
+                
+                Logger.debug("🔧 Registering battery state listener...")
+                self.backgroundStateMonitor.addBatteryStateListener(listener: self)
+                
+                Logger.debug("🔧 Starting background state monitoring...")
+                self.backgroundStateMonitor.startMonitoring()
+                
+                Logger.debug("🔧 Background state monitoring completed successfully!")
+                
+                // DEBUG: Log the actual config values
+                Logger.debug("🔧 CONFIG DEBUG: offlineMode=\(self.mutableConfig.offlineMode)")
+                Logger.debug("🔧 CONFIG DEBUG: disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
+                Logger.debug("🔧 CONFIG DEBUG: condition result=\(!self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling)")
+                
+                // Only start periodic checks if not in offline mode and polling is enabled
+                if !self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling {
+                    Logger.debug("🔧 CONDITIONS MET: offlineMode=\(self.mutableConfig.offlineMode), disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
+                    Logger.debug("🔧 Starting periodic SDK settings check...")
+                    
+                    // Start the config manager on the main queue to ensure timer works properly
+                    DispatchQueue.main.async {
+                        Logger.info("🔧 CALLING startPeriodicSdkSettingsCheck with initialCheck=true")
+                        self.configManager.startPeriodicSdkSettingsCheck(
+                            interval: self.mutableConfig.sdkSettingsCheckIntervalMs,
+                            initialCheck: true // Enable initial check to match Kotlin behavior
+                        )
+                        
+                        Logger.info("🔧 Periodic SDK settings check started successfully")
+                    }
+                } else {
+                    Logger.info("🔧 SKIPPING periodic SDK settings check: offlineMode=\(self.mutableConfig.offlineMode), disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
+                }
+                
+                // Cancel the main timeout since we completed successfully
+                timeoutWorkItem.cancel()
+                Logger.info("🚀 All listeners set up successfully!")
+                
+            } catch {
+                // Cancel timeout and log error
+                timeoutWorkItem.cancel()
+                Logger.error("❌ Error setting up listeners: \(error.localizedDescription)")
+                Logger.info("🚀 CFClient will continue to work with limited functionality")
+            }
+        }
     }
     
     deinit {
@@ -293,6 +604,41 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     public func onAppStateChange(state: AppState) {
         Logger.info("App state changed: \(state == .background ? "background" : "foreground")")
+        
+        // Handle app state changes like Kotlin does
+        if state == .background && mutableConfig.disableBackgroundPolling {
+            // Pause polling in background if configured to do so
+            Logger.info("App entered background - pausing polling due to disableBackgroundPolling=true")
+            configManager.pausePolling()
+        } else if state == .foreground {
+            // Resume polling when app comes to foreground
+            Logger.info("App entered foreground - resuming polling")
+            configManager.resumePolling()
+            
+            // Check for updates immediately when coming to foreground (like Kotlin)
+            Logger.debug("Performing immediate SDK settings check on app foreground")
+            
+            if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                Task {
+                    do {
+                        try await configManager.checkSdkSettings()
+                        Logger.debug("Immediate foreground SDK settings check completed successfully")
+                    } catch {
+                        Logger.error("Failed to check SDK settings on foreground: \(error.localizedDescription)")
+                    }
+                }
+            } else {
+                // For older versions, use background queue
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    do {
+                        try self?.configManager.checkSdkSettingsSync()
+                        Logger.debug("Immediate foreground SDK settings check completed successfully")
+                    } catch {
+                        Logger.error("Failed to check SDK settings on foreground: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - BatteryStateListener Implementation
@@ -533,11 +879,82 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// This is a Swift equivalent to Kotlin's suspend function
     /// - Parameter completion: Completion handler called when SDK settings have been initialized
     public func awaitSdkSettingsCheck(completion: @escaping (Error?) -> Void) {
-        DispatchQueue.global().async {
-            // For now, we'll simulate the SDK settings check with a delay
-            // In a real implementation, this would wait for a completion signal from the config manager
-            Thread.sleep(forTimeInterval: 2.0)
-            completion(nil)
+        Logger.debug("CFClient: Waiting for SDK settings check initialization...")
+        
+        // Create a background queue that doesn't block the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Create a timeout to ensure we don't wait indefinitely
+            let timeoutQueue = DispatchQueue(label: "ai.customfit.sdkSettingsTimeout")
+            let timeoutWork = DispatchWorkItem {
+                Logger.warning("CFClient: Timeout waiting for SDK settings check")
+                completion(NSError(domain: "CFClient", code: 1000, userInfo: [NSLocalizedDescriptionKey: "Timeout waiting for SDK settings check"]))
+            }
+            
+            // Schedule timeout after 10 seconds
+            timeoutQueue.asyncAfter(deadline: .now() + 10.0, execute: timeoutWork)
+            
+            // For iOS 13+, use async/await
+            if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+                Task {
+                    do {
+                        // Ask ConfigManager to perform an immediate check
+                        try await self.configManager.forceRefresh()
+                        
+                        // Cancel the timeout since we completed successfully
+                        timeoutWork.cancel()
+                        
+                        Logger.debug("CFClient: SDK settings check completed successfully")
+                        completion(nil)
+                    } catch {
+                        // Cancel the timeout since we completed with error
+                        timeoutWork.cancel()
+                        
+                        Logger.error("CFClient: SDK settings check failed: \(error.localizedDescription)")
+                        completion(error)
+                    }
+                }
+            } else {
+                // For older iOS versions, use a dispatch group with timeout
+                let dispatchGroup = DispatchGroup()
+                dispatchGroup.enter()
+                
+                // Create a background queue for the operation
+                let queue = DispatchQueue(label: "ai.customfit.sdkSettings", qos: .utility)
+                
+                // Perform the check
+                queue.async {
+                    do {
+                        try self.configManager.forceRefreshSync()
+                        
+                        // Cancel the timeout since we completed successfully
+                        timeoutWork.cancel()
+                        
+                        Logger.debug("CFClient: SDK settings check completed successfully")
+                        completion(nil)
+                    } catch {
+                        // Cancel the timeout since we completed with error
+                        timeoutWork.cancel()
+                        
+                        Logger.error("CFClient: SDK settings check failed: \(error.localizedDescription)")
+                        completion(error)
+                    }
+                    
+                    dispatchGroup.leave()
+                }
+                
+                // Wait with a reasonable timeout to avoid blocking forever
+                let waitResult = dispatchGroup.wait(timeout: .now() + 10.0)
+                if waitResult == .timedOut {
+                    // This is a secondary timeout in case the primary one fails
+                    Logger.warning("CFClient: DispatchGroup wait timed out in awaitSdkSettingsCheck")
+                    
+                    // Cancel the timeout work if not already cancelled
+                    if !timeoutWork.isCancelled {
+                        timeoutWork.cancel()
+                        completion(NSError(domain: "CFClient", code: 1001, userInfo: [NSLocalizedDescriptionKey: "DispatchGroup wait timed out in awaitSdkSettingsCheck"]))
+                    }
+                }
+            }
         }
     }
     

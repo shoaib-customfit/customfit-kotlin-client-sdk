@@ -23,7 +23,7 @@ public struct CFConstants {
         public static let SDK_SETTINGS_BASE_URL = "https://sdk.customfit.ai"
         
         /// Path for user configurations
-        public static let USER_CONFIGS_PATH = "/v1/users/configs"
+        public static let USER_CONFIGS_PATH = "/users/configs"
         
         /// Path pattern for SDK settings JSON file
         public static let SDK_SETTINGS_PATH_PATTERN = "/%s/cf-sdk-settings.json"
