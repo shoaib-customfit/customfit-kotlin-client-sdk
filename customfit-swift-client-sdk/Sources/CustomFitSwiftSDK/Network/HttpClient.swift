@@ -538,6 +538,9 @@ public class HttpClient {
             if httpResponse.statusCode == 200 {
                 var headers: [String: String] = [:]
                 
+                // Debug: Log all headers to see what the server actually returns
+                Logger.debug("API POLL: All response headers: \(httpResponse.allHeaderFields)")
+                
                 // Get Last-Modified header which is crucial for caching
                 if let lastModified = httpResponse.allHeaderFields[CFConstants.Http.HEADER_LAST_MODIFIED] as? String {
                     headers[CFConstants.Http.HEADER_LAST_MODIFIED] = lastModified
@@ -546,6 +549,21 @@ public class HttpClient {
                 // Get ETag header for additional caching support
                 if let etag = httpResponse.allHeaderFields[CFConstants.Http.HEADER_ETAG] as? String {
                     headers[CFConstants.Http.HEADER_ETAG] = etag
+                } else {
+                    // Debug: Try different case variations to see if it's a case sensitivity issue
+                    Logger.debug("API POLL: ETag not found with key '\(CFConstants.Http.HEADER_ETAG)', trying other variations...")
+                    if let etag = httpResponse.allHeaderFields["etag"] as? String {
+                        Logger.debug("API POLL: Found ETag with lowercase key: \(etag)")
+                        headers[CFConstants.Http.HEADER_ETAG] = etag
+                    } else if let etag = httpResponse.allHeaderFields["Etag"] as? String {
+                        Logger.debug("API POLL: Found ETag with 'Etag' key: \(etag)")
+                        // Strip W/ prefix to match Kotlin format exactly
+                        let cleanedETag = etag.hasPrefix("W/") ? String(etag.dropFirst(2)) : etag
+                        headers[CFConstants.Http.HEADER_ETAG] = cleanedETag
+                        Logger.debug("API POLL: Cleaned ETag (removed W/ prefix): \(cleanedETag)")
+                    } else {
+                        Logger.debug("API POLL: ETag header not found in any case variation")
+                    }
                 }
                 
                 Logger.info("API POLL: HEAD request successful - Last-Modified: \(headers[CFConstants.Http.HEADER_LAST_MODIFIED] ?? "none"), ETag: \(headers[CFConstants.Http.HEADER_ETAG] ?? "none")")
@@ -816,8 +834,8 @@ public class HttpClient {
     // MARK: - Private Methods
     
     private func addHeaders(to request: inout URLRequest, headers: [String: String]?) {
-        // Add API key header
-        request.setValue(config.clientKey, forHTTPHeaderField: "X-API-Key")
+        // Don't add API key header - token is already in URL query parameter as ?cfenc=
+        // This matches Kotlin's behavior
         
         // Add content type if not present
         if request.value(forHTTPHeaderField: "Content-Type") == nil {

@@ -301,7 +301,8 @@ public class ConfigManagerImpl: ConfigManager {
                 Logger.debug("🔧 SDK functionality is enabled, proceeding with config fetch...")
                 
                 Logger.debug("📡 Making config fetch request...")
-                let configResult = await configFetcher.fetchConfig(lastModified: currentLastModified, etag: currentETag)
+                // TEST: Try without any conditional headers first to rule out conditional header issues
+                let configResult = await configFetcher.fetchConfig(lastModified: nil, etag: nil)
                 Logger.debug("📡 Config fetch request completed with result: \(configResult)")
                 
                 guard case .success(let newConfigs) = configResult else {

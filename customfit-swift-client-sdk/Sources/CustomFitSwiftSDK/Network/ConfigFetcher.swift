@@ -121,6 +121,17 @@ public class ConfigFetcher {
             Logger.info("API POLL: Fetching config from URL: \(url.absoluteString)")
             Logger.debug("Config fetch payload: \(String(data: jsonData, encoding: .utf8) ?? "")")
             
+            // DEBUG: Print complete request details for manual debugging
+            print("🔴 MANUAL DEBUG - COMPLETE REQUEST DETAILS:")
+            print("🔴 URL: \(url.absoluteString)")
+            print("🔴 Method: POST")
+            print("🔴 Payload (full JSON):")
+            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                print(jsonString)
+            } else {
+                print("Failed to convert payload to string")
+            }
+            
             // Prepare headers
             var headers = [
                 CFConstants.Http.HEADER_CONTENT_TYPE: CFConstants.Http.CONTENT_TYPE_JSON
@@ -136,6 +147,24 @@ public class ConfigFetcher {
                 headers[CFConstants.Http.HEADER_IF_NONE_MATCH] = etag
                 Logger.info("API POLL: Using If-None-Match: \(etag)")
             }
+            
+            // DEBUG: Print all headers being sent
+            print("🔴 Headers being sent:")
+            for (key, value) in headers {
+                print("🔴   \(key): \(value)")
+            }
+            print("🔴 END REQUEST DETAILS")
+            print("🔴 You can now test this request manually with curl:")
+            var curlCommand = "curl -X POST \\\n"
+            curlCommand += "  '\(url.absoluteString)' \\\n"
+            for (key, value) in headers {
+                curlCommand += "  -H '\(key): \(value)' \\\n"
+            }
+            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                curlCommand += "  -d '\(jsonString)'"
+            }
+            print("🔴 CURL COMMAND:")
+            print(curlCommand)
             
             // Convert CFResult to Swift's Result for retry operation
             return try await withCheckedThrowingContinuation { continuation in
@@ -226,6 +255,22 @@ public class ConfigFetcher {
                         // Handle error response
                         let message = "Failed to fetch config: \(httpResponse.statusCode)"
                         Logger.warning("API POLL: \(message)")
+                        
+                        // DEBUG: Print complete error response details for manual debugging
+                        print("🔴 ERROR RESPONSE DETAILS:")
+                        print("🔴 Status Code: \(httpResponse.statusCode)")
+                        print("🔴 Status Text: \(HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))")
+                        print("🔴 Response Headers:")
+                        for (key, value) in httpResponse.allHeaderFields {
+                            print("🔴   \(key): \(value)")
+                        }
+                        if let data = data, let responseBody = String(data: data, encoding: .utf8) {
+                            print("🔴 Response Body:")
+                            print(responseBody)
+                        } else {
+                            print("🔴 No response body or unable to decode")
+                        }
+                        print("🔴 END ERROR RESPONSE DETAILS")
                         
                         circuitBreaker.recordFailure()
                         continuation.resume(returning: CFResult.createError(
