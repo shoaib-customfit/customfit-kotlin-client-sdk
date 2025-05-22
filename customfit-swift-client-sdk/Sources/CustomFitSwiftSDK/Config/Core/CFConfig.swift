@@ -203,33 +203,6 @@ public class CFConfig {
             
             Logger.debug("JWT: Parsed JSON keys: \(json.keys)")
             
-            // DEBUG: Print complete JWT details for manual debugging
-            print("🔴 JWT TOKEN DEBUG:")
-            print("🔴 Full Token: \(token)")
-            print("🔴 Token Parts: \(parts)")
-            if parts.count >= 2 {
-                print("🔴 Header (part 0): \(parts[0])")
-                print("🔴 Payload (part 1): \(parts[1])")
-                if parts.count >= 3 {
-                    print("🔴 Signature (part 2): \(parts[2])")
-                }
-            }
-            print("🔴 Decoded Payload JSON:")
-            if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                print(jsonString)
-            } else {
-                print("Failed to serialize JSON")
-            }
-            print("🔴 END JWT TOKEN DEBUG")
-            
-            // Debug: Show the iss value since that's what the 403 error is about
-            if let iss = json["iss"] as? String {
-                Logger.debug("JWT: Extracted iss (issuer): \(iss)")
-            } else {
-                Logger.debug("JWT: iss (issuer) not found in token")
-            }
-            
             // Extract dimension_id
             if let dimensionId = json["dimension_id"] as? String {
                 Logger.debug("JWT: Extracted dimension_id: \(dimensionId)")
@@ -239,7 +212,7 @@ public class CFConfig {
                 return nil
             }
         } catch {
-            Logger.debug("JWT: Exception during parsing: \(error.localizedDescription)")
+            Logger.error("JWT: JSON parsing failed: \(error.localizedDescription)")
             return nil
         }
     }

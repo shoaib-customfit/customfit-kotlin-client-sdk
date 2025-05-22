@@ -111,6 +111,9 @@ public class ConfigFetcher {
                 "include_only_features_flags": true
             ]
             
+            Logger.info("📡 API POLL: Fetching config from URL: \(url)")
+            
+            // Serialize payload to JSON data
             guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else {
                 return CFResult.createError(
                     message: "Failed to serialize payload",
@@ -118,53 +121,22 @@ public class ConfigFetcher {
                 )
             }
             
-            Logger.info("API POLL: Fetching config from URL: \(url.absoluteString)")
             Logger.debug("Config fetch payload: \(String(data: jsonData, encoding: .utf8) ?? "")")
             
-            // DEBUG: Print complete request details for manual debugging
-            print("🔴 MANUAL DEBUG - COMPLETE REQUEST DETAILS:")
-            print("🔴 URL: \(url.absoluteString)")
-            print("🔴 Method: POST")
-            print("🔴 Payload (full JSON):")
-            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                print(jsonString)
-            } else {
-                print("Failed to convert payload to string")
-            }
-            
-            // Prepare headers
-            var headers = [
-                CFConstants.Http.HEADER_CONTENT_TYPE: CFConstants.Http.CONTENT_TYPE_JSON
-            ]
+            // Create headers
+            var headers = [String: String]()
+            headers[CFConstants.Http.HEADER_CONTENT_TYPE] = CFConstants.Http.CONTENT_TYPE_JSON
             
             // Add conditional request headers if available
             if let lastModified = lastModified {
                 headers[CFConstants.Http.HEADER_IF_MODIFIED_SINCE] = lastModified
-                Logger.info("API POLL: Using If-Modified-Since: \(lastModified)")
+                Logger.info("📡 API POLL: Using If-Modified-Since: \(lastModified)")
             }
             
             if let etag = etag {
                 headers[CFConstants.Http.HEADER_IF_NONE_MATCH] = etag
-                Logger.info("API POLL: Using If-None-Match: \(etag)")
+                Logger.info("📡 API POLL: Using If-None-Match: \(etag)")
             }
-            
-            // DEBUG: Print all headers being sent
-            print("🔴 Headers being sent:")
-            for (key, value) in headers {
-                print("🔴   \(key): \(value)")
-            }
-            print("🔴 END REQUEST DETAILS")
-            print("🔴 You can now test this request manually with curl:")
-            var curlCommand = "curl -X POST \\\n"
-            curlCommand += "  '\(url.absoluteString)' \\\n"
-            for (key, value) in headers {
-                curlCommand += "  -H '\(key): \(value)' \\\n"
-            }
-            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                curlCommand += "  -d '\(jsonString)'"
-            }
-            print("🔴 CURL COMMAND:")
-            print(curlCommand)
             
             // Convert CFResult to Swift's Result for retry operation
             return try await withCheckedThrowingContinuation { continuation in
@@ -257,20 +229,21 @@ public class ConfigFetcher {
                         Logger.warning("API POLL: \(message)")
                         
                         // DEBUG: Print complete error response details for manual debugging
-                        print("🔴 ERROR RESPONSE DETAILS:")
-                        print("🔴 Status Code: \(httpResponse.statusCode)")
-                        print("🔴 Status Text: \(HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))")
-                        print("🔴 Response Headers:")
+                        Logger.error("❌ API ERROR RESPONSE DETAILS:")
+                        Logger.error("❌ Status Code: \(httpResponse.statusCode)")
+                        Logger.error("❌ Status Text: \(HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode))")
+                        Logger.error("❌ Response Headers:")
                         for (key, value) in httpResponse.allHeaderFields {
-                            print("🔴   \(key): \(value)")
+                            Logger.error("❌   \(key): \(value)")
                         }
+                        
+                        Logger.error("❌ Response Body:")
                         if let data = data, let responseBody = String(data: data, encoding: .utf8) {
-                            print("🔴 Response Body:")
-                            print(responseBody)
+                            Logger.error(responseBody)
                         } else {
-                            print("🔴 No response body or unable to decode")
+                            Logger.error("❌ No response body or unable to decode")
                         }
-                        print("🔴 END ERROR RESPONSE DETAILS")
+                        Logger.error("❌ END ERROR RESPONSE DETAILS")
                         
                         circuitBreaker.recordFailure()
                         continuation.resume(returning: CFResult.createError(

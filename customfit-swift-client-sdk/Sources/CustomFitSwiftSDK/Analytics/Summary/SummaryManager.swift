@@ -498,8 +498,6 @@ public class SummaryManager {
             // Get current flush interval
             let interval = TimeInterval(self.summariesFlushIntervalMs) / 1000.0
             
-            Logger.debug("📊 SUMMARY: Creating DispatchSourceTimer with interval: \(interval) seconds")
-            
             // Create dispatch timer for better CLI compatibility
             self.dispatchTimer = DispatchSource.makeTimerSource(
                 flags: [],
@@ -523,7 +521,7 @@ public class SummaryManager {
             // Start the timer
             self.dispatchTimer?.resume()
             
-            Logger.info("📊 SUMMARY: Started DispatchSourceTimer for periodic summary flush")
+            Logger.debug("📊 SUMMARY: Started periodic summary flush timer")
         }
     }
     

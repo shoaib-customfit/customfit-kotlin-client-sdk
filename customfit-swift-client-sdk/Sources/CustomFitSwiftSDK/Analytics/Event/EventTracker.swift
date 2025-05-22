@@ -603,8 +603,6 @@ public class EventTracker {
             // Get current flush interval
             let interval = TimeInterval(self.eventsFlushIntervalMs) / 1000.0
             
-            Logger.debug("🔔 TRACK: Creating DispatchSourceTimer with interval: \(interval) seconds")
-            
             // Create dispatch timer for better CLI compatibility
             self.dispatchTimer = DispatchSource.makeTimerSource(
                 flags: [],
@@ -633,7 +631,7 @@ public class EventTracker {
             // Start the timer
             self.dispatchTimer?.resume()
             
-            Logger.debug("🔔 TRACK: Started DispatchSourceTimer for periodic event flush")
+            Logger.debug("🔔 TRACK: Started periodic event flush timer")
         }
     }
     

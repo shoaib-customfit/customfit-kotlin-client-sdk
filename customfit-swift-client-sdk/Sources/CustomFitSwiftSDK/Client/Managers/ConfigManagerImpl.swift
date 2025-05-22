@@ -127,13 +127,10 @@ public class ConfigManagerImpl: ConfigManager {
                 Logger.info("🔧 CONFIG VALUE: \(key): \(variation)")
                 
                 // Track summary for this config access (like Kotlin does)
-                Logger.debug("📊 SUMMARY: Processing summary for config: \(key)")
                 if let summaryManager = summaryManager {
                     // Extract experience and config IDs for summary tracking
                     if let experienceId = configData["experience_id"] as? String,
                        let configId = configData["config_id"] as? String {
-                        
-                        Logger.debug("📊 SUMMARY: Created summary for experience: \(experienceId), config: \(configId)")
                         
                         // Create summary data for this config access
                         let summaryData = SummaryData(
@@ -149,8 +146,7 @@ public class ConfigManagerImpl: ConfigManager {
                         
                         let result = summaryManager.trackSummary(summary: summaryData)
                         if case .success = result {
-                            Logger.debug("📊 SUMMARY: Summary pushed for key: \(key)")
-                            Logger.debug("📊 SUMMARY: Added to queue: experience=\(experienceId), queue size=\(summaryManager.totalSummariesTracked)")
+                            Logger.debug("📊 SUMMARY: Summary tracked for key: \(key)")
                         }
                     } else {
                         // If experience/config IDs are missing, track a basic config access summary
@@ -163,10 +159,8 @@ public class ConfigManagerImpl: ConfigManager {
                             ]
                         )
                         _ = summaryManager.trackSummary(summary: summaryData)
-                        Logger.debug("📊 SUMMARY: Summary pushed for key: \(key)")
+                        Logger.debug("📊 SUMMARY: Summary tracked for key: \(key)")
                     }
-                } else {
-                    Logger.debug("📊 SUMMARY: SummaryManager not available for tracking config access")
                 }
                 
                 return variation as! T
@@ -223,34 +217,25 @@ public class ConfigManagerImpl: ConfigManager {
     
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     public func checkSdkSettings() async throws {
-        Logger.debug("🔧 ConfigManagerImpl.checkSdkSettings called")
-        
         // Skip if already checking
         if isCheckingSettings {
-            Logger.debug("🔧 ConfigManagerImpl: Skipping SDK settings check because another check is in progress")
+            Logger.debug("Skipping SDK settings check because another check is in progress")
             return
         }
         
         // Set the flag to indicate that a check is in progress
         isCheckingSettings = true
-        Logger.debug("🔧 ConfigManagerImpl: Set isCheckingSettings = true")
         
         // Make sure we reset the flag when we're done
         defer { 
             isCheckingSettings = false 
-            Logger.debug("🔧 ConfigManagerImpl: Reset isCheckingSettings = false")
         }
         
         // Perform the SDK settings check
-        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        Logger.debug("Starting SDK settings check at \(timestamp)")
-        
         let dimensionId = config.dimensionId ?? ""
-        Logger.debug("🔧 Using dimension ID for URL: '\(dimensionId)'")
         let sdkSettingsUrl = "\(CFConstants.Api.SDK_SETTINGS_BASE_URL)/\(dimensionId)/cf-sdk-settings.json"
         
-        // Add more detailed logging for SDK settings API call
-        Logger.debug("📡 Checking SDK settings at: \(sdkSettingsUrl)")
+        Logger.info("📡 Checking SDK settings at: \(sdkSettingsUrl)")
         
         // Skip if we're in offline mode
         if config.offlineMode {
@@ -259,7 +244,6 @@ public class ConfigManagerImpl: ConfigManager {
         }
         
         // STEP 1: Fetch SDK settings metadata (like Kotlin does)
-        Logger.debug("📡 API POLL: Fetch metadata strategy - First trying HEAD request: \(sdkSettingsUrl)")
         let metadataResult = await configFetcher.fetchMetadata(url: URL(string: sdkSettingsUrl)!)
         
         guard case .success(let metadata) = metadataResult else {
@@ -275,10 +259,6 @@ public class ConfigManagerImpl: ConfigManager {
         let currentLastModified = metadata[CFConstants.Http.HEADER_LAST_MODIFIED]
         let currentETag = metadata[CFConstants.Http.HEADER_ETAG]
         
-        // Debug logging for metadata comparison
-        Logger.debug("Last-Modified comparison: Current=\(currentLastModified ?? "nil"), Previous=\(previousLastModified ?? "nil")")
-        Logger.debug("ETag comparison: Current=\(currentETag ?? "nil"), Previous=\(previousETag ?? "nil")")
-        
         // Check if either Last-Modified or ETag has changed
         let hasLastModifiedChanged = currentLastModified != nil && currentLastModified != previousLastModified
         let hasETagChanged = currentETag != nil && currentETag != previousETag
@@ -286,8 +266,6 @@ public class ConfigManagerImpl: ConfigManager {
         
         // Only fetch full settings if this is the first check or metadata has changed
         let needsFullSettingsFetch = currentSdkSettings == nil || hasMetadataChanged
-        
-        Logger.debug("Will fetch full settings? \(needsFullSettingsFetch)")
         
         // STEP 2: Fetch full SDK settings if needed (like Kotlin does)
         if needsFullSettingsFetch {
@@ -312,8 +290,6 @@ public class ConfigManagerImpl: ConfigManager {
                 let accountEnabled = freshSettings.cf_account_enabled
                 let skipSdk = freshSettings.cf_skip_sdk
                 
-                Logger.debug("🔧 SDK SETTINGS: cf_account_enabled=\(accountEnabled), cf_skip_sdk=\(skipSdk)")
-                
                 if !accountEnabled {
                     Logger.warning("Account is disabled (cf_account_enabled=false). SDK functionality will be limited.")
                     isSdkFunctionalityEnabled = false
@@ -325,14 +301,10 @@ public class ConfigManagerImpl: ConfigManager {
                     isSdkFunctionalityEnabled = true
                     Logger.info("🔧 SDK SETTINGS: Account enabled and SDK not skipped - SDK functionality enabled")
                 }
-                
-                Logger.debug("🔧 SDK SETTINGS: isSdkFunctionalityEnabled=\(isSdkFunctionalityEnabled)")
             }
         } else {
             Logger.info("📡 API POLL: Using existing SDK settings, no change detected")
         }
-        
-        Logger.debug("Will fetch new config? \(hasMetadataChanged)")
         
         // STEP 4: Only fetch configs if SDK functionality is enabled AND metadata changed (like Kotlin does)
         if hasMetadataChanged {
@@ -342,12 +314,8 @@ public class ConfigManagerImpl: ConfigManager {
             // Only fetch configs if SDK functionality is enabled
             if isSdkFunctionalityEnabled {
                 Logger.info("📡 API POLL: Fetching new config due to metadata change")
-                Logger.debug("🔧 SDK functionality is enabled, proceeding with config fetch...")
                 
-                Logger.debug("📡 Making config fetch request...")
-                // TEST: Try without any conditional headers first to rule out conditional header issues
                 let configResult = await configFetcher.fetchConfig(lastModified: nil, etag: nil)
-                Logger.debug("📡 Config fetch request completed with result: \(configResult)")
                 
                 guard case .success(let newConfigs) = configResult else {
                     if case .error(let message, _, _, _) = configResult {
@@ -357,13 +325,11 @@ public class ConfigManagerImpl: ConfigManager {
                 }
                 
                 Logger.info("📡 API POLL: Successfully fetched \(newConfigs.count) config entries")
-                Logger.debug("Config keys: \(newConfigs.keys)")
                 
                 // Update config map with new values
                 updateConfigMap(newConfigs)
             } else {
                 Logger.info("📡 API POLL: Skipping config fetch because SDK functionality is disabled")
-                Logger.debug("🔧 isSdkFunctionalityEnabled=\(isSdkFunctionalityEnabled) - config fetch blocked")
             }
             
             // Store both metadata values for future comparisons regardless of SDK functionality status
@@ -372,9 +338,6 @@ public class ConfigManagerImpl: ConfigManager {
         } else {
             Logger.info("📡 API POLL: Metadata unchanged - skipping config fetch")
         }
-        
-        let endTimestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        Logger.debug("Completed SDK settings check at \(endTimestamp)")
     }
     
     // Non-async compatibility version for pre-iOS 13
@@ -412,15 +375,12 @@ public class ConfigManagerImpl: ConfigManager {
     }
     
     public func startPeriodicSdkSettingsCheck(interval: Int64, initialCheck: Bool = true) {
-        Logger.debug("🔧 ConfigManagerImpl.startPeriodicSdkSettingsCheck called with interval=\(interval), initialCheck=\(initialCheck)")
-        
         // Setup client queue operation with task-based error handling
         clientQueue.async { [weak self] in
             guard let self = self else { 
-                Logger.warning("🔧 ConfigManagerImpl: self is nil in clientQueue")
+                Logger.warning("ConfigManagerImpl: self is nil in clientQueue")
                 return 
             }
-            Logger.debug("🔧 ConfigManagerImpl: Inside clientQueue, starting periodic SDK settings check...")
             
             // Cancel existing timer if any
             self.timerMutex.lock()
@@ -429,18 +389,15 @@ public class ConfigManagerImpl: ConfigManager {
             
             // Check if background polling is disabled in config
             if self.config.disableBackgroundPolling {
-                Logger.info("🔧 ConfigManagerImpl: Background polling is disabled in config, skipping timer setup")
+                Logger.info("Background polling is disabled in config, skipping timer setup")
                 
                 // Perform immediate check only if requested, even if polling is disabled
                 if initialCheck {
-                    Logger.debug("🔧 ConfigManagerImpl: Performing immediate check despite disabled polling")
                     self.performTimeoutProtectedCheck()
                 }
                 
                 return
             }
-            
-            Logger.debug("🔧 ConfigManagerImpl: Background polling is enabled, setting up timer...")
             
             // Get the battery-aware polling interval
             let actualIntervalMs: Int64
@@ -455,7 +412,7 @@ public class ConfigManagerImpl: ConfigManager {
             }
             
             // Log the actual interval we're using
-            Logger.info("🔧 ConfigManagerImpl: Starting periodic settings check with interval: \(actualIntervalMs) ms" +
+            Logger.info("Starting periodic settings check with interval: \(actualIntervalMs) ms" +
                         (actualIntervalMs != interval ? " (adjusted for battery)" : ""))
             
             // Create a new timer on the main thread to ensure it works properly
@@ -487,25 +444,18 @@ public class ConfigManagerImpl: ConfigManager {
             
             // Perform immediate check only if requested
             if initialCheck {
-                Logger.debug("🔧 ConfigManagerImpl: Performing immediate initial check")
                 // Schedule the initial check with a small delay to allow initialization to complete
                 self.clientQueue.asyncAfter(deadline: .now() + 0.1) {
-                    Logger.debug("🔧 ConfigManagerImpl: About to call performTimeoutProtectedCheck for initial check")
                     self.performTimeoutProtectedCheck()
                 }
-            } else {
-                Logger.debug("🔧 ConfigManagerImpl: Skipping immediate initial check (initialCheck=false)")
             }
         }
     }
     
     // Helper method to perform a check with timeout protection
     private func performTimeoutProtectedCheck() {
-        Logger.debug("🔧 ConfigManagerImpl.performTimeoutProtectedCheck called")
-        
         // Use async or sync version based on availability
         if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
-            Logger.debug("🔧 ConfigManagerImpl: Using async version (iOS 13+)")
             Task {
                 // Implement retry logic with exponential backoff (like Kotlin)
                 let maxAttempts = 3
@@ -518,12 +468,10 @@ public class ConfigManagerImpl: ConfigManager {
                     
                     let task = Task {
                         do {
-                            Logger.debug("🔧 ConfigManagerImpl: SDK settings check attempt \(attempt)/\(maxAttempts)")
                             try await self.checkSdkSettings()
-                            Logger.debug("🔧 ConfigManagerImpl: SDK settings check completed successfully (attempt \(attempt))")
                             return true
                         } catch {
-                            Logger.warning("🔧 ConfigManagerImpl: SDK settings check failed (attempt \(attempt)): \(error.localizedDescription)")
+                            Logger.warning("SDK settings check failed (attempt \(attempt)): \(error.localizedDescription)")
                             return false
                         }
                     }
@@ -540,13 +488,11 @@ public class ConfigManagerImpl: ConfigManager {
                     timeoutTask.cancel()
                     
                     if success {
-                        Logger.debug("🔧 ConfigManagerImpl: SDK settings check succeeded on attempt \(attempt)")
                         return
                     }
                     
                     // If this wasn't the last attempt, wait before retrying
                     if attempt < maxAttempts {
-                        Logger.debug("🔧 ConfigManagerImpl: Retrying after \(delay * 1000)ms delay...")
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                         
                         // Exponential backoff with jitter (like Kotlin)
@@ -554,17 +500,15 @@ public class ConfigManagerImpl: ConfigManager {
                     }
                 }
                 
-                Logger.error("🔧 ConfigManagerImpl: SDK settings check failed after \(maxAttempts) attempts")
+                Logger.error("SDK settings check failed after \(maxAttempts) attempts")
             }
         } else {
-            Logger.debug("🔧 ConfigManagerImpl: Using sync version (pre-iOS 13)")
             // For older iOS versions, implement simpler retry logic
             let maxAttempts = 3
             var attempt = 0
             
             while attempt < maxAttempts {
                 attempt += 1
-                Logger.debug("🔧 ConfigManagerImpl: SDK settings check attempt \(attempt)/\(maxAttempts)")
                 
                 let dispatchGroup = DispatchGroup()
                 dispatchGroup.enter()
@@ -576,7 +520,7 @@ public class ConfigManagerImpl: ConfigManager {
                 // Use a timeout to avoid indefinite waiting
                 let timeoutQueue = DispatchQueue(label: "ai.customfit.sdkSettingsTimeout")
                 let timeoutWorkItem = DispatchWorkItem {
-                    Logger.warning("🔧 ConfigManagerImpl: SDK settings check attempt \(attempt) timed out")
+                    Logger.warning("SDK settings check attempt \(attempt) timed out")
                     dispatchGroup.leave()
                 }
                 
@@ -589,9 +533,8 @@ public class ConfigManagerImpl: ConfigManager {
                         try self.checkSdkSettingsSync()
                         success = true
                         timeoutWorkItem.cancel()
-                        Logger.debug("🔧 ConfigManagerImpl: checkSdkSettingsSync completed successfully (attempt \(attempt))")
                     } catch {
-                        Logger.warning("🔧 ConfigManagerImpl: SDK settings check failed (attempt \(attempt)): \(error.localizedDescription)")
+                        Logger.warning("SDK settings check failed (attempt \(attempt)): \(error.localizedDescription)")
                         timeoutWorkItem.cancel()
                     }
                     
@@ -602,19 +545,17 @@ public class ConfigManagerImpl: ConfigManager {
                 _ = dispatchGroup.wait(timeout: .now() + 11.0)
                 
                 if success {
-                    Logger.debug("🔧 ConfigManagerImpl: SDK settings check succeeded on attempt \(attempt)")
                     return
                 }
                 
                 // If this wasn't the last attempt, wait before retrying
                 if attempt < maxAttempts {
                     let delay = min(0.1 * pow(2.0, Double(attempt - 1)), 1.0) // Exponential backoff
-                    Logger.debug("🔧 ConfigManagerImpl: Retrying after \(delay * 1000)ms delay...")
                     Thread.sleep(forTimeInterval: delay)
                 }
             }
             
-            Logger.error("🔧 ConfigManagerImpl: SDK settings check failed after \(maxAttempts) attempts")
+            Logger.error("SDK settings check failed after \(maxAttempts) attempts")
         }
     }
     
