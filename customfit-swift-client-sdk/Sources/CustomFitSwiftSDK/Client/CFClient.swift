@@ -153,7 +153,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Create summary manager
         let summaryManager = SummaryManager(
             httpClient: httpClient,
-            user: userManager,
+            user: userManager, 
             config: self.mutableConfig.config
         )
         self.summaryManager = summaryManager
@@ -236,7 +236,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     }
     
     // This must be public to be accessible from Demo project
-    public init(config: CFConfig, user: CFUser) {
+public init(config: CFConfig, user: CFUser) {
         self.mutableConfig = MutableCFConfig(initConfig: config)
         
         // Setup logger
@@ -403,7 +403,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Create summary manager
         let summaryManager = SummaryManager(
             httpClient: httpClient,
-            user: userManager,
+            user: userManager, 
             config: self.mutableConfig.config
         )
         self.summaryManager = summaryManager
@@ -438,7 +438,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
             summaryManager: summaryManager
         )
         self.eventTracker = eventTracker
-
+        
         Logger.info("EventTracker initialized with eventsQueueSize=\(self.mutableConfig.eventsQueueSize), maxStoredEvents=\(self.mutableConfig.maxStoredEvents), eventsFlushTimeSeconds=\(self.mutableConfig.eventsFlushTimeSeconds), eventsFlushIntervalMs=\(self.mutableConfig.eventsFlushIntervalMs)")
         
         // Initial offline mode setup from config
@@ -930,7 +930,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
                         timeoutWork.cancel()
                         
                         Logger.debug("CFClient: SDK settings check completed successfully")
-                        completion(nil)
+            completion(nil)
                     } catch {
                         // Cancel the timeout since we completed with error
                         timeoutWork.cancel()

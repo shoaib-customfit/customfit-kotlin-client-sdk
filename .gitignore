@@ -46,3 +46,5 @@ bin/
 .DS_Store
 *.swp
 customfit-swift-client-sdk/.build/
+customfit-reactnative-client-sdk/node_modules/
+/customfit-reactnative-client-sdk/lib
