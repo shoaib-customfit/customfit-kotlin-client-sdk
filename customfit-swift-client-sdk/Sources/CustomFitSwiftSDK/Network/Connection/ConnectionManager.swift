@@ -308,7 +308,7 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
         // For simplicity, we'll use a basic URL check
         // In a real implementation, this would use a lightweight API endpoint
         
-        guard let url = URL(string: "\(config.apiBaseUrl)/ping") else {
+        guard let url = URL(string: "\(CFConstants.Api.BASE_API_URL)/ping") else {
             recordFailure(error: "Invalid ping URL")
             return
         }

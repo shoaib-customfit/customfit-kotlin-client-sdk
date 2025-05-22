@@ -17,7 +17,7 @@ public struct CFConstants {
     /// API URL constants
     public struct Api {
         /// Base URL for the CustomFit API
-        public static let BASE_API_URL = "https://api.customfit.ai"
+        public static let BASE_API_URL = "https://api.customfit.ai/v1"
         
         /// Base URL for SDK settings
         public static let SDK_SETTINGS_BASE_URL = "https://sdk.customfit.ai"

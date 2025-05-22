@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "customfit-swift-client-sdk",
+          "kind" : "fileSystem",
+          "location" : "/Users/shoaibmohammed/Desktop/work/CF/sdk/customfit-kotlin-client-sdk/customfit-swift-client-sdk",
+          "name" : "CustomFitSwiftSDK"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/shoaibmohammed/Desktop/work/CF/sdk/customfit-kotlin-client-sdk/customfit-swift-client-sdk"
+        },
+        "subpath" : "customfit-swift-client-sdk"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

@@ -13,15 +13,22 @@ let package = Package(
         .library(
             name: "CustomFitSwiftSDK",
             targets: ["CustomFitSwiftSDK"]),
+        .executable(
+            name: "DemoApp",
+            targets: ["DemoApp"])
     ],
     dependencies: [],
     targets: [
         .target(
             name: "CustomFitSwiftSDK",
             dependencies: [],
-            path: "Sources/CustomFitSwiftSDK"),
+            path: "Sources"),
+        .target(
+            name: "DemoApp",
+            dependencies: ["CustomFitSwiftSDK"],
+            path: "DemoApp"),
         .testTarget(
             name: "CustomFitSwiftSDKTests",
             dependencies: ["CustomFitSwiftSDK"]),
     ]
-) 
+)

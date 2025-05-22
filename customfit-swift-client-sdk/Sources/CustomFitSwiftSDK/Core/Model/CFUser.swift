@@ -2,8 +2,8 @@ import Foundation
 
 /// Represents a user in the CustomFit system
 public class CFUser: Codable {
-    /// User ID
-    public private(set) var userId: String?
+    /// User ID (matches user_customer_id in Kotlin)
+    public private(set) var user_customer_id: String?
     
     /// Device ID
     public private(set) var deviceId: String?
@@ -11,37 +11,46 @@ public class CFUser: Codable {
     /// Anonymous ID
     public private(set) var anonymousId: String?
     
-    /// Custom attributes
-    private var attributes: [String: Any] = [:]
+    /// Whether the user is anonymous
+    public private(set) var anonymous: Bool = false
+    
+    /// Custom attributes (properties in Kotlin)
+    private var properties: [String: Any] = [:]
     
     /// Device context
-    internal var deviceContext: DeviceContext?
+    internal var device: DeviceContext?
     
     /// Application info
-    internal var applicationInfo: ApplicationInfo?
+    internal var application: ApplicationInfo?
+    
+    /// Contexts for evaluation
+    private var contexts: [EvaluationContext] = []
     
     /// Initialize a new user
     /// - Parameters:
-    ///   - userId: User ID
+    ///   - user_customer_id: User ID
     ///   - deviceId: Device ID
     ///   - anonymousId: Anonymous ID
-    ///   - attributes: Custom attributes
+    ///   - anonymous: Whether the user is anonymous
+    ///   - properties: Custom properties
     public init(
-        userId: String? = nil,
+        user_customer_id: String? = nil,
         deviceId: String? = nil,
         anonymousId: String? = nil,
-        attributes: [String: Any] = [:]
+        anonymous: Bool = false,
+        properties: [String: Any] = [:]
     ) {
-        self.userId = userId
+        self.user_customer_id = user_customer_id
         self.deviceId = deviceId
         self.anonymousId = anonymousId
-        self.attributes = attributes
+        self.anonymous = anonymous
+        self.properties = properties
     }
     
     /// Get the user ID
     /// - Returns: User ID
     public func getUserId() -> String? {
-        return userId
+        return user_customer_id
     }
     
     /// Get the device ID
@@ -56,17 +65,35 @@ public class CFUser: Codable {
         return anonymousId
     }
     
-    /// Get the user attributes
-    /// - Returns: User attributes
-    public func getAttributes() -> [String: Any] {
-        return attributes
+    /// Get the user properties (matches getCurrentProperties in Kotlin)
+    /// - Returns: User properties
+    public func getCurrentProperties() -> [String: Any] {
+        return properties
     }
     
-    /// Get a specific attribute
-    /// - Parameter key: Attribute key
-    /// - Returns: Attribute value or nil
-    public func getAttribute(key: String) -> Any? {
-        return attributes[key]
+    /// Get a specific property
+    /// - Parameter key: Property key
+    /// - Returns: Property value or nil
+    public func getProperty(key: String) -> Any? {
+        return properties[key]
+    }
+    
+    /// Get the device context
+    /// - Returns: Device context
+    public func getDeviceContext() -> DeviceContext? {
+        return device
+    }
+    
+    /// Get the application info
+    /// - Returns: Application info
+    public func getApplicationInfo() -> ApplicationInfo? {
+        return application
+    }
+    
+    /// Get all contexts
+    /// - Returns: All contexts
+    public func getAllContexts() -> [EvaluationContext] {
+        return contexts
     }
     
     /// Convert user to dictionary
@@ -74,7 +101,7 @@ public class CFUser: Codable {
     public func toDictionary() -> [String: Any] {
         var result: [String: Any] = [:]
         
-        if let userId = userId {
+        if let userId = user_customer_id {
             result[CFConstants.UserAttributes.USER_ID] = userId
         }
         
@@ -86,8 +113,10 @@ public class CFUser: Codable {
             result[CFConstants.UserAttributes.ANONYMOUS_ID] = anonymousId
         }
         
-        // Add all custom attributes
-        for (key, value) in attributes {
+        result["anonymous"] = anonymous
+        
+        // Add all custom properties
+        for (key, value) in properties {
             // Don't overwrite built-in attributes
             if key != CFConstants.UserAttributes.USER_ID &&
                key != CFConstants.UserAttributes.DEVICE_ID &&
@@ -102,56 +131,93 @@ public class CFUser: Codable {
     /// Convert user data to a map for API requests
     /// Based on the Kotlin implementation
     public func toUserMap() -> [String: Any] {
-        var updatedProperties = attributes
+        var updatedProperties = properties
+        
+        // Inject contexts if available
+        if !contexts.isEmpty {
+            updatedProperties["contexts"] = contexts.map { $0.toDictionary() }
+        }
         
         // Add device context if available
-        if let deviceContext = deviceContext {
+        if let deviceContext = device {
             updatedProperties["device"] = deviceContext.toDictionary()
         }
         
         // Add application info if available
-        if let appInfo = applicationInfo {
+        if let appInfo = application {
             updatedProperties["application"] = appInfo.toDictionary()
         }
         
         var result: [String: Any] = [:]
         
         // Add user identification fields
-        if let userId = userId {
+        if let userId = user_customer_id {
             result["user_customer_id"] = userId
         }
         
-        // Add anonymous status (default to false)
-        result["anonymous"] = anonymousId != nil && userId == nil
+        // Add anonymous status
+        result["anonymous"] = anonymous
         
         // Add properties with device and app info 
         result["properties"] = updatedProperties
         
-        return result
+        // Filter nil values
+        return result.filter { $0.value is Any }
     }
     
-    /// Get evaluation context for feature evaluation
-    /// - Returns: Evaluation context
-    public func getEvaluationContext() -> EvaluationContext {
-        var context = toDictionary()
-        
-        // Add device context if available
-        if let deviceContext = deviceContext {
-            let deviceDict = deviceContext.toDictionary()
-            for (key, value) in deviceDict {
-                context["device_\(key)"] = value
-            }
+    /// Set the device context
+    /// - Parameter deviceContext: Device context
+    /// - Returns: Updated user
+    public func setDeviceContext(_ deviceContext: DeviceContext) -> CFUser {
+        let copy = copyUser()
+        copy.device = deviceContext
+        return copy
+    }
+    
+    /// Set the application info
+    /// - Parameter appInfo: Application info
+    /// - Returns: Updated user
+    public func setApplicationInfo(_ appInfo: ApplicationInfo) -> CFUser {
+        let copy = copyUser()
+        copy.application = appInfo
+        return copy
+    }
+    
+    /// Add a context
+    /// - Parameter context: Context to add
+    /// - Returns: Updated user
+    public func addContext(_ context: EvaluationContext) -> CFUser {
+        let copy = copyUser()
+        var updatedContexts = copy.contexts
+        updatedContexts.append(context)
+        copy.contexts = updatedContexts
+        return copy
+    }
+    
+    /// Add a property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Property value
+    /// - Returns: Updated user
+    public func addProperty(key: String, value: Any) -> CFUser {
+        let copy = copyUser()
+        var updatedProperties = copy.properties
+        updatedProperties[key] = value
+        copy.properties = updatedProperties
+        return copy
+    }
+    
+    /// Add multiple properties
+    /// - Parameter newProperties: Properties to add
+    /// - Returns: Updated user
+    public func addProperties(_ newProperties: [String: Any]) -> CFUser {
+        let copy = copyUser()
+        var updatedProperties = copy.properties
+        for (key, value) in newProperties {
+            updatedProperties[key] = value
         }
-        
-        // Add application info if available
-        if let appInfo = applicationInfo {
-            let appDict = appInfo.toDictionary()
-            for (key, value) in appDict {
-                context["app_\(key)"] = value
-            }
-        }
-        
-        return EvaluationContext(attributes: context)
+        copy.properties = updatedProperties
+        return copy
     }
     
     // MARK: - Builder-like Methods
@@ -161,7 +227,7 @@ public class CFUser: Codable {
     /// - Returns: Updated user
     public func withUserId(_ userId: String) -> CFUser {
         let copy = copyUser()
-        copy.userId = userId
+        copy.user_customer_id = userId
         return copy
     }
     
@@ -183,37 +249,103 @@ public class CFUser: Codable {
         return copy
     }
     
-    /// Create a copy with updated attributes
-    /// - Parameter attributes: New attributes
+    /// Make the user anonymous
+    /// - Parameter anonymous: Whether the user is anonymous
     /// - Returns: Updated user
-    public func withAttributes(_ attributes: [String: Any]) -> CFUser {
+    public func makeAnonymous(_ anonymous: Bool) -> CFUser {
         let copy = copyUser()
-        copy.attributes = attributes
+        copy.anonymous = anonymous
         return copy
     }
     
-    /// Create a copy with a new attribute
+    /// Create a copy with updated properties
+    /// - Parameter properties: New properties
+    /// - Returns: Updated user
+    public func withProperties(_ properties: [String: Any]) -> CFUser {
+        let copy = copyUser()
+        copy.properties = properties
+        return copy
+    }
+    
+    /// Create a copy with a new property
     /// - Parameters:
-    ///   - key: Attribute key
-    ///   - value: Attribute value
+    ///   - key: Property key
+    ///   - value: Property value
     /// - Returns: Updated user
     public func withAttribute(key: String, value: Any) -> CFUser {
         let copy = copyUser()
-        copy.attributes[key] = value
+        copy.properties[key] = value
         return copy
+    }
+    
+    /// Create a copy with a specific number property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Number value
+    /// - Returns: Updated user
+    public func withNumberProperty(key: String, value: NSNumber) -> CFUser {
+        return withAttribute(key: key, value: value)
+    }
+    
+    /// Create a copy with a specific string property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: String value
+    /// - Returns: Updated user
+    public func withStringProperty(key: String, value: String) -> CFUser {
+        return withAttribute(key: key, value: value)
+    }
+    
+    /// Create a copy with a specific boolean property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Boolean value
+    /// - Returns: Updated user
+    public func withBooleanProperty(key: String, value: Bool) -> CFUser {
+        return withAttribute(key: key, value: value)
+    }
+    
+    /// Create a copy with a specific date property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Date value
+    /// - Returns: Updated user
+    public func withDateProperty(key: String, value: Date) -> CFUser {
+        return withAttribute(key: key, value: value)
+    }
+    
+    /// Create a copy with a specific geo point property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - lat: Latitude
+    ///   - lon: Longitude
+    /// - Returns: Updated user
+    public func withGeoPointProperty(key: String, lat: Double, lon: Double) -> CFUser {
+        return withAttribute(key: key, value: ["lat": lat, "lon": lon])
+    }
+    
+    /// Create a copy with a specific JSON property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: JSON value
+    /// - Returns: Updated user
+    public func withJsonProperty(key: String, value: [String: Any]) -> CFUser {
+        return withAttribute(key: key, value: value)
     }
     
     /// Create a copy of this user
     /// - Returns: Copy of user
     private func copyUser() -> CFUser {
         let copy = CFUser(
-            userId: userId,
+            user_customer_id: user_customer_id,
             deviceId: deviceId,
             anonymousId: anonymousId,
-            attributes: attributes
+            anonymous: anonymous,
+            properties: properties
         )
-        copy.deviceContext = deviceContext
-        copy.applicationInfo = applicationInfo
+        copy.device = device
+        copy.application = application
+        copy.contexts = contexts
         return copy
     }
     
@@ -221,53 +353,230 @@ public class CFUser: Codable {
     /// - Returns: A default user for system operations
     public static func defaultUser() -> CFUser {
         return CFUser(
-            userId: nil,
+            user_customer_id: nil,
             deviceId: UUID().uuidString,
             anonymousId: UUID().uuidString,
-            attributes: [:]
+            anonymous: true,
+            properties: [:]
         )
+    }
+    
+    /// Create a builder with a user ID
+    /// - Parameter userId: User ID
+    /// - Returns: Builder
+    public static func builder(user_customer_id: String) -> Builder {
+        return Builder(user_customer_id: user_customer_id)
+    }
+    
+    // MARK: - Builder
+    
+    /// Builder for constructing a CFUser with fluent API
+    public class Builder {
+        private let user_customer_id: String
+        private var anonymous: Bool = false
+        private var deviceId: String? = nil
+        private var anonymousId: String? = nil
+        private var properties: [String: Any] = [:]
+        private var contexts: [EvaluationContext] = []
+        private var device: DeviceContext? = nil
+        private var application: ApplicationInfo? = nil
+        
+        /// Initialize with a user ID
+        /// - Parameter user_customer_id: User ID
+        public init(user_customer_id: String) {
+            self.user_customer_id = user_customer_id
+        }
+        
+        /// Make the user anonymous
+        /// - Parameter anonymous: Whether the user is anonymous
+        /// - Returns: Builder
+        public func makeAnonymous(_ anonymous: Bool) -> Builder {
+            self.anonymous = anonymous
+            return self
+        }
+        
+        /// Set a device ID
+        /// - Parameter deviceId: Device ID
+        /// - Returns: Builder
+        public func withDeviceId(_ deviceId: String) -> Builder {
+            self.deviceId = deviceId
+            return self
+        }
+        
+        /// Set an anonymous ID
+        /// - Parameter anonymousId: Anonymous ID
+        /// - Returns: Builder
+        public func withAnonymousId(_ anonymousId: String) -> Builder {
+            self.anonymousId = anonymousId
+            return self
+        }
+        
+        /// Set properties
+        /// - Parameter properties: Properties
+        /// - Returns: Builder
+        public func withProperties(_ properties: [String: Any]) -> Builder {
+            self.properties = properties
+            return self
+        }
+        
+        /// Set a specific number property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - value: Number value
+        /// - Returns: Builder
+        public func withNumberProperty(key: String, value: NSNumber) -> Builder {
+            properties[key] = value
+            return self
+        }
+        
+        /// Set a specific string property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - value: String value
+        /// - Returns: Builder
+        public func withStringProperty(key: String, value: String) -> Builder {
+            properties[key] = value
+            return self
+        }
+        
+        /// Set a specific boolean property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - value: Boolean value
+        /// - Returns: Builder
+        public func withBooleanProperty(key: String, value: Bool) -> Builder {
+            properties[key] = value
+            return self
+        }
+        
+        /// Set a specific date property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - value: Date value
+        /// - Returns: Builder
+        public func withDateProperty(key: String, value: Date) -> Builder {
+            properties[key] = value
+            return self
+        }
+        
+        /// Set a specific geo point property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - lat: Latitude
+        ///   - lon: Longitude
+        /// - Returns: Builder
+        public func withGeoPointProperty(key: String, lat: Double, lon: Double) -> Builder {
+            properties[key] = ["lat": lat, "lon": lon]
+            return self
+        }
+        
+        /// Set a specific JSON property
+        /// - Parameters:
+        ///   - key: Property key
+        ///   - value: JSON value
+        /// - Returns: Builder
+        public func withJsonProperty(key: String, value: [String: Any]) -> Builder {
+            properties[key] = value
+            return self
+        }
+        
+        /// Set a context
+        /// - Parameter context: Context
+        /// - Returns: Builder
+        public func withContext(_ context: EvaluationContext) -> Builder {
+            contexts.append(context)
+            return self
+        }
+        
+        /// Set a device context
+        /// - Parameter device: Device context
+        /// - Returns: Builder
+        public func withDeviceContext(_ device: DeviceContext) -> Builder {
+            self.device = device
+            return self
+        }
+        
+        /// Set an application info
+        /// - Parameter application: Application info
+        /// - Returns: Builder
+        public func withApplicationInfo(_ application: ApplicationInfo) -> Builder {
+            self.application = application
+            return self
+        }
+        
+        /// Build the user
+        /// - Returns: Built user
+        public func build() -> CFUser {
+            let user = CFUser(
+                user_customer_id: user_customer_id,
+                deviceId: deviceId,
+                anonymousId: anonymousId,
+                anonymous: anonymous,
+                properties: properties
+            )
+            
+            user.device = device
+            user.application = application
+            user.contexts = contexts
+            
+            return user
+        }
     }
     
     // MARK: - Codable implementation
     
     private enum CodingKeys: String, CodingKey {
-        case userId
+        case user_customer_id
         case deviceId
         case anonymousId
-        case attributes
-        case deviceContext
-        case applicationInfo
+        case anonymous
+        case properties
+        case device
+        case application
     }
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
-        try container.encodeIfPresent(userId, forKey: .userId)
+        try container.encodeIfPresent(user_customer_id, forKey: .user_customer_id)
         try container.encodeIfPresent(deviceId, forKey: .deviceId)
         try container.encodeIfPresent(anonymousId, forKey: .anonymousId)
-        try container.encodeIfPresent(deviceContext, forKey: .deviceContext)
-        try container.encodeIfPresent(applicationInfo, forKey: .applicationInfo)
+        try container.encode(anonymous, forKey: .anonymous)
+        try container.encodeIfPresent(device, forKey: .device)
+        try container.encodeIfPresent(application, forKey: .application)
         
-        // Encode attributes as a Data object
-        let attributesData = try JSONSerialization.data(withJSONObject: attributes)
-        try container.encode(attributesData, forKey: .attributes)
+        // Encode properties as a Data object
+        let propertiesData = try JSONSerialization.data(withJSONObject: properties)
+        try container.encode(propertiesData, forKey: .properties)
     }
     
     public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
-        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        user_customer_id = try container.decodeIfPresent(String.self, forKey: .user_customer_id)
         deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
         anonymousId = try container.decodeIfPresent(String.self, forKey: .anonymousId)
-        deviceContext = try container.decodeIfPresent(DeviceContext.self, forKey: .deviceContext)
-        applicationInfo = try container.decodeIfPresent(ApplicationInfo.self, forKey: .applicationInfo)
+        anonymous = try container.decode(Bool.self, forKey: .anonymous)
+        device = try container.decodeIfPresent(DeviceContext.self, forKey: .device)
+        application = try container.decodeIfPresent(ApplicationInfo.self, forKey: .application)
+        contexts = [] // Initialize to empty array, contexts aren't part of Codable
         
-        // Decode attributes from Data
-        let attributesData = try container.decode(Data.self, forKey: .attributes)
-        if let decodedAttributes = try JSONSerialization.jsonObject(with: attributesData) as? [String: Any] {
-            attributes = decodedAttributes
+        // Decode properties from Data
+        let propertiesData = try container.decode(Data.self, forKey: .properties)
+        if let decodedProperties = try JSONSerialization.jsonObject(with: propertiesData) as? [String: Any] {
+            properties = decodedProperties
         } else {
-            attributes = [:]
+            properties = [:]
         }
+    }
+}
+
+// MARK: - Helper Extensions
+
+extension Dictionary {
+    /// Filter values that are not nil
+    /// Equivalent to Kotlin's filterValues { it != null }
+    fileprivate func filterValues(isIncluded: (Value) -> Bool) -> [Key: Value] {
+        return self.filter { isIncluded($0.value) }
     }
 } 

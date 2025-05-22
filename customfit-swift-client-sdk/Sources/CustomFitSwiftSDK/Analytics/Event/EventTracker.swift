@@ -236,10 +236,10 @@ public class EventTracker {
             eventType: .track,
             timestamp: Date(),
             sessionId: sessionId,
-            userId: user.getUser().userId,
-            isAnonymous: user.getUser().userId == nil,
-            deviceContext: user.getUser().deviceContext,
-            applicationInfo: user.getUser().applicationInfo,
+            userId: user.getUser().getUserId(),
+            isAnonymous: user.getUser().getUserId() == nil,
+            deviceContext: user.getUser().getDeviceContext(),
+            applicationInfo: user.getUser().getApplicationInfo(),
             properties: properties ?? [:]
         )
         
@@ -661,7 +661,7 @@ public class EventTracker {
             let jsonData = try JSONSerialization.data(withJSONObject: eventRequestData, options: [])
             
             // Create URL
-            let eventsUrl = "\(config.apiBaseUrl)\(CFConstants.Api.EVENTS_PATH)?cfenc=\(config.clientKey)"
+            let eventsUrl = "\(CFConstants.Api.BASE_API_URL)\(CFConstants.Api.EVENTS_PATH)?cfenc=\(config.clientKey)"
             guard let url = URL(string: eventsUrl) else {
                 return CFResult.createError(message: "Invalid events URL: \(eventsUrl)", category: .validation)
             }

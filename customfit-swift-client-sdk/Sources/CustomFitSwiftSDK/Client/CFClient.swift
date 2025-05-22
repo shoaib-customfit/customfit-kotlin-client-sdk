@@ -29,6 +29,17 @@ public class CFClient: AppStateListener, BatteryStateListener {
         return newInstance
     }
     
+    /// Create a new instance of the SDK client with a user
+    /// - Parameters:
+    ///   - config: SDK configuration
+    ///   - user: User
+    /// - Returns: New client instance
+    public static func `init`(config: CFConfig, user: CFUser) -> CFClient {
+        let newInstance = CFClient(config: config, user: user)
+        instance = newInstance
+        return newInstance
+    }
+    
     // MARK: - Properties
     
     /// SDK configuration
@@ -134,6 +145,82 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.eventTracker = eventTracker
         
+        setupListeners()
+    }
+    
+    // This must be public to be accessible from Demo project
+public init(config: CFConfig, user: CFUser) {
+        self.config = config
+        
+        // Setup logger
+        if config.debugLoggingEnabled {
+            Logger.setLogLevel(level: .debug)
+        }
+        
+        // Create HTTP client
+        let httpClient = HttpClient(config: config)
+        self.httpClient = httpClient
+        
+        // Create battery manager
+        let batteryManager = BatteryManager.shared
+        self.batteryManager = batteryManager
+        
+        // Create user manager with provided user
+        let userManager = UserManager(user: user)
+        self.userManager = userManager
+        
+        // Create background state monitor
+        let backgroundStateMonitor = DefaultBackgroundStateMonitor()
+        self.backgroundStateMonitor = backgroundStateMonitor
+        
+        // Create connection manager
+        let connectionManager = DefaultConnectionManager(httpClient: httpClient, config: config)
+        self.connectionManager = connectionManager
+        
+        // Create listener manager
+        let listenerManager = DefaultListenerManager()
+        self.listenerManager = listenerManager
+        
+        // Create summary manager
+        let summaryManager = SummaryManager(
+            httpClient: httpClient,
+            user: userManager, 
+            config: config
+        )
+        self.summaryManager = summaryManager
+        
+        // Create config fetcher
+        let configFetcher = ConfigFetcher(
+            httpClient: httpClient,
+            config: config,
+            user: user
+        )
+        
+        // Create config manager with correct parameters
+        let configManager = ConfigManagerImpl(
+            configFetcher: configFetcher,
+            clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
+            listenerManager: listenerManager,
+            config: config,
+            summaryManager: summaryManager
+        )
+        self.configManager = configManager
+        
+        // Create event tracker with session ID
+        let sessionId = UUID().uuidString
+        let eventTracker = EventTracker(
+            config: config,
+            user: userManager,
+            sessionId: sessionId,
+            httpClient: httpClient,
+            summaryManager: summaryManager
+        )
+        self.eventTracker = eventTracker
+        
+        setupListeners()
+    }
+    
+    private func setupListeners() {
         // Register for notifications
         backgroundStateMonitor.addAppStateListener(listener: self)
         backgroundStateMonitor.addBatteryStateListener(listener: self)
@@ -143,12 +230,6 @@ public class CFClient: AppStateListener, BatteryStateListener {
         
         // Initialization complete
         isInitialized = true
-        
-        // Track app start event
-        eventTracker.trackEvent(
-            eventName: CFConstants.EventTypes.APP_START,
-            properties: [:]
-        )
         
         Logger.info("🚀 CustomFit SDK initialized with configuration: \(config)")
     }
@@ -162,14 +243,6 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// Shutdown the SDK and cleanup resources
     public func shutdown() {
         Logger.info("🚀 CustomFit SDK shutting down")
-        
-        // Track app stop event if initialized
-        if isInitialized {
-            eventTracker.trackEvent(
-                eventName: CFConstants.EventTypes.APP_STOP,
-                properties: [:]
-            )
-        }
         
         // Stop background monitoring
         backgroundStateMonitor.stopMonitoring()
@@ -189,20 +262,6 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     public func onAppStateChange(state: AppState) {
         Logger.info("App state changed: \(state == .background ? "background" : "foreground")")
-        
-        // Track app state events
-        switch state {
-        case .background:
-            eventTracker.trackEvent(
-                eventName: CFConstants.EventTypes.APP_BACKGROUND,
-                properties: [:]
-            )
-        case .foreground:
-            eventTracker.trackEvent(
-                eventName: CFConstants.EventTypes.APP_FOREGROUND,
-                properties: [:]
-            )
-        }
     }
     
     // MARK: - BatteryStateListener Implementation
@@ -233,7 +292,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// - Parameter attributes: User attributes
     public func setUserAttributes(attributes: [String: Any]) {
         Logger.info("Setting user attributes: \(attributes)")
-        userManager.updateUser(userManager.getUser().withAttributes(attributes))
+        userManager.updateUser(userManager.getUser().withProperties(attributes))
     }
     
     /// Set a single user attribute
@@ -419,6 +478,46 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// - Returns: Current log level
     public func getLogLevel() -> Logger.LogLevel {
         return Logger.getLogLevel()
+    }
+    
+    /// Waits for SDK settings to be initialized
+    /// This is a Swift equivalent to Kotlin's suspend function
+    /// - Parameter completion: Completion handler called when SDK settings have been initialized
+    public func awaitSdkSettingsCheck(completion: @escaping (Error?) -> Void) {
+        DispatchQueue.global().async {
+            // For now, we'll simulate the SDK settings check with a delay
+            // In a real implementation, this would wait for a completion signal from the config manager
+            Thread.sleep(forTimeInterval: 2.0)
+            completion(nil)
+        }
+    }
+    
+    /// Force a refresh of the configuration regardless of Last-Modified header
+    /// - Parameter completion: Optional completion handler
+    public func forceRefresh(completion: ((Error?) -> Void)? = nil) {
+        Logger.info("Force refreshing configurations")
+        
+        // For iOS 13+, use async/await
+        if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
+            Task {
+                do {
+                    try await configManager.forceRefresh()
+                    completion?(nil)
+                } catch {
+                    Logger.error("Force refresh failed: \(error.localizedDescription)")
+                    completion?(error)
+                }
+            }
+        } else {
+            // For older iOS versions, use sync method
+            do {
+                try configManager.forceRefreshSync()
+                completion?(nil)
+            } catch {
+                Logger.error("Force refresh failed: \(error.localizedDescription)")
+                completion?(error)
+            }
+        }
     }
 }
 

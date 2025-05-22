@@ -370,7 +370,7 @@ public class SummaryManager {
             let jsonData = try JSONSerialization.data(withJSONObject: summaryRequestData, options: [])
             
             // Create URL
-            let summariesUrl = "\(config.apiBaseUrl)\(CFConstants.Api.SUMMARIES_PATH)?cfenc=\(config.clientKey)"
+            let summariesUrl = "\(CFConstants.Api.BASE_API_URL)\(CFConstants.Api.SUMMARIES_PATH)?cfenc=\(config.clientKey)"
             guard let url = URL(string: summariesUrl) else {
                 return CFResult.createError(message: "Invalid summaries URL: \(summariesUrl)", category: .validation)
             }

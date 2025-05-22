@@ -24,15 +24,16 @@ public class UserManager: CFUserProvider {
     /// Update the current user
     public func updateUser(_ newUser: CFUser) {
         // Retain device and application context from current user if not provided
-        if newUser.deviceContext == nil {
-            newUser.deviceContext = user.deviceContext
+        if newUser.device == nil {
+            newUser.device = user.device
         }
         
-        if newUser.applicationInfo == nil {
-            newUser.applicationInfo = user.applicationInfo
+        if newUser.application == nil {
+            newUser.application = user.application
         }
         
         self.user = newUser
+        Logger.debug("User updated")
     }
     
     /// Get the current user
@@ -42,20 +43,39 @@ public class UserManager: CFUserProvider {
     
     /// Get evaluation context for feature evaluation
     public func getEvaluationContext() -> EvaluationContext {
-        return user.getEvaluationContext()
+        // Create context from user data
+        var contextData = user.toDictionary()
+        
+        // Add device context if available
+        if let deviceContext = user.device {
+            let deviceDict = deviceContext.toDictionary()
+            for (key, value) in deviceDict {
+                contextData["device_\(key)"] = value
+            }
+        }
+        
+        // Add application info if available
+        if let appInfo = user.application {
+            let appDict = appInfo.toDictionary()
+            for (key, value) in appDict {
+                contextData["app_\(key)"] = value
+            }
+        }
+        
+        return EvaluationContext(attributes: contextData)
     }
     
     // MARK: - Private Methods
     
     private func enrichUserWithEnvironmentData() {
         // Add device information if not already present
-        if user.deviceContext == nil {
-            user.deviceContext = collectDeviceContext()
+        if user.device == nil {
+            user.device = collectDeviceContext()
         }
         
         // Add application information if not already present
-        if user.applicationInfo == nil {
-            user.applicationInfo = collectApplicationInfo()
+        if user.application == nil {
+            user.application = collectApplicationInfo()
         }
     }
     

@@ -5,12 +5,6 @@ public class CFConfig {
     /// Client API key
     public let clientKey: String
     
-    /// API base URL
-    public let apiBaseUrl: String
-    
-    /// API key for authentication (if different from client key)
-    public let apiKey: String
-    
     // Event tracker configuration
     public let eventsQueueSize: Int
     public let eventsFlushTimeSeconds: Int
@@ -60,8 +54,6 @@ public class CFConfig {
     /// Initialize with all configuration parameters
     /// - Parameters:
     ///   - clientKey: Client API key
-    ///   - apiBaseUrl: API base URL
-    ///   - apiKey: API key for authentication (if different from client key)
     ///   - eventsQueueSize: Events queue size
     ///   - eventsFlushTimeSeconds: Events flush time in seconds
     ///   - eventsFlushIntervalMs: Events flush interval in milliseconds
@@ -87,8 +79,6 @@ public class CFConfig {
     ///   - autoEnvAttributesEnabled: Auto environment attributes enabled
     public init(
         clientKey: String,
-        apiBaseUrl: String,
-        apiKey: String,
         eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
         eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
         eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
@@ -114,8 +104,6 @@ public class CFConfig {
         autoEnvAttributesEnabled: Bool = false
     ) {
         self.clientKey = clientKey
-        self.apiBaseUrl = apiBaseUrl
-        self.apiKey = apiKey
         self.eventsQueueSize = eventsQueueSize
         self.eventsFlushTimeSeconds = eventsFlushTimeSeconds
         self.eventsFlushIntervalMs = eventsFlushIntervalMs
@@ -147,18 +135,12 @@ public class CFConfig {
     /// - Parameter clientKey: Client API key
     /// - Returns: A new CFConfig instance
     public static func fromClientKey(_ clientKey: String) -> CFConfig {
-        return CFConfig(
-            clientKey: clientKey, 
-            apiBaseUrl: CFConstants.Api.BASE_API_URL,
-            apiKey: clientKey
-        )
+        return CFConfig(clientKey: clientKey)
     }
     
     /// Create a configuration with basic settings
     /// - Parameters:
     ///   - clientKey: Client API key
-    ///   - apiBaseUrl: API base URL (optional, defaults to standard endpoint)
-    ///   - apiKey: API key for authentication (optional, defaults to client key)
     ///   - eventsQueueSize: Events queue size
     ///   - eventsFlushTimeSeconds: Events flush time in seconds
     ///   - eventsFlushIntervalMs: Events flush interval in milliseconds
@@ -168,8 +150,6 @@ public class CFConfig {
     /// - Returns: A new CFConfig instance
     public static func fromClientKey(
         _ clientKey: String,
-        apiBaseUrl: String = CFConstants.Api.BASE_API_URL,
-        apiKey: String? = nil,
         eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
         eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
         eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
@@ -179,8 +159,6 @@ public class CFConfig {
     ) -> CFConfig {
         return CFConfig(
             clientKey: clientKey,
-            apiBaseUrl: apiBaseUrl,
-            apiKey: apiKey ?? clientKey,
             eventsQueueSize: eventsQueueSize,
             eventsFlushTimeSeconds: eventsFlushTimeSeconds,
             eventsFlushIntervalMs: eventsFlushIntervalMs,
@@ -236,8 +214,6 @@ public class CFConfig {
     /// Builder for creating a CFConfig instance
     public class Builder {
         private let clientKey: String
-        private var apiBaseUrl: String = CFConstants.Api.BASE_API_URL
-        private var apiKey: String
         private var eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE
         private var eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS
         private var eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS
@@ -266,23 +242,6 @@ public class CFConfig {
         /// - Parameter clientKey: Client API key
         public init(_ clientKey: String) {
             self.clientKey = clientKey
-            self.apiKey = clientKey
-        }
-        
-        /// Set API base URL
-        /// - Parameter url: API base URL
-        /// - Returns: Builder instance
-        public func apiBaseUrl(_ url: String) -> Builder {
-            self.apiBaseUrl = url
-            return self
-        }
-        
-        /// Set API key for authentication (if different from client key)
-        /// - Parameter key: API key for authentication (if different from client key)
-        /// - Returns: Builder instance
-        public func apiKey(_ key: String) -> Builder {
-            self.apiKey = key
-            return self
         }
         
         /// Set events queue size
@@ -313,6 +272,7 @@ public class CFConfig {
         /// - Parameter attempts: Maximum retry attempts
         /// - Returns: Builder instance
         public func maxRetryAttempts(_ attempts: Int) -> Builder {
+            precondition(attempts >= 0, "Max retry attempts must be non-negative")
             self.maxRetryAttempts = attempts
             return self
         }
@@ -321,6 +281,7 @@ public class CFConfig {
         /// - Parameter ms: Initial retry delay in milliseconds
         /// - Returns: Builder instance
         public func retryInitialDelayMs(_ ms: Int64) -> Builder {
+            precondition(ms > 0, "Initial delay must be positive")
             self.retryInitialDelayMs = ms
             return self
         }
@@ -329,6 +290,7 @@ public class CFConfig {
         /// - Parameter ms: Maximum retry delay in milliseconds
         /// - Returns: Builder instance
         public func retryMaxDelayMs(_ ms: Int64) -> Builder {
+            precondition(ms > 0, "Max delay must be positive")
             self.retryMaxDelayMs = ms
             return self
         }
@@ -337,6 +299,7 @@ public class CFConfig {
         /// - Parameter multiplier: Retry backoff multiplier
         /// - Returns: Builder instance
         public func retryBackoffMultiplier(_ multiplier: Double) -> Builder {
+            precondition(multiplier > 1.0, "Backoff multiplier must be greater than 1.0")
             self.retryBackoffMultiplier = multiplier
             return self
         }
@@ -409,6 +372,8 @@ public class CFConfig {
         /// - Parameter level: Log level
         /// - Returns: Builder instance
         public func logLevel(_ level: String) -> Builder {
+            precondition(CFConstants.Logging.VALID_LOG_LEVELS.contains(level), 
+                      "Log level must be one of: \(CFConstants.Logging.VALID_LOG_LEVELS.joined(separator: ", "))")
             self.logLevel = level
             return self
         }
@@ -433,6 +398,7 @@ public class CFConfig {
         /// - Parameter ms: Background polling interval in milliseconds
         /// - Returns: Builder instance
         public func backgroundPollingIntervalMs(_ ms: Int64) -> Builder {
+            precondition(ms > 0, "Interval must be greater than 0")
             self.backgroundPollingIntervalMs = ms
             return self
         }
@@ -449,6 +415,7 @@ public class CFConfig {
         /// - Parameter ms: Reduced polling interval in milliseconds
         /// - Returns: Builder instance
         public func reducedPollingIntervalMs(_ ms: Int64) -> Builder {
+            precondition(ms > 0, "Interval must be greater than 0")
             self.reducedPollingIntervalMs = ms
             return self
         }
@@ -457,6 +424,7 @@ public class CFConfig {
         /// - Parameter max: Maximum stored events
         /// - Returns: Builder instance
         public func maxStoredEvents(_ max: Int) -> Builder {
+            precondition(max > 0, "Max stored events must be greater than 0")
             self.maxStoredEvents = max
             return self
         }
@@ -474,8 +442,6 @@ public class CFConfig {
         public func build() -> CFConfig {
             return CFConfig(
                 clientKey: clientKey,
-                apiBaseUrl: apiBaseUrl,
-                apiKey: apiKey,
                 eventsQueueSize: eventsQueueSize,
                 eventsFlushTimeSeconds: eventsFlushTimeSeconds,
                 eventsFlushIntervalMs: eventsFlushIntervalMs,

@@ -753,7 +753,7 @@ public class HttpClient {
     
     private func addHeaders(to request: inout URLRequest, headers: [String: String]?) {
         // Add API key header
-        request.setValue(config.apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(config.clientKey, forHTTPHeaderField: "X-API-Key")
         
         // Add content type if not present
         if request.value(forHTTPHeaderField: "Content-Type") == nil {
