@@ -45,3 +45,4 @@ bin/
 ### Mac OS ###
 .DS_Store
 *.swp
+customfit-swift-client-sdk/.build/
