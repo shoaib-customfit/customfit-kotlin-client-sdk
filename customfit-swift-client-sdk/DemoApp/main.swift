@@ -16,6 +16,13 @@ let clientKey = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhY2NvdW50X2lkIjoiYTRiZG
 
 // Create a configuration
 let config = CFConfig.Builder(clientKey)
+    .sdkSettingsCheckIntervalMs(2_000)
+    .backgroundPollingIntervalMs(2_000)
+    .reducedPollingIntervalMs(2_000)
+    .summariesFlushTimeSeconds(3)
+    .summariesFlushIntervalMs(3_000)
+    .eventsFlushTimeSeconds(3)
+    .eventsFlushIntervalMs(3_000)
     .debugLoggingEnabled(true)
     .build()
 

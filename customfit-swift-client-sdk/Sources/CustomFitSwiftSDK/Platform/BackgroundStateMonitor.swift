@@ -58,6 +58,18 @@ public protocol BackgroundStateMonitor {
     /// Get current battery state
     /// - Returns: The current battery state
     func getCurrentBatteryState() -> CFBatteryState
+
+    /// Gets the battery-aware polling interval.
+    /// - Parameters:
+    ///   - normalInterval: Regular polling interval in milliseconds.
+    ///   - reducedInterval: Reduced polling interval for low battery in milliseconds.
+    ///   - useReducedWhenLow: Whether to use reduced interval when battery is low.
+    /// - Returns: The appropriate polling interval in milliseconds.
+    func getPollingInterval(
+        normalInterval: Int64,
+        reducedInterval: Int64,
+        useReducedWhenLow: Bool
+    ) -> Int64
 }
 
 /// Default implementation of BackgroundStateMonitor
@@ -258,6 +270,30 @@ public class DefaultBackgroundStateMonitor: BackgroundStateMonitor {
         defer { lock.unlock() }
         
         return batteryState
+    }
+    
+    /// Gets the battery-aware polling interval.
+    /// - Parameters:
+    ///   - normalInterval: Regular polling interval in milliseconds.
+    ///   - reducedInterval: Reduced polling interval for low battery in milliseconds.
+    ///   - useReducedWhenLow: Whether to use reduced interval when battery is low.
+    /// - Returns: The appropriate polling interval in milliseconds.
+    public func getPollingInterval(
+        normalInterval: Int64,
+        reducedInterval: Int64,
+        useReducedWhenLow: Bool
+    ) -> Int64 {
+        lock.lock() // Ensure thread-safe access to batteryState
+        let currentBatteryState = self.batteryState // self.batteryState is updated by listeners
+        lock.unlock()
+
+        // If reduced polling is enabled and battery is low (which considers low power mode)
+        if useReducedWhenLow && currentBatteryState.isLow {
+            Logger.debug("Using reduced polling interval (\(reducedInterval) ms) due to low battery/power saving mode.")
+            return reducedInterval
+        }
+        
+        return normalInterval
     }
     
     // MARK: - Private Methods

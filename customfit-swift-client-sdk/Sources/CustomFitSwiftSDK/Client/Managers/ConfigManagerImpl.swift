@@ -33,6 +33,9 @@ public class ConfigManagerImpl: ConfigManager {
     // Flag to track if we've loaded from cache
     private var initialCacheLoadComplete: Bool = false
     
+    // Background state monitor for battery awareness
+    private var backgroundStateMonitor: BackgroundStateMonitor?
+    
     // MARK: - Initialization
     
     public init(
@@ -40,7 +43,8 @@ public class ConfigManagerImpl: ConfigManager {
         clientQueue: DispatchQueue,
         listenerManager: ListenerManager,
         config: CFConfig,
-        summaryManager: SummaryManager
+        summaryManager: SummaryManager,
+        backgroundStateMonitor: BackgroundStateMonitor? = nil
     ) {
         self.config = config
         self.configCache = ConfigCache()
@@ -48,6 +52,7 @@ public class ConfigManagerImpl: ConfigManager {
         self.clientQueue = clientQueue
         self.listenerManager = listenerManager
         self.summaryManager = summaryManager
+        self.backgroundStateMonitor = backgroundStateMonitor
         
         // Load cached flags if available
         loadFromCache()
@@ -66,13 +71,15 @@ public class ConfigManagerImpl: ConfigManager {
             user: userManager,
             config: config
         )
+        let backgroundStateMonitor = DefaultBackgroundStateMonitor()
         
         self.init(
             configFetcher: configFetcher,
             clientQueue: clientQueue,
             listenerManager: listenerManager,
             config: config,
-            summaryManager: summaryManager
+            summaryManager: summaryManager,
+            backgroundStateMonitor: backgroundStateMonitor
         )
     }
     
@@ -398,12 +405,16 @@ public class ConfigManagerImpl: ConfigManager {
                 }
                 
                 // Get the battery-aware polling interval
-                let batteryManager = BatteryManager.shared
-                let actualIntervalMs = batteryManager.getPollingInterval(
-                    normalInterval: interval,
-                    reducedInterval: self.config.reducedPollingIntervalMs,
-                    useReducedWhenLow: self.config.useReducedPollingWhenBatteryLow
-                )
+                let actualIntervalMs: Int64
+                if let monitor = self.backgroundStateMonitor {
+                    actualIntervalMs = monitor.getPollingInterval(
+                        normalInterval: interval,
+                        reducedInterval: self.config.reducedPollingIntervalMs,
+                        useReducedWhenLow: self.config.useReducedPollingWhenBatteryLow
+                    )
+                } else {
+                    actualIntervalMs = interval
+                }
                 
                 // Log the actual interval we're using
                 Logger.info("Starting periodic settings check with interval: \(actualIntervalMs) ms" +
@@ -505,12 +516,16 @@ public class ConfigManagerImpl: ConfigManager {
         }
         
         // Get the battery-aware polling interval
-        let batteryManager = BatteryManager.shared
-        let actualIntervalMs = batteryManager.getPollingInterval(
-            normalInterval: interval,
-            reducedInterval: config.reducedPollingIntervalMs,
-            useReducedWhenLow: config.useReducedPollingWhenBatteryLow
-        )
+        let actualIntervalMs: Int64
+        if let monitor = self.backgroundStateMonitor {
+            actualIntervalMs = monitor.getPollingInterval(
+                normalInterval: interval,
+                reducedInterval: self.config.reducedPollingIntervalMs,
+                useReducedWhenLow: self.config.useReducedPollingWhenBatteryLow
+            )
+        } else {
+            actualIntervalMs = interval
+        }
         
         // Log the actual interval being used
         Logger.info("Restarting periodic settings check with interval: \(actualIntervalMs) ms" +

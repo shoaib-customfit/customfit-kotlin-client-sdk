@@ -43,13 +43,13 @@ public class CFClient: AppStateListener, BatteryStateListener {
     // MARK: - Properties
     
     /// SDK configuration
-    private let config: CFConfig
+    private let mutableConfig: MutableCFConfig
     
     /// Config manager
     private let configManager: ConfigManager
     
     /// Connection manager
-    private let connectionManager: ConnectionManager
+    private let connectionManager: ConnectionManagerInterface
     
     /// Listener manager
     private let listenerManager: ListenerManager
@@ -63,35 +63,33 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// Summary manager
     private let summaryManager: SummaryManager
     
+    /// ConfigFetcher instance
+    private let configFetcher: ConfigFetcher
+    
     /// Background state monitor
     private let backgroundStateMonitor: BackgroundStateMonitor
-    
-    /// Battery manager
-    private let batteryManager: BatteryManager
-    
-    /// Whether the SDK is initialized
-    private var isInitialized: Bool = false
     
     /// HTTP client
     private let httpClient: HttpClient
     
+    /// Whether the SDK is initialized
+    private var isInitialized: Bool = false
+    
     // MARK: - Initialization
     
     private init(config: CFConfig) {
-        self.config = config
+        self.mutableConfig = MutableCFConfig(initConfig: config)
         
         // Setup logger
-        if config.debugLoggingEnabled {
-            Logger.setLogLevel(level: .debug)
-        }
+        Logger.configure(
+            loggingEnabled: self.mutableConfig.loggingEnabled,
+            debugLoggingEnabled: self.mutableConfig.debugLoggingEnabled,
+            logLevelStr: self.mutableConfig.logLevel
+        )
         
         // Create HTTP client
-        let httpClient = HttpClient(config: config)
+        let httpClient = HttpClient(config: self.mutableConfig.config)
         self.httpClient = httpClient
-        
-        // Create battery manager
-        let batteryManager = BatteryManager.shared
-        self.batteryManager = batteryManager
         
         // Create user manager
         let userManager = UserManager(user: CFUser())
@@ -101,9 +99,16 @@ public class CFClient: AppStateListener, BatteryStateListener {
         let backgroundStateMonitor = DefaultBackgroundStateMonitor()
         self.backgroundStateMonitor = backgroundStateMonitor
         
-        // Create connection manager
-        let connectionManager = DefaultConnectionManager(httpClient: httpClient, config: config)
-        self.connectionManager = connectionManager
+        // Initialize EnvironmentAttributesCollector based on config
+        if self.mutableConfig.autoEnvAttributesEnabled {
+            EnvironmentAttributesCollector.initializeShared(backgroundStateMonitor: backgroundStateMonitor)
+        } else {
+            Logger.info("Auto environment attributes collection disabled by config.")
+        }
+
+        // Create connection manager - ensure it's DefaultConnectionManager for the interface
+        let connManager = DefaultConnectionManager(httpClient: httpClient, config: self.mutableConfig.config)
+        self.connectionManager = connManager // Store as ConnectionManagerInterface
         
         // Create listener manager
         let listenerManager = DefaultListenerManager()
@@ -112,32 +117,33 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Create summary manager
         let summaryManager = SummaryManager(
             httpClient: httpClient,
-            user: userManager, 
-            config: config
+            user: userManager,
+            config: self.mutableConfig.config
         )
         self.summaryManager = summaryManager
         
-        // Create config fetcher
-        let configFetcher = ConfigFetcher(
+        // Create and store config fetcher
+        let fetcher = ConfigFetcher(
             httpClient: httpClient,
-            config: config,
+            config: self.mutableConfig.config,
             user: userManager.getUser()
         )
+        self.configFetcher = fetcher // Store the instance
         
         // Create config manager with correct parameters
-        let configManager = ConfigManagerImpl(
-            configFetcher: configFetcher,
+        let confManager = ConfigManagerImpl(
+            configFetcher: self.configFetcher, // Pass the stored fetcher
             clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
             listenerManager: listenerManager,
-            config: config,
+            config: self.mutableConfig.config,
             summaryManager: summaryManager
         )
-        self.configManager = configManager
+        self.configManager = confManager
         
         // Create event tracker with session ID
         let sessionId = UUID().uuidString
         let eventTracker = EventTracker(
-            config: config,
+            config: self.mutableConfig.config,
             user: userManager,
             sessionId: sessionId,
             httpClient: httpClient,
@@ -145,25 +151,31 @@ public class CFClient: AppStateListener, BatteryStateListener {
         )
         self.eventTracker = eventTracker
         
+        // Initial offline mode setup from config
+        if self.mutableConfig.offlineMode {
+            self.configFetcher.setOffline(true)
+            self.connectionManager.setOfflineMode(offlineMode: true)
+            Logger.info("CFClient initialized in offline mode based on config.")
+        }
+
         setupListeners()
+        self.mutableConfig.addConfigChangeListener(self)
     }
     
     // This must be public to be accessible from Demo project
-public init(config: CFConfig, user: CFUser) {
-        self.config = config
+    public init(config: CFConfig, user: CFUser) {
+        self.mutableConfig = MutableCFConfig(initConfig: config)
         
         // Setup logger
-        if config.debugLoggingEnabled {
-            Logger.setLogLevel(level: .debug)
-        }
+        Logger.configure(
+            loggingEnabled: self.mutableConfig.loggingEnabled,
+            debugLoggingEnabled: self.mutableConfig.debugLoggingEnabled,
+            logLevelStr: self.mutableConfig.logLevel
+        )
         
         // Create HTTP client
-        let httpClient = HttpClient(config: config)
+        let httpClient = HttpClient(config: self.mutableConfig.config)
         self.httpClient = httpClient
-        
-        // Create battery manager
-        let batteryManager = BatteryManager.shared
-        self.batteryManager = batteryManager
         
         // Create user manager with provided user
         let userManager = UserManager(user: user)
@@ -173,9 +185,16 @@ public init(config: CFConfig, user: CFUser) {
         let backgroundStateMonitor = DefaultBackgroundStateMonitor()
         self.backgroundStateMonitor = backgroundStateMonitor
         
-        // Create connection manager
-        let connectionManager = DefaultConnectionManager(httpClient: httpClient, config: config)
-        self.connectionManager = connectionManager
+        // Initialize EnvironmentAttributesCollector based on config
+        if self.mutableConfig.autoEnvAttributesEnabled {
+            EnvironmentAttributesCollector.initializeShared(backgroundStateMonitor: backgroundStateMonitor)
+        } else {
+            Logger.info("Auto environment attributes collection disabled by config.")
+        }
+        
+        // Create connection manager - ensure it's DefaultConnectionManager for the interface
+        let connManager = DefaultConnectionManager(httpClient: httpClient, config: self.mutableConfig.config)
+        self.connectionManager = connManager // Store as ConnectionManagerInterface
         
         // Create listener manager
         let listenerManager = DefaultListenerManager()
@@ -184,40 +203,49 @@ public init(config: CFConfig, user: CFUser) {
         // Create summary manager
         let summaryManager = SummaryManager(
             httpClient: httpClient,
-            user: userManager, 
-            config: config
+            user: userManager,
+            config: self.mutableConfig.config
         )
         self.summaryManager = summaryManager
         
-        // Create config fetcher
-        let configFetcher = ConfigFetcher(
+        // Create and store config fetcher
+        let fetcher = ConfigFetcher(
             httpClient: httpClient,
-            config: config,
-            user: user
+            config: self.mutableConfig.config,
+            user: user // Use the provided user
         )
+        self.configFetcher = fetcher // Store the instance
         
         // Create config manager with correct parameters
-        let configManager = ConfigManagerImpl(
-            configFetcher: configFetcher,
+        let confManager = ConfigManagerImpl(
+            configFetcher: self.configFetcher, // Pass the stored fetcher
             clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
             listenerManager: listenerManager,
-            config: config,
+            config: self.mutableConfig.config,
             summaryManager: summaryManager
         )
-        self.configManager = configManager
+        self.configManager = confManager
         
         // Create event tracker with session ID
         let sessionId = UUID().uuidString
         let eventTracker = EventTracker(
-            config: config,
+            config: self.mutableConfig.config,
             user: userManager,
             sessionId: sessionId,
             httpClient: httpClient,
             summaryManager: summaryManager
         )
         self.eventTracker = eventTracker
+
+        // Initial offline mode setup from config
+        if self.mutableConfig.offlineMode {
+            self.configFetcher.setOffline(true)
+            self.connectionManager.setOfflineMode(offlineMode: true)
+            Logger.info("CFClient initialized in offline mode based on config.")
+        }
         
         setupListeners()
+        self.mutableConfig.addConfigChangeListener(self)
     }
     
     private func setupListeners() {
@@ -228,10 +256,13 @@ public init(config: CFConfig, user: CFUser) {
         // Start monitoring background state
         backgroundStateMonitor.startMonitoring()
         
+        // Start periodic SDK settings check with the configured interval
+        configManager.startPeriodicSdkSettingsCheck(interval: mutableConfig.sdkSettingsCheckIntervalMs, initialCheck: true)
+        
         // Initialization complete
         isInitialized = true
         
-        Logger.info("🚀 CustomFit SDK initialized with configuration: \(config)")
+        Logger.info("🚀 CustomFit SDK initialized with configuration: \(mutableConfig.config)")
     }
     
     deinit {
@@ -267,15 +298,33 @@ public init(config: CFConfig, user: CFUser) {
     // MARK: - BatteryStateListener Implementation
     
     public func onBatteryStateChange(state: CFBatteryState) {
-        Logger.info("Battery state changed: level=\(state.level), isLow=\(state.isLow), isCharging=\(state.isCharging)")
-        
-        // Update polling intervals based on battery state
-        if state.isLow && !state.isCharging {
-            // Reduce polling frequency when battery is low
-            configManager.setLowPowerMode(enabled: true)
+        Logger.debug("CFClient: Battery state changed - Level: \(state.level), Low: \(state.isLow), Charging: \(state.isCharging)")
+        // Handle battery state changes, e.g., adjust polling intervals
+        if mutableConfig.useReducedPollingWhenBatteryLow && state.isLow && !state.isCharging {
+            Logger.info("Battery low, using reduced polling interval: \(mutableConfig.reducedPollingIntervalMs) ms")
+            do {
+                try configManager.restartPeriodicSdkSettingsCheck(interval: mutableConfig.reducedPollingIntervalMs, initialCheck: false)
+            } catch {
+                Logger.error("Failed to adjust polling for low battery: \(error.localizedDescription)")
+            }
         } else {
-            // Normal polling frequency
-            configManager.setLowPowerMode(enabled: false)
+            // Revert to normal background polling interval or foreground interval if app is in foreground
+            let currentAppState = backgroundStateMonitor.getCurrentAppState()
+            if currentAppState == .foreground {
+                 // If foreground, sdkSettingsCheckIntervalMs is typically used by resumePolling logic
+                 // For now, explicitly restart with sdkSettingsCheckIntervalMs if not low battery.
+                do {
+                    try configManager.restartPeriodicSdkSettingsCheck(interval: mutableConfig.sdkSettingsCheckIntervalMs, initialCheck: false)
+                } catch {
+                    Logger.error("Failed to adjust polling for foreground: \(error.localizedDescription)")
+                }
+            } else {
+                do {
+                    try configManager.restartPeriodicSdkSettingsCheck(interval: mutableConfig.backgroundPollingIntervalMs, initialCheck: false)
+                } catch {
+                    Logger.error("Failed to adjust polling for background: \(error.localizedDescription)")
+                }
+            }
         }
     }
     
@@ -559,5 +608,63 @@ private class ClosureConnectionStatusListener: ConnectionStatusListener {
     
     func onConnectionStatusChanged(newStatus: ConnectionStatus, info: ConnectionInformation) {
         callback(newStatus, info)
+    }
+}
+
+// MARK: - ConfigChangeListener
+extension CFClient: ConfigChangeListener {
+    public var id: String {
+        return "CFClient_ConfigChangeListener"
+    }
+
+    public func onConfigChanged(key: String) {
+        Logger.debug("CFClient: Detected configuration change for key - \(key)")
+        let newConfig = mutableConfig.config // Get the latest immutable config
+
+        // Mirroring Kotlin's CFClient.handleConfigChange behavior
+        switch key {
+        case "offlineMode":
+            self.configFetcher.setOffline(newConfig.offlineMode) // No cast needed
+            self.connectionManager.setOfflineMode(offlineMode: newConfig.offlineMode) // No cast needed
+            Logger.info("CFClient: Updated offline mode to: \(newConfig.offlineMode)")
+        case "sdkSettingsCheckIntervalMs", "backgroundPollingIntervalMs", "reducedPollingIntervalMs":
+            // Polling interval changes are handled by onBatteryStateChange and onAppStateChange
+            // or by directly calling restartPeriodicSdkSettingsCheck if needed.
+            // Here, we ensure the ConfigManager is using the primary interval if not otherwise adjusted.
+            // This logic might need refinement based on how ConfigManager prioritizes intervals.
+             Logger.info("CFClient: SDK settings check interval changed. ConfigManager will pick up new interval: \(newConfig.sdkSettingsCheckIntervalMs)")
+             do {
+                 try configManager.restartPeriodicSdkSettingsCheck(interval: newConfig.sdkSettingsCheckIntervalMs, initialCheck: true) // Or choose based on current state.
+             } catch {
+                 Logger.error("Failed to restart periodic SDK settings check: \(error.localizedDescription)")
+             }
+        case "networkConnectionTimeoutMs":
+            httpClient.updateConnectionTimeout(timeout: newConfig.networkConnectionTimeoutMs)
+            Logger.info("CFClient: Updated network connection timeout to \(newConfig.networkConnectionTimeoutMs) ms")
+        case "networkReadTimeoutMs":
+            httpClient.updateReadTimeout(timeout: newConfig.networkReadTimeoutMs)
+            Logger.info("CFClient: Updated network read timeout to \(newConfig.networkReadTimeoutMs) ms")
+        case "loggingEnabled", "debugLoggingEnabled", "logLevel":
+            Logger.configure(
+                loggingEnabled: newConfig.loggingEnabled,
+                debugLoggingEnabled: newConfig.debugLoggingEnabled,
+                logLevelStr: newConfig.logLevel
+            )
+            Logger.info("CFClient: Updated logging configuration.")
+        // Add other cases as needed for properties in CFConfig that sub-modules should react to.
+        default:
+            Logger.debug("CFClient: Configuration key \(key) changed, but no specific action defined in CFClient.")
+        }
+    }
+}
+
+// MARK: - Public API
+extension CFClient {
+    public func updateConfig(newConfig: CFConfig) {
+        let oldConfig = self.mutableConfig.config
+        if self.mutableConfig.updateConfig(newConfig) {
+             Logger.info("CFConfig updated. Old: \(oldConfig), New: \(newConfig)")
+             // The onConfigChanged(key:) will be called for each changed property by MutableCFConfig
+        }
     }
 } 

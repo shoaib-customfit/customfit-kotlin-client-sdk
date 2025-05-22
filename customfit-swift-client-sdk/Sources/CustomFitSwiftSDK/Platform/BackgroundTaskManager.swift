@@ -90,7 +90,7 @@ public protocol BackgroundTaskManager {
 }
 
 /// Default implementation of BackgroundTaskManager
-public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListener, BatteryStateListener, NetworkConnectivityObserver {
+public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListener, BatteryStateListener {
     
     // MARK: - Properties
     
@@ -109,9 +109,6 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListen
     /// Background state monitor
     private let backgroundStateMonitor: BackgroundStateMonitor
     
-    /// Network connectivity monitor
-    private let networkConnectivityMonitor: NetworkConnectivityMonitor
-    
     /// Thread-safe operations on task registry
     private let tasksLock = NSLock()
     
@@ -124,9 +121,6 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListen
     /// Current battery state
     private var batteryState: CFBatteryState
     
-    /// Current network state
-    private var networkState: ConnectionNetworkState = .unknown
-    
     #if os(iOS) || os(tvOS)
     /// Background task identifiers
     private var backgroundTaskIds = [String: UIBackgroundTaskIdentifier]()
@@ -137,36 +131,31 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListen
     /// Initialize a new background task manager
     /// - Parameters:
     ///   - backgroundStateMonitor: Background state monitor
-    ///   - networkConnectivityMonitor: Network connectivity monitor
     public init(
-        backgroundStateMonitor: BackgroundStateMonitor,
-        networkConnectivityMonitor: NetworkConnectivityMonitor
+        backgroundStateMonitor: BackgroundStateMonitor
     ) {
         self.backgroundStateMonitor = backgroundStateMonitor
-        self.networkConnectivityMonitor = networkConnectivityMonitor
         self.batteryState = CFBatteryState(isLow: false, isCharging: false, level: 1.0)
+        Logger.debug("DefaultBackgroundTaskManager initialized.")
     }
     
     /// Set up state monitoring
     public func setupStateMonitoring() {
         backgroundStateMonitor.addAppStateListener(listener: self)
         backgroundStateMonitor.addBatteryStateListener(listener: self)
-        networkConnectivityMonitor.addObserver(observer: self)
         
         // Set initial states
         appState = backgroundStateMonitor.getCurrentAppState()
         batteryState = backgroundStateMonitor.getCurrentBatteryState()
-        networkState = networkConnectivityMonitor.getCurrentNetworkState()
         
-        // Start network monitoring
-        networkConnectivityMonitor.startMonitoring()
+        Logger.debug("State monitoring setup. AppState: \(appState), BatteryState: \(batteryState)")
     }
     
     /// Clean up state monitoring
     public func cleanupStateMonitoring() {
         backgroundStateMonitor.removeAppStateListener(listener: self)
         backgroundStateMonitor.removeBatteryStateListener(listener: self)
-        networkConnectivityMonitor.removeObserver(observer: self)
+        Logger.debug("State monitoring cleaned up.")
     }
     
     // MARK: - AppStateListener Implementation
@@ -192,21 +181,6 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListen
         Logger.debug("Battery state changed: \(state)")
         
         batteryState = state
-    }
-    
-    // MARK: - NetworkConnectivityObserver Implementation
-    
-    /// Handle network state changes - implementation of NetworkConnectivityObserver
-    /// - Parameter state: The new network state
-    public func onNetworkStateChanged(state: ConnectionNetworkState) {
-        Logger.debug("Network state changed: \(state)")
-        
-        networkState = state
-        
-        // If network is now connected, check for delayed tasks
-        if state == .wifi || state == .cellular || state == .ethernet {
-            checkForDelayedTasks()
-        }
     }
     
     // MARK: - BackgroundTaskManager Protocol
@@ -359,17 +333,9 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListen
                 scheduleTimer(for: task) // Reschedule for later
                 return
             }
-            
-            // Check if task can run with current network state
-            let networkConnected = networkState == .wifi || networkState == .cellular || networkState == .ethernet
-            if task.requiresConnectivity && !networkConnected {
-                Logger.debug("Skipping task \(task.identifier) due to no network connectivity")
-                scheduleTimer(for: task) // Reschedule for later
-                return
-            }
         }
         
-        Logger.debug("Executing task: \(task.identifier)")
+        Logger.debug("Executing task: \(task.identifier). Ignoring constraints: \(ignoreConstraints)")
         
         // Begin background task for iOS
         #if os(iOS) || os(tvOS)

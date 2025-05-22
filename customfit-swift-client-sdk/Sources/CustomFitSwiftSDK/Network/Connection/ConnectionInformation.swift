@@ -33,57 +33,40 @@ public struct NetworkState {
     }
 }
 
-/// Information about a network connection
+/// Information about a network connection, mirroring Kotlin's ConnectionInformation
 public struct ConnectionInformation {
     /// Connection status
     public let status: ConnectionStatus
-    
-    /// Timestamp when the status was last changed
-    public let timestamp: Date
-    
-    /// Error message if applicable
-    public let errorMessage: String?
-    
-    /// Network state if applicable
-    public let networkState: NetworkState?
-    
+
+    /// When true, indicates the SDK was put in offline mode intentionally.
+    public let isOfflineMode: Bool
+
+    /// Last connection error message, if any.
+    public let lastError: String?
+
+    /// Timestamp of the last successful connection in milliseconds.
+    public let lastSuccessfulConnectionTimeMs: Int64? // Kotlin has non-optional Long, default 0
+
+    /// Number of consecutive connection failures.
+    public let failureCount: Int
+
+    /// Time of the next reconnection attempt in milliseconds.
+    public let nextReconnectTimeMs: Int64? // Kotlin has non-optional Long, default 0
+
     /// Initialize a new connection information
-    /// - Parameters:
-    ///   - status: Connection status
-    ///   - timestamp: Timestamp when the status was last changed
-    ///   - errorMessage: Error message if applicable
-    ///   - networkState: Network state if applicable
-    public init(
-        status: ConnectionStatus,
-        timestamp: Date = Date(),
-        errorMessage: String? = nil,
-        networkState: NetworkState? = nil
-    ) {
-        self.status = status
-        self.timestamp = timestamp
-        self.errorMessage = errorMessage
-        self.networkState = networkState
-    }
-    
-    /// Convenience initializer with detailed connection information
     public init(
         status: ConnectionStatus,
         isOfflineMode: Bool = false,
         lastError: String? = nil,
-        lastSuccessfulConnectionTimeMs: Int64? = nil,
+        lastSuccessfulConnectionTimeMs: Int64? = nil, // Default to nil to match optional type
         failureCount: Int = 0,
-        nextReconnectTimeMs: Int64? = nil,
-        connectionType: String? = nil
+        nextReconnectTimeMs: Int64? = nil // Default to nil to match optional type
     ) {
         self.status = status
-        self.timestamp = Date()
-        self.errorMessage = lastError
-        self.networkState = NetworkState(
-            connectionType: connectionType,
-            isOfflineMode: isOfflineMode,
-            lastSuccessfulConnectionTimeMs: lastSuccessfulConnectionTimeMs,
-            failureCount: failureCount,
-            nextReconnectTimeMs: nextReconnectTimeMs
-        )
+        self.isOfflineMode = isOfflineMode
+        self.lastError = lastError
+        self.lastSuccessfulConnectionTimeMs = lastSuccessfulConnectionTimeMs
+        self.failureCount = failureCount
+        self.nextReconnectTimeMs = nextReconnectTimeMs
     }
 } 

@@ -3,6 +3,15 @@ import Foundation
 /// Helper class for handling JSON serialization of complex objects
 public class JSONHelper {
     
+    /// Standard ISO 8601 date formatter (UTC with milliseconds).
+    private static let iso8601Formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.locale = Locale(identifier: "en_US_POSIX") // Essential for format consistency
+        return formatter
+    }()
+
     /// Convert any Swift object to a JSON-serializable value
     /// - Parameter value: Any Swift value
     /// - Returns: JSON-serializable value
@@ -14,12 +23,13 @@ public class JSONHelper {
         switch value {
         case let string as String:
             return string
-        case let number as NSNumber:
+        case let number as NSNumber: // Handles Int, Double, Bool (as 0/1) etc.
             return number
         case let bool as Bool:
-            return bool
+            return bool // Explicitly handle Bool to ensure true/false, not 0/1 unless NSNumber did that
         case let date as Date:
-            return CFConfigRequestSummary.timestampFormatter.string(from: date)
+            // Use ISO 8601 for loose dates converted via anyToJSON
+            return iso8601Formatter.string(from: date)
         case let array as [Any]:
             return array.map { anyToJSON($0) }.compactMap { $0 }
         case let dictionary as [String: Any]:
@@ -64,8 +74,11 @@ public class JSONHelper {
     /// - Returns: JSON data or nil if encoding failed
     public static func tryEncode<T: Encodable>(_ value: T) -> Data? {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .formatted(CFConfigRequestSummary.timestampFormatter)
-        
+        // Use standard ISO 8601 date encoding strategy for Codable types.
+        encoder.dateEncodingStrategy = .iso8601
+        // CFConfigRequestSummary.timestampFormatter is specific to that struct's string field.
+        // encoder.dateEncodingStrategy = .formatted(CFConfigRequestSummary.timestampFormatter)
+
         do {
             return try encoder.encode(value)
         } catch {
