@@ -4,31 +4,9 @@ import Foundation
 import UIKit
 #endif
 
-/// Protocol for a task that can be scheduled by the BackgroundTaskManager
-public protocol BackgroundTask {
-    /// Unique identifier for the task
-    var identifier: String { get }
-    
-    /// Minimum interval between executions in milliseconds
-    var intervalMs: Int64 { get }
-    
-    /// Whether the task requires connectivity
-    var requiresConnectivity: Bool { get }
-    
-    /// Whether the task should run even when battery is low
-    var runWhenLowBattery: Bool { get }
-    
-    /// Time when the task was last executed
-    var lastExecutionTime: Date? { get set }
-    
-    /// Execute the task
-    /// - Parameter completion: Completion handler called when the task is complete
-    func execute(completion: @escaping (Bool) -> Void)
-}
-
-/// Default implementation of BackgroundTask
-public class DefaultBackgroundTask: BackgroundTask {
-    /// Unique identifier for the task
+/// Background task definition
+public class BackgroundTask {
+    /// Unique identifier
     public let identifier: String
     
     /// Minimum interval between executions in milliseconds
@@ -78,7 +56,7 @@ public class DefaultBackgroundTask: BackgroundTask {
 }
 
 /// Protocol for managing background tasks
-public protocol BackgroundTaskManager: AppStateListener, BatteryStateListener, NetworkStateListener {
+public protocol BackgroundTaskManager {
     /// Schedule a task
     /// - Parameter task: The task to schedule
     /// - Returns: Whether the task was scheduled
@@ -103,12 +81,30 @@ public protocol BackgroundTaskManager: AppStateListener, BatteryStateListener, N
     /// - Parameter identifier: The task identifier
     /// - Returns: The next execution time
     func getNextExecutionTime(identifier: String) -> Date?
+    
+    /// Start background task manager
+    func start()
+    
+    /// Stop background task manager
+    func stop()
 }
 
 /// Default implementation of BackgroundTaskManager
-public class DefaultBackgroundTaskManager: BackgroundTaskManager {
+public class DefaultBackgroundTaskManager: BackgroundTaskManager, AppStateListener, BatteryStateListener, NetworkConnectivityObserver {
     
     // MARK: - Properties
+    
+    /// Registry of background tasks
+    private var tasks = [String: BackgroundTask]()
+    
+    /// Task executions
+    private var taskExecutions = [String: Date]()
+    
+    /// Task execution locks
+    private var locks = [String: NSLock]()
+    
+    /// Timers mapped by task identifier
+    private var timers = [String: Timer]()
     
     /// Background state monitor
     private let backgroundStateMonitor: BackgroundStateMonitor
@@ -116,46 +112,46 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// Network connectivity monitor
     private let networkConnectivityMonitor: NetworkConnectivityMonitor
     
-    /// Scheduled tasks
-    private var tasks: [String: BackgroundTask] = [:]
+    /// Thread-safe operations on task registry
+    private let tasksLock = NSLock()
     
-    /// Task timers
-    private var timers: [String: Timer] = [:]
-    
-    /// Thread-safe access to tasks and timers
+    /// General lock for other synchronized operations
     private let lock = NSLock()
-    
-    /// Current background task identifiers (iOS)
-    #if os(iOS) || os(tvOS)
-    private var backgroundTaskIds: [String: UIBackgroundTaskIdentifier] = [:]
-    #endif
     
     /// Current app state
     private var appState: AppState = .foreground
     
     /// Current battery state
-    private var batteryState: CFBatteryState = CFBatteryState(isLow: false, isCharging: true, level: 1.0)
+    private var batteryState: CFBatteryState
     
     /// Current network state
-    private var networkState: NetworkState = .unknown
+    private var networkState: ConnectionNetworkState = .unknown
+    
+    #if os(iOS) || os(tvOS)
+    /// Background task identifiers
+    private var backgroundTaskIds = [String: UIBackgroundTaskIdentifier]()
+    #endif
     
     // MARK: - Initialization
     
     /// Initialize a new background task manager
     /// - Parameters:
-    ///   - backgroundStateMonitor: The background state monitor
-    ///   - networkConnectivityMonitor: The network connectivity monitor
+    ///   - backgroundStateMonitor: Background state monitor
+    ///   - networkConnectivityMonitor: Network connectivity monitor
     public init(
         backgroundStateMonitor: BackgroundStateMonitor,
         networkConnectivityMonitor: NetworkConnectivityMonitor
     ) {
         self.backgroundStateMonitor = backgroundStateMonitor
         self.networkConnectivityMonitor = networkConnectivityMonitor
-        
-        // Register for state changes
+        self.batteryState = CFBatteryState(isLow: false, isCharging: false, level: 1.0)
+    }
+    
+    /// Set up state monitoring
+    public func setupStateMonitoring() {
         backgroundStateMonitor.addAppStateListener(listener: self)
         backgroundStateMonitor.addBatteryStateListener(listener: self)
-        networkConnectivityMonitor.addNetworkStateListener(listener: self)
+        networkConnectivityMonitor.addObserver(observer: self)
         
         // Set initial states
         appState = backgroundStateMonitor.getCurrentAppState()
@@ -164,18 +160,53 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
         
         // Start network monitoring
         networkConnectivityMonitor.startMonitoring()
-        
-        Logger.debug("BackgroundTaskManager initialized")
     }
     
-    deinit {
-        // Clean up all tasks
-        cancelAllTasks()
-        
-        // Remove listeners
+    /// Clean up state monitoring
+    public func cleanupStateMonitoring() {
         backgroundStateMonitor.removeAppStateListener(listener: self)
         backgroundStateMonitor.removeBatteryStateListener(listener: self)
-        networkConnectivityMonitor.removeNetworkStateListener(listener: self)
+        networkConnectivityMonitor.removeObserver(observer: self)
+    }
+    
+    // MARK: - AppStateListener Implementation
+    
+    /// Handle app state changes - implementation of AppStateListener
+    /// - Parameter state: The new app state
+    public func onAppStateChange(state: AppState) {
+        Logger.debug("App state changed: \(state)")
+        
+        appState = state
+        
+        // Check if tasks should run based on new state
+        if state == .foreground || state == .background {
+            checkForDelayedTasks()
+        }
+    }
+    
+    // MARK: - BatteryStateListener Implementation
+    
+    /// Handle battery state changes - implementation of BatteryStateListener
+    /// - Parameter state: The new battery state
+    public func onBatteryStateChange(state: CFBatteryState) {
+        Logger.debug("Battery state changed: \(state)")
+        
+        batteryState = state
+    }
+    
+    // MARK: - NetworkConnectivityObserver Implementation
+    
+    /// Handle network state changes - implementation of NetworkConnectivityObserver
+    /// - Parameter state: The new network state
+    public func onNetworkStateChanged(state: ConnectionNetworkState) {
+        Logger.debug("Network state changed: \(state)")
+        
+        networkState = state
+        
+        // If network is now connected, check for delayed tasks
+        if state == .wifi || state == .cellular || state == .ethernet {
+            checkForDelayedTasks()
+        }
     }
     
     // MARK: - BackgroundTaskManager Protocol
@@ -184,8 +215,8 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter task: The task to schedule
     /// - Returns: Whether the task was scheduled
     public func scheduleTask(task: BackgroundTask) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
         
         // Check if task is already scheduled
         if tasks[task.identifier] != nil {
@@ -208,8 +239,8 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter identifier: The task identifier
     /// - Returns: Whether the task was cancelled
     public func cancelTask(identifier: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
         
         return cancelTaskInternal(identifier: identifier)
     }
@@ -218,9 +249,9 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter identifier: The task identifier
     /// - Returns: Whether the task was executed
     public func executeTaskNow(identifier: String) -> Bool {
-        lock.lock()
+        tasksLock.lock()
         let task = tasks[identifier]
-        lock.unlock()
+        tasksLock.unlock()
         
         guard let task = task else {
             Logger.warning("Task not found: \(identifier)")
@@ -236,8 +267,8 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter identifier: The task identifier
     /// - Returns: Whether the task is scheduled
     public func isTaskScheduled(identifier: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
         
         return tasks[identifier] != nil
     }
@@ -246,8 +277,8 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter identifier: The task identifier
     /// - Returns: The next execution time
     public func getNextExecutionTime(identifier: String) -> Date? {
-        lock.lock()
-        defer { lock.unlock() }
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
         
         guard let task = tasks[identifier],
               let lastExecution = task.lastExecutionTime else {
@@ -257,45 +288,16 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
         return Date(timeIntervalSince1970: lastExecution.timeIntervalSince1970 + Double(task.intervalMs) / 1000.0)
     }
     
-    // MARK: - State Listener Implementations
-    
-    /// Handle app state changes
-    /// - Parameter state: The new app state
-    public func onAppStateChange(state: AppState) {
-        appState = state
-        
-        Logger.debug("App state changed: \(state == .background ? "background" : "foreground")")
-        
-        if state == .foreground {
-            // App came to foreground, check for delayed tasks
-            checkForDelayedTasks()
-        }
+    /// Start background task manager
+    public func start() {
+        // Setup monitoring
+        setupStateMonitoring()
     }
     
-    /// Handle battery state changes
-    /// - Parameter state: The new battery state
-    public func onBatteryStateChange(state: CFBatteryState) {
-        batteryState = state
-        
-        Logger.debug("Battery state changed: level=\(state.level), isLow=\(state.isLow), isCharging=\(state.isCharging)")
-        
-        // If battery is no longer low, check for delayed tasks
-        if !state.isLow || state.isCharging {
-            checkForDelayedTasks()
-        }
-    }
-    
-    /// Handle network state changes
-    /// - Parameter state: The new network state
-    public func onNetworkStateChanged(state: NetworkState) {
-        networkState = state
-        
-        Logger.debug("Network state changed: \(state)")
-        
-        // If network is now connected, check for delayed tasks
-        if state == .wifi || state == .cellular || state == .other {
-            checkForDelayedTasks()
-        }
+    /// Stop background task manager
+    public func stop() {
+        cancelAllTasks()
+        cleanupStateMonitoring()
     }
     
     // MARK: - Private Methods
@@ -304,8 +306,8 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
     /// - Parameter task: The task to schedule
     private func scheduleTimer(for task: BackgroundTask) {
         // Cancel existing timer
-        if let timer = timers[task.identifier] {
-            timer.invalidate()
+        if let existingTimer = timers[task.identifier] {
+            existingTimer.invalidate()
             timers[task.identifier] = nil
         }
         
@@ -326,9 +328,9 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
                 guard let self = self else { return }
                 
                 // Get the task from current tasks
-                self.lock.lock()
+                self.tasksLock.lock()
                 let task = self.tasks[task.identifier]
-                self.lock.unlock()
+                self.tasksLock.unlock()
                 
                 if let task = task {
                     self.executeTask(task: task)
@@ -359,7 +361,7 @@ public class DefaultBackgroundTaskManager: BackgroundTaskManager {
             }
             
             // Check if task can run with current network state
-            let networkConnected = networkState == .wifi || networkState == .cellular || networkState == .other
+            let networkConnected = networkState == .wifi || networkState == .cellular || networkState == .ethernet
             if task.requiresConnectivity && !networkConnected {
                 Logger.debug("Skipping task \(task.identifier) due to no network connectivity")
                 scheduleTimer(for: task) // Reschedule for later

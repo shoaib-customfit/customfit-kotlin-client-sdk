@@ -15,7 +15,7 @@ public protocol AllFlagsListener: AnyObject {
 /// Connection status listener protocol
 public protocol ConnectionStatusListener: AnyObject {
     /// Called when connection status changes
-    func onConnectionStatusChanged(status: ConnectionStatus, info: ConnectionInformation)
+    func onConnectionStatusChanged(newStatus: ConnectionStatus, info: ConnectionInformation)
 }
 
 /// ListenerManager protocol for managing feature flag and connection status listeners
@@ -46,6 +46,9 @@ public protocol ListenerManager {
     
     /// Notify connection status listeners
     func notifyConnectionStatusChange(status: ConnectionStatus, info: ConnectionInformation)
+    
+    /// Clear all registered listeners
+    func clearAllListeners()
 }
 
 /// Event listener management implementation
@@ -205,7 +208,7 @@ public class ListenerManagerImpl: ListenerManager {
         
         for listener in listeners {
             try? {
-                listener.onConnectionStatusChanged(status: status, info: info)
+                listener.onConnectionStatusChanged(newStatus: status, info: info)
             }()
         }
     }

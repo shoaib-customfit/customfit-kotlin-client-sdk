@@ -1,17 +1,12 @@
 import Foundation
 
-/// Result type for CustomFit operations
+/// Represents a result which can be either success or error
 public enum CFResult<Value> {
-    /// Represents a successful operation with a result
+    /// Success case with a value
     case success(value: Value)
     
-    /// Represents an error/failure result
-    case error(
-        message: String,
-        error: Error? = nil,
-        code: Int? = nil,
-        category: CFErrorCategory = .unknown
-    )
+    /// Error case with details
+    case error(message: String, error: Error? = nil, code: Int? = nil, category: CFErrorCategory = .unknown)
     
     /// Whether the result is a success
     public var isSuccess: Bool {
@@ -28,8 +23,25 @@ public enum CFResult<Value> {
         return !isSuccess
     }
     
-    /// Get the success value if available
-    public var value: Value? {
+    /// Get the value if success, throws an error if not
+    /// - Returns: The value
+    /// - Throws: CFError if result is error
+    public func get() throws -> Value {
+        switch self {
+        case .success(let value):
+            return value
+        case .error(let message, let error, let code, let category):
+            if let error = error {
+                throw error
+            } else {
+                throw CFError(code: code != nil ? CFErrorCode(rawValue: code!) : nil, message: message, category: category)
+            }
+        }
+    }
+    
+    /// Get the value if success, or nil if error
+    /// - Returns: The value or nil
+    public func getOrNull() -> Value? {
         switch self {
         case .success(let value):
             return value
@@ -38,50 +50,22 @@ public enum CFResult<Value> {
         }
     }
     
-    /// Get the error message if available
-    public var errorMessage: String? {
+    /// Get the value if success, or default value if error
+    /// - Parameter defaultValue: The default value
+    /// - Returns: The value or default value
+    public func getOrDefault(_ defaultValue: Value) -> Value {
         switch self {
-        case .success:
-            return nil
-        case .error(let message, _, _, _):
-            return message
+        case .success(let value):
+            return value
+        case .error:
+            return defaultValue
         }
     }
     
-    /// Get the error if available
-    public var error: Error? {
-        switch self {
-        case .success:
-            return nil
-        case .error(_, let error, _, _):
-            return error
-        }
-    }
-    
-    /// Get the error code if available
-    public var errorCode: Int? {
-        switch self {
-        case .success:
-            return nil
-        case .error(_, _, let code, _):
-            return code
-        }
-    }
-    
-    /// Get the error category if available
-    public var errorCategory: CFErrorCategory? {
-        switch self {
-        case .success:
-            return nil
-        case .error(_, _, _, let category):
-            return category
-        }
-    }
-    
-    /// Map success value to another type
-    /// - Parameter transform: Transform function
-    /// - Returns: New result with transformed value
-    public func map<T>(_ transform: (Value) -> T) -> CFResult<T> {
+    /// Maps the value if success
+    /// - Parameter transform: The transform function
+    /// - Returns: A new result with transformed value
+    public func map<NewValue>(_ transform: (Value) -> NewValue) -> CFResult<NewValue> {
         switch self {
         case .success(let value):
             return .success(value: transform(value))
@@ -90,13 +74,30 @@ public enum CFResult<Value> {
         }
     }
     
-    /// Creates a Success result with the given value
-    public static func success(value: Value) -> CFResult<Value> {
+    /// Maps the value with a potentially failing transform
+    /// - Parameter transform: The transform function that may throw
+    /// - Returns: A new result with transformed value or error
+    public func flatMap<NewValue>(_ transform: (Value) throws -> NewValue) -> CFResult<NewValue> {
+        switch self {
+        case .success(let value):
+            do {
+                let newValue = try transform(value)
+                return .success(value: newValue)
+            } catch {
+                return .error(message: "Transform failed: \(error.localizedDescription)", error: error)
+            }
+        case .error(let message, let error, let code, let category):
+            return .error(message: message, error: error, code: code, category: category)
+        }
+    }
+    
+    /// Factory methods to create success results
+    public static func createSuccess(value: Value) -> CFResult<Value> {
         return .success(value: value)
     }
     
-    /// Creates an Error result
-    public static func error(
+    /// Factory method to create error results
+    public static func createError(
         message: String,
         error: Error? = nil,
         code: Int? = nil,
@@ -105,98 +106,45 @@ public enum CFResult<Value> {
         return .error(message: message, error: error, code: code, category: category)
     }
     
-    // MARK: - Factory Methods
+    /// Run operation and wrap result
+    /// - Parameter action: The action to run
+    /// - Returns: CFResult containing result or error
+    public static func of<T>(_ action: () throws -> T) -> CFResult<T> {
+        do {
+            let result = try action()
+            return CFResult<T>.success(value: result)
+        } catch let error as CFError {
+            return CFResult<T>.error(
+                message: error.message,
+                error: error,
+                code: error.code?.rawValue,
+                category: error.category
+            )
+        } catch {
+            return CFResult<T>.error(message: error.localizedDescription, error: error)
+        }
+    }
     
-    /// Creates a CFResult from a Swift Result
-    public static func from(result: Result<Value, Error>, errorMessage: String = "Operation failed") -> CFResult<Value> {
+    /// Convert from Result<T, Error>
+    /// - Parameter result: Swift standard Result
+    /// - Returns: Equivalent CFResult
+    public static func from<T, E: Error>(_ result: Result<T, E>, errorMessage: String? = nil) -> CFResult<T> {
         switch result {
         case .success(let value):
-            return .success(value: value)
+            return CFResult<T>.success(value: value)
         case .failure(let error):
-            return .error(message: errorMessage, error: error)
+            return CFResult<T>.error(
+                message: errorMessage ?? error.localizedDescription,
+                error: error
+            )
         }
     }
     
-    // MARK: - Accessors
+    // MARK: - Callback Handlers
     
-    /// Returns the success value or nil if this is an error
-    public func getOrNil() -> Value? {
-        return value
-    }
-    
-    /// Returns the success value or executes the default function if this is an error
-    public func getOrElse(_ defaultHandler: (String, Error?, Int?, CFErrorCategory) -> Value) -> Value {
-        switch self {
-        case .success(let value):
-            return value
-        case .error(let message, let error, let code, let category):
-            return defaultHandler(message, error, code, category)
-        }
-    }
-    
-    /// Returns the success value or the default value if this is an error
-    public func getOrDefault(_ defaultValue: Value) -> Value {
-        return value ?? defaultValue
-    }
-    
-    /// Returns the success value or throws the error
-    /// - Throws: The wrapped error or a CFError if no error was provided
-    /// - Returns: The success value
-    public func getOrThrow() throws -> Value {
-        switch self {
-        case .success(let value):
-            return value
-        case .error(let message, let error, let code, let category):
-            if let error = error {
-                throw error
-            } else {
-                throw CFError(message: message, code: code, category: category)
-            }
-        }
-    }
-    
-    /// Converts this result to Swift's Result type
-    public func toResult() -> Result<Value, Error> {
-        switch self {
-        case .success(let value):
-            return .success(value)
-        case .error(let message, let error, let code, let category):
-            if let error = error {
-                return .failure(error)
-            } else {
-                return .failure(CFError(message: message, code: code, category: category))
-            }
-        }
-    }
-    
-    // MARK: - Transformations
-    
-    /// Transform a success result using the given transform function that may itself fail
-    public func flatMap<NewValue>(_ transform: (Value) -> CFResult<NewValue>) -> CFResult<NewValue> {
-        switch self {
-        case .success(let value):
-            return transform(value)
-        case .error(let message, let error, let code, let category):
-            return .error(message: message, error: error, code: code, category: category)
-        }
-    }
-    
-    /// Process the result with respective handlers for success and error
-    public func fold<NewValue>(
-        onSuccess: (Value) -> NewValue,
-        onError: (String, Error?, Int?, CFErrorCategory) -> NewValue
-    ) -> NewValue {
-        switch self {
-        case .success(let value):
-            return onSuccess(value)
-        case .error(let message, let error, let code, let category):
-            return onError(message, error, code, category)
-        }
-    }
-    
-    // MARK: - Side-effects
-    
-    /// Executes the given action if this is a success
+    /// Execute action if result is success
+    /// - Parameter action: Action to execute with value
+    /// - Returns: Same result for chaining
     @discardableResult
     public func onSuccess(_ action: (Value) -> Void) -> CFResult<Value> {
         if case .success(let value) = self {
@@ -205,7 +153,9 @@ public enum CFResult<Value> {
         return self
     }
     
-    /// Executes the given action if this is an error
+    /// Execute action if result is error
+    /// - Parameter action: Action to execute with error details
+    /// - Returns: Same result for chaining
     @discardableResult
     public func onError(_ action: (String, Error?, Int?, CFErrorCategory) -> Void) -> CFResult<Value> {
         if case .error(let message, let error, let code, let category) = self {
@@ -214,26 +164,37 @@ public enum CFResult<Value> {
         return self
     }
     
-    /// Executes an action on both success and error
-    @discardableResult
-    public func onComplete(action: (CFResult<Value>) -> Void) -> CFResult<Value> {
-        action(self)
-        return self
+    /// Tries to extract an error or creates a generic one
+    /// - Returns: The contained error or a generic one
+    public func toError() -> Error {
+        switch self {
+        case .error(let message, let error, let code, let category):
+            if let error = error {
+                return error
+            } else {
+                if let code = code {
+                    return CFError(code: CFErrorCode(rawValue: code), message: message, category: category)
+                } else {
+                    return CFError(code: nil as CFErrorCode?, message: message, category: category)
+                }
+            }
+        case .success:
+            return CFError(code: nil as CFErrorCode?, message: "Cannot convert success to error", category: .unknown)
+        }
     }
     
-    /// Wraps any errors from the given operation in a CFResult
-    public static func catching(action: () throws -> Value) -> CFResult<Value> {
-        do {
-            let result = try action()
-            return .success(value: result)
-        } catch let error as CFError {
+    /// Create result from error
+    /// - Parameter error: Error object
+    /// - Returns: Error result
+    public static func failure(_ error: Error) -> CFResult<Value> {
+        if let cfError = error as? CFError {
             return .error(
-                message: error.message,
+                message: error.localizedDescription,
                 error: error,
-                code: error.code,
-                category: error.category
+                code: cfError.code?.rawValue,
+                category: cfError.category
             )
-        } catch {
+        } else {
             return .error(message: error.localizedDescription, error: error)
         }
     }
@@ -247,20 +208,6 @@ extension CFResult {
         case .success(let value):
             return .success(value: value)
         case .failure(let error):
-            return .error(message: error.localizedDescription, error: error)
-        }
-    }
-    
-    /// Converts an Error into a CFResult.error
-    public static func failure(_ error: Error) -> CFResult<Value> {
-        if let cfError = error as? CFError {
-            return .error(
-                message: error.localizedDescription,
-                error: error,
-                code: cfError.code.rawValue,
-                category: cfError.category
-            )
-        } else {
             return .error(message: error.localizedDescription, error: error)
         }
     }

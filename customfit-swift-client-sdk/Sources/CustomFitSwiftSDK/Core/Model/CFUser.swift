@@ -1,15 +1,15 @@
 import Foundation
 
 /// Represents a user in the CustomFit system
-public class CFUser {
+public class CFUser: Codable {
     /// User ID
-    private var userId: String?
+    public private(set) var userId: String?
     
     /// Device ID
-    private var deviceId: String?
+    public private(set) var deviceId: String?
     
     /// Anonymous ID
-    private var anonymousId: String?
+    public private(set) var anonymousId: String?
     
     /// Custom attributes
     private var attributes: [String: Any] = [:]
@@ -99,6 +99,37 @@ public class CFUser {
         return result
     }
     
+    /// Convert user data to a map for API requests
+    /// Based on the Kotlin implementation
+    public func toUserMap() -> [String: Any] {
+        var updatedProperties = attributes
+        
+        // Add device context if available
+        if let deviceContext = deviceContext {
+            updatedProperties["device"] = deviceContext.toDictionary()
+        }
+        
+        // Add application info if available
+        if let appInfo = applicationInfo {
+            updatedProperties["application"] = appInfo.toDictionary()
+        }
+        
+        var result: [String: Any] = [:]
+        
+        // Add user identification fields
+        if let userId = userId {
+            result["user_customer_id"] = userId
+        }
+        
+        // Add anonymous status (default to false)
+        result["anonymous"] = anonymousId != nil && userId == nil
+        
+        // Add properties with device and app info 
+        result["properties"] = updatedProperties
+        
+        return result
+    }
+    
     /// Get evaluation context for feature evaluation
     /// - Returns: Evaluation context
     public func getEvaluationContext() -> EvaluationContext {
@@ -184,5 +215,59 @@ public class CFUser {
         copy.deviceContext = deviceContext
         copy.applicationInfo = applicationInfo
         return copy
+    }
+    
+    /// Create a default user
+    /// - Returns: A default user for system operations
+    public static func defaultUser() -> CFUser {
+        return CFUser(
+            userId: nil,
+            deviceId: UUID().uuidString,
+            anonymousId: UUID().uuidString,
+            attributes: [:]
+        )
+    }
+    
+    // MARK: - Codable implementation
+    
+    private enum CodingKeys: String, CodingKey {
+        case userId
+        case deviceId
+        case anonymousId
+        case attributes
+        case deviceContext
+        case applicationInfo
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encodeIfPresent(userId, forKey: .userId)
+        try container.encodeIfPresent(deviceId, forKey: .deviceId)
+        try container.encodeIfPresent(anonymousId, forKey: .anonymousId)
+        try container.encodeIfPresent(deviceContext, forKey: .deviceContext)
+        try container.encodeIfPresent(applicationInfo, forKey: .applicationInfo)
+        
+        // Encode attributes as a Data object
+        let attributesData = try JSONSerialization.data(withJSONObject: attributes)
+        try container.encode(attributesData, forKey: .attributes)
+    }
+    
+    public required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        userId = try container.decodeIfPresent(String.self, forKey: .userId)
+        deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
+        anonymousId = try container.decodeIfPresent(String.self, forKey: .anonymousId)
+        deviceContext = try container.decodeIfPresent(DeviceContext.self, forKey: .deviceContext)
+        applicationInfo = try container.decodeIfPresent(ApplicationInfo.self, forKey: .applicationInfo)
+        
+        // Decode attributes from Data
+        let attributesData = try container.decode(Data.self, forKey: .attributes)
+        if let decodedAttributes = try JSONSerialization.jsonObject(with: attributesData) as? [String: Any] {
+            attributes = decodedAttributes
+        } else {
+            attributes = [:]
+        }
     }
 } 

@@ -1,303 +1,149 @@
 import Foundation
 
-/// Utility for retrying operations with configurable backoff
+/// Utility for retrying operations with exponential backoff
 public class RetryUtil {
-    
-    // MARK: - Constants
-    
-    /// Default number of retry attempts
-    public static let DEFAULT_MAX_ATTEMPTS = 3
-    
-    /// Default initial delay between retries (200ms)
-    public static let DEFAULT_INITIAL_DELAY_MS: Int64 = 200
-    
-    /// Default maximum delay between retries (10s)
-    public static let DEFAULT_MAX_DELAY_MS: Int64 = 10000
-    
-    /// Default backoff multiplier for exponential backoff
-    public static let DEFAULT_BACKOFF_MULTIPLIER = 2.0
-    
-    /// Default jitter factor to add randomness to delays (0-1)
-    public static let DEFAULT_JITTER_FACTOR = 0.2
-    
-    // MARK: - Retry Utilities
-    
-    /// Execute operation with retry logic (synchronous version)
-    ///
+    /// Retry an operation with exponential backoff
     /// - Parameters:
-    ///   - maxAttempts: Maximum number of retry attempts
-    ///   - initialDelayMs: Initial delay between retries in milliseconds
-    ///   - maxDelayMs: Maximum delay between retries in milliseconds
-    ///   - backoffMultiplier: Multiplier for exponential backoff
-    ///   - jitterFactor: Random factor to add jitter to delays (0-1)
-    ///   - retryIf: Predicate to determine if error is retryable
-    ///   - operation: Operation to execute
-    /// - Returns: Result of the operation
-    /// - Throws: Last error if all attempts fail
+    ///   - maxAttempts: Maximum number of attempts
+    ///   - delay: Initial delay in milliseconds
+    ///   - maxDelay: Maximum delay in milliseconds
+    ///   - factor: Backoff factor (multiplier for next delay)
+    ///   - jitter: Jitter factor (0.0-1.0) to add randomness to delay
+    ///   - operation: The operation to retry
+    /// - Returns: The result of the operation
     public static func withRetry<T>(
-        maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
-        initialDelayMs: Int64 = DEFAULT_INITIAL_DELAY_MS,
-        maxDelayMs: Int64 = DEFAULT_MAX_DELAY_MS,
-        backoffMultiplier: Double = DEFAULT_BACKOFF_MULTIPLIER,
-        jitterFactor: Double = DEFAULT_JITTER_FACTOR,
-        retryIf: ((Error) -> Bool)? = nil,
+        maxAttempts: Int = 3,
+        delay: Int = 100,
+        maxDelay: Int = 10000,
+        factor: Double = 2.0,
+        jitter: Double = 0.2,
         operation: () throws -> T
     ) throws -> T {
-        var attempt = 0
         var lastError: Error?
-        var currentDelay = initialDelayMs
+        var currentDelay = delay
         
-        while attempt < maxAttempts {
+        for attempt in 1...maxAttempts {
             do {
-                // If not first attempt, log the retry
-                if attempt > 0 {
-                    Logger.debug("Retry attempt \(attempt)/\(maxAttempts) after \(currentDelay)ms delay")
-                }
-                
-                // Execute the operation
-                let result = try operation()
-                
-                // If successful, log success after retry (if not first attempt)
-                if attempt > 0 {
-                    Logger.debug("Operation succeeded after \(attempt) retries")
-                }
-                
-                return result
-            } catch let error {
+                // Try the operation
+                return try operation()
+            } catch {
                 lastError = error
                 
-                // Check if error is retryable
-                let isRetryable = retryIf?(error) ?? true
-                
-                // If not retryable or last attempt, don't retry
-                if !isRetryable || attempt >= maxAttempts - 1 {
+                // If this was the last attempt, don't delay
+                if attempt == maxAttempts {
                     break
                 }
                 
-                // Log the error and retry
-                Logger.debug("Operation failed (attempt \(attempt + 1)/\(maxAttempts)): \(error.localizedDescription)")
+                // Add jitter to delay
+                let jitterAmount = Double(currentDelay) * jitter
+                let jitterRange = -jitterAmount...jitterAmount
+                let jitteredDelay = currentDelay + Int(jitterRange.lowerBound + (jitterRange.upperBound - jitterRange.lowerBound) * Double.random(in: 0...1))
                 
-                // Sleep for the current delay
-                Thread.sleep(forTimeInterval: TimeInterval(currentDelay) / 1000.0)
+                // Sleep for the calculated delay
+                Thread.sleep(forTimeInterval: TimeInterval(jitteredDelay) / 1000.0)
                 
-                // Calculate next delay with exponential backoff and jitter
-                let nextDelay = calculateNextDelay(
-                    currentDelay: currentDelay,
-                    maxDelayMs: maxDelayMs,
-                    backoffMultiplier: backoffMultiplier,
-                    jitterFactor: jitterFactor
-                )
-                
-                currentDelay = nextDelay
-                attempt += 1
+                // Increase delay for next attempt, but cap it
+                currentDelay = min(maxDelay, Int(Double(currentDelay) * factor))
             }
         }
         
-        // All attempts failed
-        Logger.warning("Operation failed after \(maxAttempts) attempts")
+        // If we reached here, all attempts failed
         throw lastError ?? NSError(domain: "RetryUtil", code: -1, userInfo: [NSLocalizedDescriptionKey: "All retry attempts failed"])
     }
     
-    /// Execute async operation with retry logic
-    ///
+    /// Retry an asynchronous operation with exponential backoff
     /// - Parameters:
-    ///   - maxAttempts: Maximum number of retry attempts
-    ///   - initialDelayMs: Initial delay between retries in milliseconds
-    ///   - maxDelayMs: Maximum delay between retries in milliseconds
-    ///   - backoffMultiplier: Multiplier for exponential backoff
-    ///   - jitterFactor: Random factor to add jitter to delays (0-1)
-    ///   - retryIf: Predicate to determine if error is retryable
-    ///   - operation: Async operation to execute
-    ///   - completion: Completion handler with result or error
+    ///   - maxAttempts: Maximum number of attempts
+    ///   - delay: Initial delay in milliseconds
+    ///   - maxDelay: Maximum delay in milliseconds
+    ///   - factor: Backoff factor (multiplier for next delay)
+    ///   - jitter: Jitter factor (0.0-1.0) to add randomness to delay
+    ///   - operation: The asynchronous operation to retry
+    /// - Returns: The result of the operation
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     public static func withRetryAsync<T>(
-        maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
-        initialDelayMs: Int64 = DEFAULT_INITIAL_DELAY_MS,
-        maxDelayMs: Int64 = DEFAULT_MAX_DELAY_MS,
-        backoffMultiplier: Double = DEFAULT_BACKOFF_MULTIPLIER,
-        jitterFactor: Double = DEFAULT_JITTER_FACTOR,
-        retryIf: ((Error) -> Bool)? = nil,
-        operation: @escaping (@escaping (Result<T, Error>) -> Void) -> Void,
-        completion: @escaping (Result<T, Error>) -> Void
-    ) {
-        executeRetryAsync(
-            maxAttempts: maxAttempts,
-            initialDelayMs: initialDelayMs,
-            maxDelayMs: maxDelayMs,
-            backoffMultiplier: backoffMultiplier,
-            jitterFactor: jitterFactor,
-            retryIf: retryIf,
-            attempt: 0,
-            currentDelay: initialDelayMs,
-            operation: operation,
-            completion: completion
-        )
+        maxAttempts: Int = 3,
+        delay: Int = 100,
+        maxDelay: Int = 10000,
+        factor: Double = 2.0,
+        jitter: Double = 0.2,
+        operation: @escaping (@escaping (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
+        return try await withCheckedThrowingContinuation { continuation in
+            retryAsync(
+                currentAttempt: 1,
+                maxAttempts: maxAttempts,
+                delay: delay,
+                maxDelay: maxDelay,
+                factor: factor,
+                jitter: jitter,
+                operation: operation,
+                continuation: continuation
+            )
+        }
     }
     
-    // MARK: - Helper Methods
-    
-    /// Execute the retry logic recursively for async operations
-    private static func executeRetryAsync<T>(
+    /// Helper for retrying an asynchronous operation recursively
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    private static func retryAsync<T>(
+        currentAttempt: Int,
         maxAttempts: Int,
-        initialDelayMs: Int64,
-        maxDelayMs: Int64,
-        backoffMultiplier: Double,
-        jitterFactor: Double,
-        retryIf: ((Error) -> Bool)?,
-        attempt: Int,
-        currentDelay: Int64,
+        delay: Int,
+        maxDelay: Int,
+        factor: Double,
+        jitter: Double,
         operation: @escaping (@escaping (Result<T, Error>) -> Void) -> Void,
-        completion: @escaping (Result<T, Error>) -> Void
+        continuation: CheckedContinuation<T, Error>
     ) {
-        // If not first attempt, log the retry
-        if attempt > 0 {
-            Logger.debug("Retry attempt \(attempt)/\(maxAttempts) after \(currentDelay)ms delay")
-        }
-        
-        // Execute the operation
         operation { result in
             switch result {
             case .success(let value):
-                // If successful, log success after retry (if not first attempt)
-                if attempt > 0 {
-                    Logger.debug("Operation succeeded after \(attempt) retries")
-                }
-                
-                completion(.success(value))
+                continuation.resume(returning: value)
                 
             case .failure(let error):
-                // Check if error is retryable
-                let isRetryable = retryIf?(error) ?? true
-                
-                // If not retryable or last attempt, don't retry
-                if !isRetryable || attempt >= maxAttempts - 1 {
-                    Logger.warning("Operation failed after \(attempt + 1) attempts: \(error.localizedDescription)")
-                    completion(.failure(error))
+                if currentAttempt >= maxAttempts {
+                    continuation.resume(throwing: error)
                     return
                 }
                 
-                // Log the error and retry
-                Logger.debug("Operation failed (attempt \(attempt + 1)/\(maxAttempts)): \(error.localizedDescription)")
-                
-                // Calculate next delay with exponential backoff and jitter
-                let nextDelay = calculateNextDelay(
-                    currentDelay: currentDelay,
-                    maxDelayMs: maxDelayMs,
-                    backoffMultiplier: backoffMultiplier,
-                    jitterFactor: jitterFactor
-                )
+                // Calculate next delay with jitter
+                let currentDelay = min(maxDelay, Int(pow(Double(delay), Double(currentAttempt)) * factor))
+                let jitterAmount = Double(currentDelay) * jitter
+                let jitterRange = -jitterAmount...jitterAmount
+                let jitteredDelay = currentDelay + Int(jitterRange.lowerBound + (jitterRange.upperBound - jitterRange.lowerBound) * Double.random(in: 0...1))
                 
                 // Schedule retry after delay
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(Int(currentDelay))) {
-                    executeRetryAsync(
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(jitteredDelay)) {
+                    retryAsync(
+                        currentAttempt: currentAttempt + 1,
                         maxAttempts: maxAttempts,
-                        initialDelayMs: initialDelayMs,
-                        maxDelayMs: maxDelayMs,
-                        backoffMultiplier: backoffMultiplier,
-                        jitterFactor: jitterFactor,
-                        retryIf: retryIf,
-                        attempt: attempt + 1,
-                        currentDelay: nextDelay,
+                        delay: delay,
+                        maxDelay: maxDelay,
+                        factor: factor,
+                        jitter: jitter,
                         operation: operation,
-                        completion: completion
+                        continuation: continuation
                     )
                 }
             }
         }
     }
     
-    /// Calculate the next retry delay with exponential backoff and jitter
-    private static func calculateNextDelay(
-        currentDelay: Int64,
-        maxDelayMs: Int64,
-        backoffMultiplier: Double,
-        jitterFactor: Double
-    ) -> Int64 {
-        // Calculate exponential backoff
-        let exponentialDelay = min(
-            Int64(Double(currentDelay) * backoffMultiplier),
-            maxDelayMs
-        )
-        
-        // Add jitter
-        let jitterRange = Double(exponentialDelay) * jitterFactor
-        let jitter = Int64(Double.random(in: -jitterRange...jitterRange))
-        
-        // Ensure delay is within bounds
-        return max(0, min(exponentialDelay + jitter, maxDelayMs))
-    }
-    
-    // MARK: - Convenience Methods
-    
-    /// Execute operation with timeout
-    ///
-    /// - Parameters:
-    ///   - timeoutMs: Timeout in milliseconds
-    ///   - operation: Operation to execute
-    /// - Returns: Result of the operation or nil if timed out
-    public static func withTimeout<T>(
-        timeoutMs: Int64,
-        operation: @escaping () throws -> T
-    ) -> T? {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: T?
-        var operationError: Error?
-        
-        // Execute operation in background
-        DispatchQueue.global().async {
-            do {
-                result = try operation()
-            } catch {
-                operationError = error
-            }
-            semaphore.signal()
-        }
-        
-        // Wait for completion or timeout
-        if semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs))) == .timedOut {
-            Logger.warning("Operation timed out after \(timeoutMs)ms")
-            return nil
-        }
-        
-        // If operation completed with error, log it
-        if let error = operationError {
-            Logger.warning("Operation failed with error: \(error.localizedDescription)")
-        }
-        
-        return result
-    }
-    
-    /// Execute async operation with timeout
-    ///
-    /// - Parameters:
-    ///   - timeoutMs: Timeout in milliseconds
-    ///   - operation: Async operation to execute
-    ///   - completion: Completion handler with result or nil if timed out
-    public static func withTimeoutAsync<T>(
-        timeoutMs: Int64,
-        operation: @escaping (@escaping (Result<T, Error>) -> Void) -> Void,
-        completion: @escaping (Result<T?, Error>?) -> Void
-    ) {
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
-        var completed = false
-        
-        // Set timeout
-        timer.schedule(deadline: .now() + .milliseconds(Int(timeoutMs)))
-        timer.setEventHandler {
-            if !completed {
-                completed = true
-                Logger.warning("Operation timed out after \(timeoutMs)ms")
-                completion(nil)
-                timer.cancel()
-            }
-        }
-        timer.resume()
-        
-        // Execute operation
-        operation { result in
-            if !completed {
-                completed = true
-                completion(result)
-                timer.cancel()
+    /// Transform a closure with completion handler into an async operation
+    /// - Parameter body: The closure with completion handler
+    /// - Returns: The result of the operation
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    public static func asyncOperation<T>(
+        body: @escaping (@escaping (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
+        return try await withCheckedThrowingContinuation { continuation in
+            body { result in
+                switch result {
+                case .success(let value):
+                    continuation.resume(returning: value)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }

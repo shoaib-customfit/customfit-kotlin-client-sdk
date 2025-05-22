@@ -75,10 +75,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         }
         
         // Create HTTP client
-        let httpClient = DefaultHttpClient(
-            connectionTimeoutMs: config.networkConnectionTimeoutMs,
-            readTimeoutMs: config.networkReadTimeoutMs
-        )
+        let httpClient = HttpClient(config: config)
         self.httpClient = httpClient
         
         // Create battery manager
@@ -101,26 +98,41 @@ public class CFClient: AppStateListener, BatteryStateListener {
         let listenerManager = DefaultListenerManager()
         self.listenerManager = listenerManager
         
-        // Create config manager
-        let configManager = ConfigManagerImpl(
-            user: userManager,
+        // Create summary manager
+        let summaryManager = SummaryManager(
+            httpClient: httpClient,
+            user: userManager, 
+            config: config
+        )
+        self.summaryManager = summaryManager
+        
+        // Create config fetcher
+        let configFetcher = ConfigFetcher(
             httpClient: httpClient,
             config: config,
-            connectionManager: connectionManager,
-            listenerManager: listenerManager
+            user: userManager.getUser()
+        )
+        
+        // Create config manager with correct parameters
+        let configManager = ConfigManagerImpl(
+            configFetcher: configFetcher,
+            clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
+            listenerManager: listenerManager,
+            config: config,
+            summaryManager: summaryManager
         )
         self.configManager = configManager
         
-        // Create event tracker
-        let eventTracker = EventTracker(config: config, httpClient: httpClient)
-        self.eventTracker = eventTracker
-        
-        // Create summary manager
-        let summaryManager = SummaryManager(
+        // Create event tracker with session ID
+        let sessionId = UUID().uuidString
+        let eventTracker = EventTracker(
             config: config,
-            httpClient: httpClient
+            user: userManager,
+            sessionId: sessionId,
+            httpClient: httpClient,
+            summaryManager: summaryManager
         )
-        self.summaryManager = summaryManager
+        self.eventTracker = eventTracker
         
         // Register for notifications
         backgroundStateMonitor.addAppStateListener(listener: self)
@@ -134,8 +146,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         
         // Track app start event
         eventTracker.trackEvent(
-            name: CFConstants.EventTypes.APP_START,
-            properties: nil
+            eventName: CFConstants.EventTypes.APP_START,
+            properties: [:]
         )
         
         Logger.info("🚀 CustomFit SDK initialized with configuration: \(config)")
@@ -154,8 +166,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Track app stop event if initialized
         if isInitialized {
             eventTracker.trackEvent(
-                name: CFConstants.EventTypes.APP_STOP,
-                properties: nil
+                eventName: CFConstants.EventTypes.APP_STOP,
+                properties: [:]
             )
         }
         
@@ -182,13 +194,13 @@ public class CFClient: AppStateListener, BatteryStateListener {
         switch state {
         case .background:
             eventTracker.trackEvent(
-                name: CFConstants.EventTypes.APP_BACKGROUND,
-                properties: nil
+                eventName: CFConstants.EventTypes.APP_BACKGROUND,
+                properties: [:]
             )
         case .foreground:
             eventTracker.trackEvent(
-                name: CFConstants.EventTypes.APP_FOREGROUND,
-                properties: nil
+                eventName: CFConstants.EventTypes.APP_FOREGROUND,
+                properties: [:]
             )
         }
     }
@@ -286,7 +298,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     ///   - name: Event name
     ///   - properties: Event properties
     public func trackEvent(name: String, properties: [String: Any]? = nil) {
-        eventTracker.trackEvent(name: name, properties: properties)
+        eventTracker.trackEvent(eventName: name, properties: properties)
     }
     
     /// Track a screen view
@@ -446,7 +458,7 @@ private class ClosureConnectionStatusListener: ConnectionStatusListener {
         self.callback = callback
     }
     
-    func onConnectionStatusChanged(status: ConnectionStatus, info: ConnectionInformation) {
-        callback(status, info)
+    func onConnectionStatusChanged(newStatus: ConnectionStatus, info: ConnectionInformation) {
+        callback(newStatus, info)
     }
 } 

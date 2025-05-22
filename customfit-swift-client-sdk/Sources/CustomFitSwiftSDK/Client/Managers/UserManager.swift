@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 /// User data management
-public class UserManager {
+public class UserManager: CFUserProvider {
     
     // MARK: - Properties
     
@@ -60,10 +60,12 @@ public class UserManager {
     }
     
     private func collectDeviceContext() -> DeviceContext {
-        // This would collect real device information using iOS APIs
-        // For now, we'll create a placeholder
+        let deviceId = UUID().uuidString
+        
+        #if os(iOS) || os(tvOS)
+        // iOS/tvOS specific device info
         return DeviceContext(
-            deviceId: UUID().uuidString,
+            deviceId: deviceId,
             deviceModel: UIDevice.current.model,
             deviceManufacturer: "Apple",
             osName: UIDevice.current.systemName,
@@ -73,8 +75,22 @@ public class UserManager {
             localeLanguage: Locale.current.languageCode,
             localeCountry: Locale.current.regionCode,
             timeZone: TimeZone.current.identifier
-            // Battery and network info would require more implementation
         )
+        #else
+        // macOS or other platforms
+        return DeviceContext(
+            deviceId: deviceId,
+            deviceModel: "Apple Device",
+            deviceManufacturer: "Apple",
+            osName: "macOS",
+            osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            screenWidth: 0,
+            screenHeight: 0,
+            localeLanguage: Locale.current.languageCode,
+            localeCountry: Locale.current.regionCode,
+            timeZone: TimeZone.current.identifier
+        )
+        #endif
     }
     
     private func collectApplicationInfo() -> ApplicationInfo {

@@ -25,6 +25,14 @@ public class EventStorageManager {
     /// Storage URL for events
     private let storageUrl: URL?
     
+    /// Events file URL
+    private var eventsFile: URL {
+        guard let storageUrl = storageUrl else {
+            fatalError("Storage URL not available")
+        }
+        return storageUrl.appendingPathComponent(EventStorageManager.EVENTS_FILE)
+    }
+    
     // MARK: - Initialization
     
     /// Initialize with configuration
@@ -56,18 +64,25 @@ public class EventStorageManager {
     
     // MARK: - Storage Methods
     
-    /// Store events to persistent storage
-    /// - Parameter events: Events to store
-    /// - Throws: Error if storage fails
-    public func storeEvents(events: [EventData]) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        
+    /// Create storage directory if it doesn't exist
+    /// - Throws: Error if directory creation fails
+    private func createStorageDirectoryIfNeeded() throws {
         guard let storageUrl = storageUrl else {
             throw NSError(domain: "EventStorageManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Storage directory not available"])
         }
         
-        let eventsFile = storageUrl.appendingPathComponent(EventStorageManager.EVENTS_FILE)
+        if !fileManager.fileExists(atPath: storageUrl.path) {
+            try fileManager.createDirectory(at: storageUrl, withIntermediateDirectories: true)
+            Logger.debug("Created event storage directory: \(storageUrl.path)")
+        }
+    }
+    
+    /// Store events to disk
+    /// - Parameter events: Events to store
+    /// - Throws: Error if storage fails
+    func storeEvents(events: [EventData]) throws {
+        // Create directory if needed
+        try createStorageDirectoryIfNeeded()
         
         // Convert events to dictionaries
         let eventDicts = events.map { $0.toDictionary() }
@@ -76,49 +91,40 @@ public class EventStorageManager {
         let data = try JSONSerialization.data(withJSONObject: eventDicts, options: [.prettyPrinted])
         
         // Write to file
-        try data.write(to: eventsFile, options: .atomic)
+        try data.write(to: eventsFile, options: .atomicWrite)
         
         Logger.debug("Stored \(events.count) events to file: \(eventsFile.path)")
     }
     
-    /// Load events from persistent storage
-    /// - Returns: Array of events
+    /// Load events from disk
+    /// - Returns: Loaded events
     /// - Throws: Error if loading fails
-    public func loadEvents() throws -> [EventData] {
-        lock.lock()
-        defer { lock.unlock() }
-        
-        guard let storageUrl = storageUrl else {
-            throw NSError(domain: "EventStorageManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Storage directory not available"])
-        }
-        
-        let eventsFile = storageUrl.appendingPathComponent(EventStorageManager.EVENTS_FILE)
-        
+    func loadEvents() throws -> [EventData] {
         // Check if file exists
-        guard fileManager.fileExists(atPath: eventsFile.path) else {
+        guard FileManager.default.fileExists(atPath: eventsFile.path) else {
+            Logger.debug("No events file exists at: \(eventsFile.path)")
             return []
         }
         
-        // Read file
+        // Read data
         let data = try Data(contentsOf: eventsFile)
         
         // Parse JSON
-        guard let eventDicts = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            throw NSError(domain: "EventStorageManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid JSON format in stored events"])
+        guard let eventDicts = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] else {
+            throw NSError(domain: "EventStorageManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid event data format"])
         }
         
-        // Convert dictionaries to events
+        // Convert to EventData objects
         var events = [EventData]()
         for dict in eventDicts {
             if let event = EventData.fromDictionary(dict) {
                 events.append(event)
             } else {
-                Logger.warning("Failed to parse event from dictionary: \(dict)")
+                Logger.warning("Failed to parse event from stored data")
             }
         }
         
         Logger.debug("Loaded \(events.count) events from file: \(eventsFile.path)")
-        
         return events
     }
     

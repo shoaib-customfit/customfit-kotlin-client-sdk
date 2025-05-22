@@ -1,4 +1,4 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.2
 import PackageDescription
 
 let package = Package(
@@ -18,7 +18,8 @@ let package = Package(
     targets: [
         .target(
             name: "CustomFitSwiftSDK",
-            dependencies: []),
+            dependencies: [],
+            path: "Sources/CustomFitSwiftSDK"),
         .testTarget(
             name: "CustomFitSwiftSDKTests",
             dependencies: ["CustomFitSwiftSDK"]),

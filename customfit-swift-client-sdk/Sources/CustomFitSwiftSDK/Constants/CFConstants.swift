@@ -27,6 +27,15 @@ public struct CFConstants {
         
         /// Path pattern for SDK settings JSON file
         public static let SDK_SETTINGS_PATH_PATTERN = "/%s/cf-sdk-settings.json"
+        
+        /// Path for event data
+        public static let EVENTS_PATH = "/v1/cfe"
+        
+        /// Path for summary data
+        public static let SUMMARIES_PATH = "/v1/summary"
+        
+        /// Path for config polling
+        public static let CONFIG_POLL_PATH = "/v1/config"
     }
     
     /// Default configuration values for events
@@ -90,6 +99,9 @@ public struct CFConstants {
         
         /// Circuit breaker reset timeout in milliseconds
         public static let CIRCUIT_BREAKER_RESET_TIMEOUT_MS = 30_000
+        
+        /// Default jitter factor for exponential backoff
+        public static let JITTER_FACTOR = 0.5
     }
     
     /// Background polling constants
@@ -102,6 +114,9 @@ public struct CFConstants {
         
         /// Default reduced polling interval when battery is low (milliseconds)
         public static let REDUCED_POLLING_INTERVAL_MS: Int64 = 7_200_000 // 2 hours
+        
+        /// Default reduced SDK settings check interval in milliseconds
+        public static let REDUCED_SDK_SETTINGS_CHECK_INTERVAL_MS: Int64 = 600_000 // 10 minutes
     }
     
     /// Logging constants

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Application information for context
-public struct ApplicationInfo {
-    /// Application identifier
+/// Application information
+public struct ApplicationInfo: Codable {
+    /// Application ID
     public let appId: String?
     
     /// Application version
@@ -15,14 +15,14 @@ public struct ApplicationInfo {
     public let appName: String?
     
     /// SDK version
-    public let sdkVersion: String
+    public let sdkVersion: String?
     
-    /// SDK type (swift)
-    public let sdkType: String
+    /// SDK type
+    public let sdkType: String?
     
-    /// Initialize a new application info
+    /// Initialize with all fields
     /// - Parameters:
-    ///   - appId: Application identifier
+    ///   - appId: Application ID
     ///   - appVersion: Application version
     ///   - appBuild: Application build number
     ///   - appName: Application name
@@ -33,8 +33,8 @@ public struct ApplicationInfo {
         appVersion: String? = nil,
         appBuild: String? = nil,
         appName: String? = nil,
-        sdkVersion: String = CFConstants.General.DEFAULT_SDK_VERSION,
-        sdkType: String = "swift"
+        sdkVersion: String? = nil,
+        sdkType: String? = nil
     ) {
         self.appId = appId
         self.appVersion = appVersion
@@ -44,31 +44,33 @@ public struct ApplicationInfo {
         self.sdkType = sdkType
     }
     
-    /// Convert to dictionary
-    /// - Returns: Dictionary representation
+    /// Convert to dictionary representation
+    /// - Returns: Dictionary with application info properties
     public func toDictionary() -> [String: Any] {
-        var result: [String: Any] = [:]
+        var dict: [String: Any] = [:]
         
-        result["sdk_version"] = sdkVersion
-        result["sdk_type"] = sdkType
+        if let appId = appId { dict["app_id"] = appId }
+        if let appVersion = appVersion { dict["app_version"] = appVersion }
+        if let appBuild = appBuild { dict["app_build"] = appBuild }
+        if let appName = appName { dict["app_name"] = appName }
+        if let sdkVersion = sdkVersion { dict["sdk_version"] = sdkVersion }
+        if let sdkType = sdkType { dict["sdk_type"] = sdkType }
         
-        if let appId = appId {
-            result["id"] = appId
-        }
-        
-        if let appVersion = appVersion {
-            result["version"] = appVersion
-        }
-        
-        if let appBuild = appBuild {
-            result["build"] = appBuild
-        }
-        
-        if let appName = appName {
-            result["name"] = appName
-        }
-        
-        return result
+        return dict
+    }
+    
+    /// Create from dictionary representation
+    /// - Parameter dict: Dictionary with application info properties
+    /// - Returns: ApplicationInfo instance
+    public static func fromDictionary(_ dict: [String: Any]) -> ApplicationInfo {
+        return ApplicationInfo(
+            appId: dict["app_id"] as? String,
+            appVersion: dict["app_version"] as? String,
+            appBuild: dict["app_build"] as? String,
+            appName: dict["app_name"] as? String,
+            sdkVersion: dict["sdk_version"] as? String,
+            sdkType: dict["sdk_type"] as? String
+        )
     }
     
     /// Create a basic ApplicationInfo with current app details

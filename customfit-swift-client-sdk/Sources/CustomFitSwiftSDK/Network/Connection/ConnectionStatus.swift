@@ -13,4 +13,7 @@ public enum ConnectionStatus {
     
     /// Failed to connect to the server
     case failed
+    
+    /// Offline mode active
+    case offline
 } 

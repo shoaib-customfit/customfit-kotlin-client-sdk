@@ -1,190 +1,210 @@
 import Foundation
 
-/// Enhanced event tracking implementation matching Kotlin SDK functionality
+/// Manages tracking and sending of analytics events
 public class EventTracker {
     
     // MARK: - Constants
     
-    private static let SOURCE = "EventTracker"
+    /// Source identifier for logging
+    public static let SOURCE = "EventTracker"
+    
+    /// Default flush interval in ms (30 seconds)
+    static let DEFAULT_FLUSH_INTERVAL_MS: Int64 = 30000
+    
+    /// Default flush time threshold in seconds (60 seconds)
+    static let DEFAULT_FLUSH_TIME_SECONDS = 60
     
     // MARK: - Properties
     
-    private let sessionId: String
-    private let httpClient: HttpClient
-    private let user: UserManager
-    private let summaryManager: SummaryManager
+    /// Event queue
+    private let eventQueue = EventQueue()
+    
+    /// Config reference
     private let config: CFConfig
     
-    // Thread-safe atomic properties
-    private let eventsFlushTimeSecondsLock = NSLock()
-    private var _eventsFlushTimeSeconds: Int
+    /// User for events
+    private let user: CFUserProvider
     
-    private let eventsFlushIntervalMsLock = NSLock()
-    private var _eventsFlushIntervalMs: Int64
+    /// HTTP client for sending events
+    private let httpClient: HttpClient
     
-    // Queue and storage
-    private let eventQueue: ThreadSafeQueue<EventData>
+    /// Session ID for grouping events
+    private let sessionId: String
+    
+    /// Storage manager for persisting events
     private let eventStorageManager: EventStorageManager
     
-    // Timer management
-    private var flushTimer: Timer?
+    /// Summary manager reference
+    private let summaryManager: SummaryManager
+    
+    /// Background work queue
+    private let workQueue = DispatchQueue(label: "ai.customfit.EventTracker", qos: .utility)
+    
+    /// Lock for synchronized access
+    private let lock = NSLock()
+    
+    /// Lock for event flush timer
     private let timerLock = NSLock()
     
-    // Metrics tracking (thread-safe counters)
-    private let metricsLock = NSLock()
-    private var _totalEventsTracked: Int = 0
-    private var _totalEventsDropped: Int = 0
-    private var _totalEventsFlushed: Int = 0
-    private var _totalFlushes: Int = 0
-    private var _failedFlushes: Int = 0
-    
-    // Persistent event storage mutex
+    /// Lock for persisted events operations
     private let persistedEventsMutex = NSLock()
     
-    // Main Queue for operations to ensure thread safety
-    private let workQueue: DispatchQueue
+    /// Metrics lock for thread safety
+    private let metricsLock = NSLock()
     
-    // MARK: - Computed Properties
+    /// Timer for periodic event flushing
+    private var flushTimer: Timer?
     
-    /// Current flush time threshold in seconds
-    public var eventsFlushTimeSeconds: Int {
+    /// Last time events were flushed
+    private var lastFlushTime: Date = Date()
+    
+    /// Flush interval in milliseconds
+    private var flushIntervalMs: Int64 = DEFAULT_FLUSH_INTERVAL_MS
+    
+    /// Flush time threshold in seconds
+    private var flushTimeSeconds: Int = DEFAULT_FLUSH_TIME_SECONDS
+    
+    /// Events flush interval in milliseconds
+    private var eventsFlushIntervalMs: Int64 {
         get {
-            eventsFlushTimeSecondsLock.lock()
-            defer { eventsFlushTimeSecondsLock.unlock() }
-            return _eventsFlushTimeSeconds
-        }
-        set {
-            eventsFlushTimeSecondsLock.lock()
-            _eventsFlushTimeSeconds = newValue
-            eventsFlushTimeSecondsLock.unlock()
+            lock.lock()
+            defer { lock.unlock() }
+            return flushIntervalMs
         }
     }
     
-    /// Current flush interval in milliseconds
-    public var eventsFlushIntervalMs: Int64 {
+    /// Events flush time threshold in seconds
+    private var eventsFlushTimeSeconds: Int {
         get {
-            eventsFlushIntervalMsLock.lock()
-            defer { eventsFlushIntervalMsLock.unlock() }
-            return _eventsFlushIntervalMs
-        }
-        set {
-            eventsFlushIntervalMsLock.lock()
-            _eventsFlushIntervalMs = newValue
-            eventsFlushIntervalMsLock.unlock()
+            lock.lock()
+            defer { lock.unlock() }
+            return flushTimeSeconds
         }
     }
     
-    /// Total events tracked (thread-safe)
+    // MARK: - Metrics
+    
+    /// Total events tracked
+    private var _totalEventsTracked: Int = 0
+    
+    /// Total events flushed
+    private var _totalEventsFlushed: Int = 0
+    
+    /// Total events dropped
+    private var _totalEventsDropped: Int = 0
+    
+    /// Total flush attempts
+    private var _totalFlushes: Int = 0
+    
+    /// Failed flush attempts
+    private var _failedFlushes: Int = 0
+    
+    /// Get total events tracked
     public var totalEventsTracked: Int {
         metricsLock.lock()
         defer { metricsLock.unlock() }
         return _totalEventsTracked
     }
     
-    /// Total events dropped due to queue overflow (thread-safe)
-    public var totalEventsDropped: Int {
-        metricsLock.lock()
-        defer { metricsLock.unlock() }
-        return _totalEventsDropped
-    }
-    
-    /// Total events successfully flushed (thread-safe)
+    /// Get total events flushed
     public var totalEventsFlushed: Int {
         metricsLock.lock()
         defer { metricsLock.unlock() }
         return _totalEventsFlushed
     }
     
+    /// Get total events dropped
+    public var totalEventsDropped: Int {
+        metricsLock.lock()
+        defer { metricsLock.unlock() }
+        return _totalEventsDropped
+    }
+    
+    /// Get total flush attempts
+    public var totalFlushes: Int {
+        metricsLock.lock()
+        defer { metricsLock.unlock() }
+        return _totalFlushes
+    }
+    
+    /// Get failed flush attempts
+    public var failedFlushes: Int {
+        metricsLock.lock()
+        defer { metricsLock.unlock() }
+        return _failedFlushes
+    }
+    
     // MARK: - Initialization
     
+    /// Initialize with required dependencies
+    /// - Parameters:
+    ///   - config: Configuration for the SDK
+    ///   - user: User provider for user context
+    ///   - sessionId: Session ID for grouping events
+    ///   - httpClient: HTTP client for API requests
+    ///   - summaryManager: Summary manager for event summaries
     public init(
+        config: CFConfig,
+        user: CFUserProvider,
         sessionId: String,
         httpClient: HttpClient,
-        user: UserManager,
-        summaryManager: SummaryManager,
-        config: CFConfig
+        summaryManager: SummaryManager
     ) {
+        self.config = config
+        self.user = user
         self.sessionId = sessionId
         self.httpClient = httpClient
-        self.user = user
         self.summaryManager = summaryManager
-        self.config = config
-        
-        // Initialize atomic properties
-        self._eventsFlushTimeSeconds = config.eventsFlushTimeSeconds
-        self._eventsFlushIntervalMs = config.eventsFlushIntervalMs
-        
-        // Initialize queue with config capacity
-        self.eventQueue = ThreadSafeQueue<EventData>(capacity: config.eventsQueueSize)
         self.eventStorageManager = EventStorageManager(config: config)
         
-        // Create background work queue
-        self.workQueue = DispatchQueue(label: "ai.customfit.EventTracker", qos: .utility)
+        // Set default values for flush settings
+        self.flushIntervalMs = EventTracker.DEFAULT_FLUSH_INTERVAL_MS
+        self.flushTimeSeconds = EventTracker.DEFAULT_FLUSH_TIME_SECONDS
         
-        Logger.info("🔔 TRACK: EventTracker initialized with eventsQueueSize=\(config.eventsQueueSize), maxStoredEvents=\(config.maxStoredEvents), eventsFlushTimeSeconds=\(config.eventsFlushTimeSeconds), eventsFlushIntervalMs=\(config.eventsFlushIntervalMs)")
+        // Initialize event queue
+        let queueSize = max(config.eventsQueueSize, 10)
+        eventQueue.setMaxSize(queueSize)
         
-        // Load persisted events on initialization
-        loadPersistedEvents()
+        // Start periodic flush
         startPeriodicFlush()
+        
+        // Load persisted events
+        loadPersistedEvents()
+        
+        Logger.info("EventTracker initialized with queue size \(queueSize), flush interval \(EventTracker.DEFAULT_FLUSH_INTERVAL_MS)ms")
     }
     
     deinit {
         stopPeriodicFlush()
-        
-        // Try to persist any remaining events
-        do {
-            try persistEvents()
-        } catch {
-            Logger.error("Failed to persist events during deinit: \(error.localizedDescription)")
-        }
     }
     
-    // MARK: - Configuration Update Methods
+    // MARK: - Configuration
     
-    /// Updates the flush interval and restarts the timer
-    /// - Parameter intervalMs: new interval in milliseconds
+    /// Update the flush interval in milliseconds
+    /// - Parameter intervalMs: New flush interval in milliseconds
     /// - Returns: Result containing the updated interval or error details
-    public func updateFlushInterval(intervalMs: Int64) -> CFResult<Int64> {
-        guard intervalMs > 0 else {
+    public func updateFlushIntervalMs(intervalMs: Int64) -> CFResult<Int64> {
+        if intervalMs <= 0 {
             let message = "Interval must be greater than 0"
             Logger.error("🔔 TRACK: \(message)")
-            return CFResult.error(message: message, category: .validation)
+            return CFResult.createError(message: message, category: .validation)
         }
         
-        // Update interval
-        eventsFlushIntervalMs = intervalMs
-        
-        // Restart timer
-        restartPeriodicFlush()
+        lock.lock()
+        flushIntervalMs = intervalMs
+        lock.unlock()
         
         Logger.info("🔔 TRACK: Updated events flush interval to \(intervalMs) ms")
-        return CFResult.success(value: intervalMs)
-    }
-    
-    /// Updates the flush time threshold
-    /// - Parameter seconds: new threshold in seconds
-    /// - Returns: Result containing the updated threshold or error details
-    public func updateFlushTimeSeconds(seconds: Int) -> CFResult<Int> {
-        guard seconds > 0 else {
-            let message = "Seconds must be greater than 0"
-            Logger.error("🔔 TRACK: \(message)")
-            return CFResult.error(message: message, category: .validation)
-        }
-        
-        // Update threshold
-        eventsFlushTimeSeconds = seconds
-        
-        Logger.info("🔔 TRACK: Updated events flush time threshold to \(seconds) seconds")
-        return CFResult.success(value: seconds)
+        return CFResult.createSuccess(value: intervalMs)
     }
     
     // MARK: - Public Tracking Methods
     
     /// Track an event with improved error handling and storage limit enforcement
     /// Always flushes summaries before tracking a new event
-    public func trackEvent(eventName: String, properties: [String: Any] = [:]) -> CFResult<EventData> {
+    public func trackEvent(eventName: String, properties: [String: Any]? = nil) -> CFResult<EventData> {
         // Using Logger for consistent logging
-        Logger.info("🔔 🔔 TRACK: Tracking event: \(eventName) with properties: \(properties)")
+        Logger.info("🔔 🔔 TRACK: Tracking event: \(eventName) with properties: \(properties ?? [:])")
         
         // Always flush summaries first before tracking a new event
         workQueue.async {
@@ -206,20 +226,21 @@ public class EventTracker {
                 category: .validation,
                 severity: .medium
             )
-            return CFResult.error(message: message, category: .validation)
+            return CFResult.createError(message: message, category: .validation)
         }
         
         // Create event with validation
         let event = EventData(
             eventId: UUID().uuidString,
-            eventCustomerId: eventName,
+            name: eventName,
             eventType: .track,
             timestamp: Date(),
             sessionId: sessionId,
-            userId: user.getUser().customerId,
+            userId: user.getUser().userId,
+            isAnonymous: user.getUser().userId == nil,
             deviceContext: user.getUser().deviceContext,
             applicationInfo: user.getUser().applicationInfo,
-            properties: properties
+            properties: properties ?? [:]
         )
         
         // Check if queue is full
@@ -228,7 +249,7 @@ public class EventTracker {
             ErrorHandler.handleError(
                 message: "Event queue is full (capacity = \(config.eventsQueueSize)), dropping oldest event",
                 source: EventTracker.SOURCE,
-                category: .internal,
+                category: .state,
                 severity: .medium
             )
             
@@ -243,11 +264,11 @@ public class EventTracker {
         
         // Try to enqueue the event
         if !eventQueue.enqueue(event) {
-            Logger.warning("🔔 TRACK: Event queue full, forcing flush for event: \(event.eventCustomerId)")
+            Logger.warning("🔔 TRACK: Event queue full, forcing flush for event: \(event.name)")
             ErrorHandler.handleError(
-                message: "Event queue full, forcing flush for event: \(event.eventCustomerId)",
+                message: "Event queue full, forcing flush for event: \(event.name)",
                 source: EventTracker.SOURCE,
-                category: .internal,
+                category: .state,
                 severity: .medium
             )
             
@@ -257,11 +278,11 @@ public class EventTracker {
             // Try again
             if !eventQueue.enqueue(event) {
                 let message = "Failed to queue event after flush"
-                Logger.error("🔔 TRACK: \(message): \(event.eventCustomerId)")
+                Logger.error("🔔 TRACK: \(message): \(event.name)")
                 ErrorHandler.handleError(
-                    message: "\(message): \(event.eventCustomerId)",
+                    message: "\(message): \(event.name)",
                     source: EventTracker.SOURCE,
-                    category: .internal,
+                    category: .state,
                     severity: .high
                 )
                 
@@ -270,7 +291,7 @@ public class EventTracker {
                 _totalEventsDropped += 1
                 metricsLock.unlock()
                 
-                return CFResult.error(message: message, category: .internal)
+                return CFResult.createError(message: message, category: .state)
             }
         }
         
@@ -279,7 +300,7 @@ public class EventTracker {
         _totalEventsTracked += 1
         metricsLock.unlock()
         
-        Logger.info("🔔 TRACK: Event added to queue: \(event.eventCustomerId), queue size=\(eventQueue.count)")
+        Logger.info("🔔 TRACK: Event added to queue: \(event.name), queue size=\(eventQueue.count)")
         
         // If approaching capacity, persist to storage as backup
         if eventQueue.count > Int(Double(config.eventsQueueSize) * 0.7) {
@@ -300,7 +321,7 @@ public class EventTracker {
             }
         }
         
-        return CFResult.success(value: event)
+        return CFResult.createSuccess(value: event)
     }
     
     /// Track a screen view event
@@ -335,25 +356,17 @@ public class EventTracker {
     /// - Returns: Result containing the number of events flushed or error details
     @discardableResult
     public func flushEvents() -> CFResult<Int> {
-        // Always ensure summaries are flushed first
-        Logger.info("🔔 🔔 TRACK: Beginning event flush process")
-        
-        let summaryResult = summaryManager.flushSummaries()
-        if case .error(let message, _, _, let category) = summaryResult {
-            Logger.warning("🔔 🔔 TRACK: Failed to flush summaries before flushing events: \(message)")
-            ErrorHandler.handleError(
-                message: "Failed to flush summaries before flushing events: \(message)",
-                source: EventTracker.SOURCE,
-                category: category,
-                severity: .medium
-            )
-        }
+        lock.lock()
+        defer { lock.unlock() }
         
         // Check if queue is empty
         if eventQueue.isEmpty {
             Logger.debug("🔔 TRACK: No events to flush")
-            return CFResult.success(value: 0)
+            return CFResult.createSuccess(value: 0)
         }
+        
+        // Update last flush time
+        lastFlushTime = Date()
         
         // Drain the queue
         var eventsToFlush = [EventData]()
@@ -361,14 +374,33 @@ public class EventTracker {
         
         if eventsToFlush.isEmpty {
             Logger.debug("🔔 TRACK: No events to flush after drain")
-            return CFResult.success(value: 0)
+            return CFResult.createSuccess(value: 0)
         }
-        
-        Logger.info("🔔 TRACK: Flushing \(eventsToFlush.count) events to server")
         
         // Log detailed info about events
         eventsToFlush.enumerated().forEach { index, event in
-            Logger.debug("🔔 TRACK: Event #\(index+1): \(event.eventCustomerId)")
+            Logger.debug("🔔 TRACK: Event #\(index+1): \(event.name)")
+        }
+        
+        Logger.info("🔔 TRACK: Flushing \(eventsToFlush.count) events")
+        
+        // Make sure summaries are flushed first if any
+        let summaryResult = summaryManager.flushSummaries()
+        
+        switch summaryResult {
+        case .success:
+            // Summary flush successful, proceed with events
+            break
+            
+        case .error(let message, let error, _, let category):
+            // Log summary flush error but continue with event flush
+            Logger.warning("🔔 TRACK: Failed to flush summaries before events: \(message)")
+            ErrorHandler.handleError(
+                message: "Failed to flush summaries before flushing events: \(message)",
+                source: EventTracker.SOURCE,
+                category: category.toErrorHandlerCategory,
+                severity: .medium
+            )
         }
         
         // Update metrics
@@ -377,7 +409,7 @@ public class EventTracker {
         metricsLock.unlock()
         
         // Send events to server
-        let result = sendTrackEvents(events: eventsToFlush)
+        let result = sendEvents(events: eventsToFlush)
         
         switch result {
         case .success:
@@ -388,17 +420,7 @@ public class EventTracker {
             
             Logger.info("🔔 TRACK: Successfully flushed \(eventsToFlush.count) events")
             
-            // Clear persisted events on successful flush
-            workQueue.async {
-                do {
-                    try self.eventStorageManager.clearEvents()
-                    Logger.debug("🔔 TRACK: Cleared persisted events after successful flush")
-                } catch {
-                    Logger.error("Failed to clear persisted events: \(error.localizedDescription)")
-                }
-            }
-            
-            return CFResult.success(value: eventsToFlush.count)
+            return CFResult.createSuccess(value: eventsToFlush.count)
             
         case .error(let message, let error, _, let category):
             // Update metrics
@@ -408,22 +430,37 @@ public class EventTracker {
             
             Logger.warning("🔔 TRACK: Failed to flush events: \(message)")
             
-            // Persist undelivered events for retry later
-            workQueue.async {
-                do {
-                    Logger.info("🔔 TRACK: Persisting \(eventsToFlush.count) undelivered events for retry later")
-                    self.persistedEventsMutex.lock()
-                    try self.eventStorageManager.storeEvents(events: eventsToFlush)
-                    self.persistedEventsMutex.unlock()
-                } catch {
-                    Logger.error("Failed to persist undelivered events: \(error.localizedDescription)")
+            // Add back to queue if possible, with priority given to newer events
+            let originalCount = eventsToFlush.count
+            
+            // Try re-adding events in reverse order (newest first)
+            var readdedCount = 0
+            for event in eventsToFlush.reversed() {
+                if !eventQueue.isFull {
+                    if eventQueue.enqueue(event) {
+                        readdedCount += 1
+                    }
+                } else {
+                    break
                 }
             }
             
-            if let error = error {
-                return CFResult.error(message: "Failed to flush events: \(message)", error: error, category: category)
+            if readdedCount < originalCount {
+                let droppedCount = originalCount - readdedCount
+                Logger.warning("🔔 TRACK: Re-queued \(readdedCount) of \(originalCount) events, dropped \(droppedCount)")
+                
+                // Update metrics
+                metricsLock.lock()
+                _totalEventsDropped += droppedCount
+                metricsLock.unlock()
             } else {
-                return CFResult.error(message: "Failed to flush events: \(message)", category: category)
+                Logger.info("🔔 TRACK: Re-queued all \(originalCount) events after failed flush")
+            }
+            
+            if let error = error {
+                return CFResult.createError(message: "Failed to flush events: \(message)", error: error, category: category)
+            } else {
+                return CFResult.createError(message: "Failed to flush events: \(message)", category: category)
             }
         }
     }
@@ -449,13 +486,13 @@ public class EventTracker {
         
         if eventsToStore.isEmpty {
             Logger.debug("No events to persist")
-            return CFResult.success(value: 0)
+            return CFResult.createSuccess(value: 0)
         }
         
         Logger.info("Persisting \(eventsToStore.count) events to storage")
         try eventStorageManager.storeEvents(events: eventsToStore)
         
-        return CFResult.success(value: eventsToStore.count)
+        return CFResult.createSuccess(value: eventsToStore.count)
     }
     
     // MARK: - Private Methods
@@ -612,10 +649,10 @@ public class EventTracker {
         return payload
     }
     
-    /// Sends events to the tracking API
+    /// Send events to the server
     /// - Parameter events: Events to send
     /// - Returns: Result indicating success or failure
-    private func sendTrackEvents(events: [EventData]) -> CFResult<Bool> {
+    private func sendEvents(events: [EventData]) -> CFResult<Bool> {
         do {
             // Build payload
             let eventRequestData = buildEventApiPayload(events: events)
@@ -626,7 +663,7 @@ public class EventTracker {
             // Create URL
             let eventsUrl = "\(config.apiBaseUrl)\(CFConstants.Api.EVENTS_PATH)?cfenc=\(config.clientKey)"
             guard let url = URL(string: eventsUrl) else {
-                return CFResult.error(message: "Invalid events URL: \(eventsUrl)", category: .validation)
+                return CFResult.createError(message: "Invalid events URL: \(eventsUrl)", category: .validation)
             }
             
             // Create circuit breaker
@@ -634,26 +671,26 @@ public class EventTracker {
             
             // Create semaphore for synchronous execution
             let semaphore = DispatchSemaphore(value: 0)
-            var resultValue: CFResult<Bool> = CFResult.error(message: "Unknown error", category: .unknown)
+            var resultValue: CFResult<Bool> = CFResult.createError(message: "Unknown error", category: .unknown)
             
             // Use circuit breaker to prevent cascading failures
             do {
                 try circuitBreaker.execute(operation: {
-                    // Use our HttpClient to post the events
-                    httpClient.postJson(url: url, payload: jsonData) { result in
+                    // Use HttpClient to post the events
+                    self.httpClient.postJson(url: url, payload: jsonData) { result in
                         // Handle response
                         resultValue = result
                         semaphore.signal()
                     }
                 })
             } catch {
-                return CFResult.error(message: "Circuit breaker prevented event send", error: error, category: .network)
+                return CFResult.createError(message: "Circuit breaker prevented event send", error: error, category: .network)
             }
             
             // Wait for response (with timeout)
             if semaphore.wait(timeout: .now() + 30.0) == .timedOut {
                 circuitBreaker.recordFailure()
-                return CFResult.error(message: "Timeout waiting for events API response", category: .network)
+                return CFResult.createError(message: "Timeout waiting for events API response", category: .network)
             }
             
             // Process the result
@@ -673,7 +710,7 @@ public class EventTracker {
                 source: EventTracker.SOURCE,
                 severity: .high
             )
-            return CFResult.error(message: "Error serializing events", error: error, category: .serialization)
+            return CFResult.createError(message: "Error serializing events", error: error, category: .serialization)
         }
     }
     
@@ -697,46 +734,108 @@ public class EventTracker {
     }
 }
 
-/// Event Storage Manager for persisting events
-class EventStorageManager {
-    private let config: CFConfig
-    private let fileManager = FileManager.default
-    private let persistenceFileName = "customfit_events.json"
+/// Queue for managing event data with thread safety and configurable size
+private class EventQueue {
+    /// Internal storage array
+    private var queue = [EventData]()
     
-    init(config: CFConfig) {
-        self.config = config
+    /// Maximum queue size
+    private var maxSize = 100
+    
+    /// Lock for thread safety
+    private let lock = NSLock()
+    
+    /// Whether the queue is empty
+    var isEmpty: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return queue.isEmpty
     }
     
-    /// Store events to disk
-    func storeEvents(events: [EventData]) throws {
-        let eventsData = try JSONEncoder().encode(events)
-        
-        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let fileURL = documentsDirectory.appendingPathComponent(persistenceFileName)
-        
-        try eventsData.write(to: fileURL, options: .atomic)
+    /// Number of items in the queue
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return queue.count
     }
     
-    /// Load events from disk
-    func loadEvents() throws -> [EventData] {
-        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let fileURL = documentsDirectory.appendingPathComponent(persistenceFileName)
+    /// Whether the queue is full
+    var isFull: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return queue.count >= maxSize
+    }
+    
+    /// Set maximum queue size
+    /// - Parameter size: New maximum size
+    func setMaxSize(_ size: Int) {
+        lock.lock()
+        maxSize = size
+        lock.unlock()
+    }
+    
+    /// Add an item to the queue
+    /// - Parameter item: Item to add
+    /// - Returns: Whether the item was added
+    func enqueue(_ item: EventData) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         
-        if !fileManager.fileExists(atPath: fileURL.path) {
-            return []
+        if queue.count >= maxSize {
+            return false
         }
         
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([EventData].self, from: data)
+        queue.append(item)
+        return true
     }
     
-    /// Clear stored events
-    func clearEvents() throws {
-        let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let fileURL = documentsDirectory.appendingPathComponent(persistenceFileName)
+    /// Remove an item from the queue
+    /// - Returns: The removed item or nil if queue is empty
+    func dequeue() -> EventData? {
+        lock.lock()
+        defer { lock.unlock() }
         
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.removeItem(at: fileURL)
+        if queue.isEmpty {
+            return nil
         }
+        
+        return queue.removeFirst()
+    }
+    
+    /// Get the first item without removing it
+    /// - Returns: The first item or nil if queue is empty
+    func peek() -> EventData? {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        if queue.isEmpty {
+            return nil
+        }
+        
+        return queue.first
+    }
+    
+    /// Clear the queue
+    func clear() {
+        lock.lock()
+        queue.removeAll()
+        lock.unlock()
+    }
+    
+    /// Get a copy of all items in the queue
+    /// - Returns: Copy of all items
+    func snapshot() -> [EventData] {
+        lock.lock()
+        defer { lock.unlock() }
+        return queue
+    }
+    
+    /// Drain the queue to the provided array
+    /// - Parameter array: Array to drain to
+    func drainTo(_ array: inout [EventData]) {
+        lock.lock()
+        array.append(contentsOf: queue)
+        queue.removeAll()
+        lock.unlock()
     }
 } 

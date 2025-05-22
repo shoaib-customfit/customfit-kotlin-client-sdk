@@ -1,98 +1,170 @@
 import Foundation
 
-/// Error category for CustomFit error
-public enum CFErrorCategory: String {
-    /// Network-related errors
-    case network = "NETWORK"
-    
-    /// Configuration-related errors
-    case configuration = "CONFIGURATION"
-    
-    /// Authentication-related errors
-    case authentication = "AUTHENTICATION"
-    
-    /// Validation-related errors
-    case validation = "VALIDATION"
-    
-    /// Internal errors
-    case `internal` = "INTERNAL"
-    
-    /// Unknown errors
-    case unknown = "UNKNOWN"
-}
-
-/// Error code for CustomFit error
+/// Error code for CustomFit errors
 public enum CFErrorCode: Int {
-    /// Network connection error
-    case networkConnectionError = 1001
+    // Network error codes (1000-1999)
+    case networkConnectionError = 1000
+    case networkTimeoutError = 1001
+    case networkResponseError = 1002
     
-    /// Network timeout error
-    case networkTimeoutError = 1002
+    // Configuration error codes (2000-2999)
+    case configurationMissingError = 2000
+    case configurationInvalidError = 2001
     
-    /// Network response error
-    case networkResponseError = 1003
+    // Authentication error codes (3000-3999)
+    case authenticationFailedError = 3000
+    case authenticationExpiredError = 3001
     
-    /// Configuration missing error
-    case configurationMissingError = 2001
+    // Validation error codes (4000-4999)
+    case validationMissingFieldError = 4000
+    case validationInvalidFieldError = 4001
     
-    /// Configuration invalid error
-    case configurationInvalidError = 2002
+    // Serialization error codes (5000-5999)
+    case serializationError = 5000
     
-    /// Authentication failed error
-    case authenticationFailedError = 3001
-    
-    /// Authentication token expired error
-    case authenticationTokenExpiredError = 3002
-    
-    /// Validation missing field error
-    case validationMissingFieldError = 4001
-    
-    /// Validation invalid field error
-    case validationInvalidFieldError = 4002
-    
-    /// Internal error
-    case internalError = 5001
-    
-    /// Unknown error
+    // Internal error codes (9000-9999)
+    case internalError = 9000
     case unknownError = 9999
 }
 
-/// CustomFit error class
+/// Error category for CustomFit errors
+public enum CFErrorCategory: String {
+    /// Unknown error
+    case unknown
+    
+    /// Network error
+    case network
+    
+    /// Storage error
+    case storage
+    
+    /// Configuration error
+    case configuration
+    
+    /// Validation error
+    case validation
+    
+    /// Serialization error
+    case serialization
+    
+    /// Authentication error
+    case authentication
+    
+    /// Permission error
+    case permission
+    
+    /// API error
+    case api
+    
+    /// Feature flag error
+    case featureFlag
+    
+    /// State error
+    case state
+    
+    /// Timeout error
+    case timeout
+}
+
+/// Custom error type for the SDK
 public class CFError: Error {
-    /// Error code
-    public let code: CFErrorCode
+    /// Error message
+    public let message: String
+    
+    /// Original error that caused this error
+    public let cause: Error?
+    
+    /// Error code (optional)
+    public let code: CFErrorCode?
     
     /// Error category
     public let category: CFErrorCategory
     
-    /// Error message
-    public let message: String
-    
-    /// Underlying error
-    public let underlyingError: Error?
-    
-    /// Extra information
-    public let info: [String: Any]?
-    
-    /// Initialize a new CustomFit error
+    /// Initialize a new error
     /// - Parameters:
-    ///   - code: Error code
-    ///   - category: Error category
+    ///   - code: Error code (optional)
     ///   - message: Error message
-    ///   - underlyingError: Underlying error
-    ///   - info: Extra information
+    ///   - cause: Original error (optional)
+    ///   - category: Error category
     public init(
-        code: CFErrorCode,
-        category: CFErrorCategory = .unknown,
+        code: CFErrorCode? = nil,
         message: String,
-        underlyingError: Error? = nil,
-        info: [String: Any]? = nil
+        cause: Error? = nil,
+        category: CFErrorCategory = .unknown
     ) {
         self.code = code
-        self.category = category
         self.message = message
-        self.underlyingError = underlyingError
-        self.info = info
+        self.cause = cause
+        self.category = category
+    }
+    
+    /// Initialize a new error with Int code
+    /// - Parameters:
+    ///   - code: Error code as Int (optional)
+    ///   - message: Error message
+    ///   - cause: Original error (optional)
+    ///   - category: Error category
+    public convenience init(
+        code: Int? = nil,
+        message: String,
+        cause: Error? = nil,
+        category: CFErrorCategory = .unknown
+    ) {
+        let errorCode: CFErrorCode?
+        if let code = code, let mappedCode = CFErrorCode(rawValue: code) {
+            errorCode = mappedCode
+        } else {
+            errorCode = nil
+        }
+        
+        self.init(code: errorCode, message: message, cause: cause, category: category)
+    }
+    
+    /// Factory method to create a CFError with all parameters
+    /// - Parameters:
+    ///   - message: Error message
+    ///   - cause: Original error (optional)
+    ///   - code: Error code as Int (optional)
+    ///   - category: Error category
+    /// - Returns: A new CFError instance
+    public static func create(
+        message: String,
+        cause: Error? = nil,
+        code: Int? = nil,
+        category: CFErrorCategory = .unknown
+    ) -> CFError {
+        return CFError(code: code, message: message, cause: cause, category: category)
+    }
+    
+    /// Factory method to create a CFError with all parameters
+    /// - Parameters:
+    ///   - message: Error message
+    ///   - cause: Original error (optional)
+    ///   - code: Error code (optional)
+    ///   - category: Error category
+    /// - Returns: A new CFError instance
+    public static func create(
+        message: String,
+        cause: Error? = nil,
+        code: CFErrorCode? = nil,
+        category: CFErrorCategory = .unknown
+    ) -> CFError {
+        return CFError(code: code, message: message, cause: cause, category: category)
+    }
+    
+    /// Custom description implementation
+    public var localizedDescription: String {
+        var result = message
+        
+        if let code = code {
+            result += " (code: \(code.rawValue))"
+        }
+        
+        if let cause = cause {
+            result += " - Caused by: \(cause.localizedDescription)"
+        }
+        
+        return result
     }
     
     /// Create a network error
@@ -110,10 +182,9 @@ public class CFError: Error {
     ) -> CFError {
         return CFError(
             code: code,
-            category: .network,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .network
         )
     }
     
@@ -132,10 +203,9 @@ public class CFError: Error {
     ) -> CFError {
         return CFError(
             code: code,
-            category: .configuration,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .configuration
         )
     }
     
@@ -154,10 +224,9 @@ public class CFError: Error {
     ) -> CFError {
         return CFError(
             code: code,
-            category: .authentication,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .authentication
         )
     }
     
@@ -176,10 +245,9 @@ public class CFError: Error {
     ) -> CFError {
         return CFError(
             code: code,
-            category: .validation,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .validation
         )
     }
     
@@ -198,10 +266,9 @@ public class CFError: Error {
     ) -> CFError {
         return CFError(
             code: code,
-            category: .internal,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .state
         )
     }
     
@@ -217,11 +284,10 @@ public class CFError: Error {
         info: [String: Any]? = nil
     ) -> CFError {
         return CFError(
-            code: .unknownError,
-            category: .unknown,
+            code: nil as CFErrorCode?,
             message: message,
-            underlyingError: underlyingError,
-            info: info
+            cause: underlyingError,
+            category: .unknown
         )
     }
 }
@@ -229,10 +295,6 @@ public class CFError: Error {
 /// Extension to provide a localizedDescription
 extension CFError: LocalizedError {
     public var errorDescription: String? {
-        return message
-    }
-    
-    public var localizedDescription: String {
         return message
     }
 } 

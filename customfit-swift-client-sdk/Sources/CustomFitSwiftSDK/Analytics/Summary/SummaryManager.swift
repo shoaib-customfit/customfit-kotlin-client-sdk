@@ -69,12 +69,12 @@ public class SummaryManager {
         self.config = config
         
         // Create queue with capacity from config
-        self.summaryQueue = ThreadSafeQueue<SummaryData>(capacity: config.summaryQueueSize)
+        self.summaryQueue = ThreadSafeQueue<SummaryData>(capacity: config.summariesQueueSize)
         
         // Create background queue
         self.workQueue = DispatchQueue(label: "ai.customfit.SummaryManager", qos: .utility)
         
-        Logger.info("📊 SUMMARY: SummaryManager initialized with summaryQueueSize=\(config.summaryQueueSize)")
+        Logger.info("📊 SUMMARY: SummaryManager initialized with summaryQueueSize=\(config.summariesQueueSize)")
     }
     
     // MARK: - Public Methods
@@ -87,17 +87,17 @@ public class SummaryManager {
         if summary.name.isEmpty {
             let message = "Summary name cannot be empty"
             Logger.warning("📊 SUMMARY: \(message)")
-            return CFResult.error(message: message, category: .validation)
+            return CFResult.createError(message: message, category: .validation)
         }
         
         // Check if queue is full
         if summaryQueue.isFull {
-            let message = "Summary queue is full (capacity = \(config.summaryQueueSize)), dropping oldest summary"
+            let message = "Summary queue is full (capacity = \(config.summariesQueueSize)), dropping oldest summary"
             Logger.warning("📊 SUMMARY: \(message)")
             ErrorHandler.handleError(
                 message: message,
                 source: SummaryManager.SOURCE,
-                category: .internal,
+                category: .state,
                 severity: .medium
             )
             
@@ -124,7 +124,7 @@ public class SummaryManager {
                 ErrorHandler.handleError(
                     message: message,
                     source: SummaryManager.SOURCE,
-                    category: .internal,
+                    category: .state,
                     severity: .high
                 )
                 
@@ -133,7 +133,7 @@ public class SummaryManager {
                 _totalSummariesDropped += 1
                 metricsLock.unlock()
                 
-                return CFResult.error(message: message, category: .internal)
+                return CFResult.createError(message: message, category: .state)
             }
         }
         
@@ -145,13 +145,13 @@ public class SummaryManager {
         Logger.info("📊 SUMMARY: Tracked summary: \(summary.name), queue size=\(summaryQueue.count)")
         
         // If queue is full or near capacity, trigger flush
-        if summaryQueue.count > Int(Double(config.summaryQueueSize) * 0.7) {
+        if summaryQueue.count > Int(Double(config.summariesQueueSize) * 0.7) {
             workQueue.async {
                 self.flushSummaries()
             }
         }
         
-        return CFResult.success(value: summary)
+        return CFResult.createSuccess(value: summary)
     }
     
     /// Track a feature usage summary
@@ -184,6 +184,45 @@ public class SummaryManager {
         return trackSummary(summary: summary)
     }
     
+    /// Track a config request summary
+    /// - Parameters:
+    ///   - config: Config data
+    ///   - customerUserId: Customer user ID
+    ///   - sessionId: Session ID
+    /// - Returns: Result indicating success or failure
+    public func trackConfigRequest(
+        config: [String: Any],
+        customerUserId: String,
+        sessionId: String
+    ) -> CFResult<Bool> {
+        let summary = SummaryData(
+            name: "config_request",
+            count: 1,
+            properties: [
+                "config": config,
+                "customer_user_id": customerUserId,
+                "session_id": sessionId
+            ]
+        )
+        
+        let result = trackSummary(summary: summary)
+        return result.isSuccess ? CFResult.createSuccess(value: true) : CFResult.createError(message: "Failed to track config request", category: .state)
+    }
+    
+    /// Track a config summary
+    /// - Parameter config: Configuration data
+    /// - Returns: Result indicating success or failure
+    public func trackConfigSummary(_ config: [String: Any]) -> CFResult<Bool> {
+        let summary = SummaryData(
+            name: "config_summary",
+            count: 1,
+            properties: ["config": config]
+        )
+        
+        let result = trackSummary(summary: summary)
+        return result.isSuccess ? CFResult.createSuccess(value: true) : CFResult.createError(message: "Failed to track config summary", category: .state)
+    }
+    
     /// Flush summaries to the server
     /// - Returns: Result containing the number of summaries flushed or error details
     @discardableResult
@@ -194,7 +233,7 @@ public class SummaryManager {
         // Check if queue is empty
         if summaryQueue.isEmpty {
             Logger.debug("📊 SUMMARY: No summaries to flush")
-            return CFResult.success(value: 0)
+            return CFResult.createSuccess(value: 0)
         }
         
         // Update last flush time
@@ -206,7 +245,7 @@ public class SummaryManager {
         
         if summariesToFlush.isEmpty {
             Logger.debug("📊 SUMMARY: No summaries to flush after drain")
-            return CFResult.success(value: 0)
+            return CFResult.createSuccess(value: 0)
         }
         
         // Merge similar summaries to optimize payload size
@@ -230,7 +269,7 @@ public class SummaryManager {
             metricsLock.unlock()
             
             Logger.info("📊 SUMMARY: Successfully flushed \(mergedSummaries.count) summaries")
-            return CFResult.success(value: summariesToFlush.count)
+            return CFResult.createSuccess(value: summariesToFlush.count)
             
         case .error(let message, let error, _, let category):
             // Update metrics
@@ -268,11 +307,25 @@ public class SummaryManager {
             }
             
             if let error = error {
-                return CFResult.error(message: "Failed to flush summaries: \(message)", error: error, category: category)
+                return CFResult.createError(message: "Failed to flush summaries: \(message)", error: error, category: category)
             } else {
-                return CFResult.error(message: "Failed to flush summaries: \(message)", category: category)
+                return CFResult.createError(message: "Failed to flush summaries: \(message)", category: category)
             }
         }
+    }
+    
+    /// Push a configuration summary
+    /// - Parameter config: Configuration data
+    /// - Returns: Result indicating success or failure
+    public func pushSummary(config: [String: Any]) -> CFResult<Bool> {
+        let summary = SummaryData(
+            name: "config_summary",
+            count: 1,
+            properties: ["config": config]
+        )
+        
+        let result = trackSummary(summary: summary)
+        return result.isSuccess ? CFResult.createSuccess(value: true) : CFResult.createError(message: "Failed to track config summary", category: .state)
     }
     
     // MARK: - Private Methods
@@ -319,7 +372,7 @@ public class SummaryManager {
             // Create URL
             let summariesUrl = "\(config.apiBaseUrl)\(CFConstants.Api.SUMMARIES_PATH)?cfenc=\(config.clientKey)"
             guard let url = URL(string: summariesUrl) else {
-                return CFResult.error(message: "Invalid summaries URL: \(summariesUrl)", category: .validation)
+                return CFResult.createError(message: "Invalid summaries URL: \(summariesUrl)", category: .validation)
             }
             
             // Create circuit breaker
@@ -327,7 +380,7 @@ public class SummaryManager {
             
             // Create semaphore for synchronous execution
             let semaphore = DispatchSemaphore(value: 0)
-            var resultValue: CFResult<Bool> = CFResult.error(message: "Unknown error", category: .unknown)
+            var resultValue: CFResult<Bool> = CFResult.createError(message: "Unknown error", category: .unknown)
             
             // Use circuit breaker to prevent cascading failures
             do {
@@ -340,13 +393,13 @@ public class SummaryManager {
                     }
                 })
             } catch {
-                return CFResult.error(message: "Circuit breaker prevented summary send", error: error, category: .network)
+                return CFResult.createError(message: "Circuit breaker prevented summary send", error: error, category: .network)
             }
             
             // Wait for response (with timeout)
             if semaphore.wait(timeout: .now() + 30.0) == .timedOut {
                 circuitBreaker.recordFailure()
-                return CFResult.error(message: "Timeout waiting for summaries API response", category: .network)
+                return CFResult.createError(message: "Timeout waiting for summaries API response", category: .network)
             }
             
             // Process the result
@@ -366,7 +419,7 @@ public class SummaryManager {
                 source: SummaryManager.SOURCE,
                 severity: .high
             )
-            return CFResult.error(message: "Error serializing summaries", error: error, category: .serialization)
+            return CFResult.createError(message: "Error serializing summaries", error: error, category: .serialization)
         }
     }
     
@@ -405,7 +458,7 @@ public class SummaryManager {
             "totalFlushes": _totalFlushes,
             "failedFlushes": _failedFlushes,
             "currentQueueSize": summaryQueue.count,
-            "queueCapacity": config.summaryQueueSize
+            "queueCapacity": config.summariesQueueSize
         ]
     }
 } 

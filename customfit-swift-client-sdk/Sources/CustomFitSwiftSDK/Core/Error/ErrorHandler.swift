@@ -15,6 +15,7 @@ public class ErrorHandler {
         case timeout
         case `internal`
         case unknown
+        case state
     }
     
     /// Error severity levels
@@ -185,5 +186,63 @@ public class ErrorHandler {
         category: ErrorCategory
     ) -> String {
         return "[\(source)] [\(severity.rawValue.uppercased())] [\(category.rawValue.uppercased())] \(message)"
+    }
+}
+
+// MARK: - Extensions for ErrorCategory Conversion
+
+extension ErrorHandler.ErrorCategory {
+    /// Convert ErrorHandler.ErrorCategory to CFErrorCategory
+    public var toCFErrorCategory: CFErrorCategory {
+        switch self {
+        case .network:
+            return .network
+        case .serialization:
+            return .serialization
+        case .validation:
+            return .validation
+        case .permission:
+            return .permission
+        case .timeout:
+            return .timeout
+        case .internal:
+            return .state
+        case .state:
+            return .state
+        case .unknown:
+            return .unknown
+        }
+    }
+}
+
+extension CFErrorCategory {
+    /// Convert CFErrorCategory to ErrorHandler.ErrorCategory
+    public var toErrorHandlerCategory: ErrorHandler.ErrorCategory {
+        switch self {
+        case .network:
+            return .network
+        case .serialization:
+            return .serialization
+        case .validation:
+            return .validation
+        case .permission:
+            return .permission
+        case .timeout:
+            return .timeout
+        case .state:
+            return .state
+        case .storage:
+            return .internal
+        case .configuration:
+            return .internal
+        case .authentication:
+            return .permission
+        case .api:
+            return .network
+        case .featureFlag:
+            return .internal
+        case .unknown:
+            return .unknown
+        }
     }
 } 

@@ -2,222 +2,219 @@ import Foundation
 import Network
 
 /// Network connectivity state
-public enum NetworkState {
+public enum ConnectionNetworkState {
     /// Connected to WiFi
     case wifi
     
-    /// Connected to cellular network
+    /// Connected to mobile data
     case cellular
     
-    /// Connected to other non-cellular, non-WiFi network
+    /// Connected via ethernet
+    case ethernet
+    
+    /// Connected via unknown interface
     case other
     
-    /// No network connectivity
-    case notConnected
+    /// Not connected
+    case disconnected
     
-    /// Unknown network state
+    /// Connection state unknown
     case unknown
 }
 
-/// Protocol for listening to network state changes
-public protocol NetworkStateListener: AnyObject {
+/// Network connectivity observer
+public protocol NetworkConnectivityObserver: AnyObject {
     /// Called when network state changes
     /// - Parameter state: The new network state
-    func onNetworkStateChanged(state: NetworkState)
+    func onNetworkStateChanged(state: ConnectionNetworkState)
 }
 
-/// Protocol for monitoring network connectivity
+/// Network connectivity monitor interface
 public protocol NetworkConnectivityMonitor {
-    /// Start monitoring network state
-    func startMonitoring()
+    /// Add network state observer
+    /// - Parameter observer: The observer to add
+    func addObserver(observer: NetworkConnectivityObserver)
     
-    /// Stop monitoring network state
-    func stopMonitoring()
-    
-    /// Add a network state listener
-    /// - Parameter listener: The listener to add
-    func addNetworkStateListener(listener: NetworkStateListener)
-    
-    /// Remove a network state listener
-    /// - Parameter listener: The listener to remove
-    func removeNetworkStateListener(listener: NetworkStateListener)
+    /// Remove network state observer
+    /// - Parameter observer: The observer to remove
+    func removeObserver(observer: NetworkConnectivityObserver)
     
     /// Get current network state
     /// - Returns: The current network state
-    func getCurrentNetworkState() -> NetworkState
+    func getCurrentNetworkState() -> ConnectionNetworkState
     
     /// Check if network is connected
-    /// - Returns: Whether the network is connected
-    func isNetworkConnected() -> Bool
+    /// - Returns: True if connected, false otherwise
+    func isConnected() -> Bool
+    
+    /// Start monitoring
+    func startMonitoring()
+    
+    /// Stop monitoring
+    func stopMonitoring()
 }
 
-/// Default implementation of NetworkConnectivityMonitor
-public class DefaultNetworkConnectivityMonitor: NetworkConnectivityMonitor {
+/// Network connectivity monitor implementation
+public class NetworkConnectivityMonitorImpl: NetworkConnectivityMonitor {
     
     // MARK: - Properties
     
-    /// Network path monitor
-    private let pathMonitor: NWPathMonitor
-    
     /// Current network state
-    private var currentState: NetworkState = .unknown
+    private var currentState: ConnectionNetworkState = .unknown
     
     /// Thread-safe network state
     private let stateLock = NSLock()
     
-    /// Network state listeners
-    private var listeners: [NetworkStateListener] = []
-    
-    /// Thread-safe listeners
-    private let listenersLock = NSLock()
+    /// Network path monitor
+    private let monitor = NWPathMonitor()
     
     /// Monitor queue
-    private let monitorQueue: DispatchQueue
+    private let monitorQueue = DispatchQueue(label: "ai.customfit.networkMonitor", qos: .utility)
+    
+    /// Main queue for callbacks
+    private let callbackQueue = DispatchQueue.main
+    
+    /// Registered observers
+    private var listeners = [ObjectIdentifier: NetworkConnectivityObserver]()
+    
+    /// Thread-safe observers
+    private let listenersLock = NSLock()
     
     /// Whether monitoring is active
     private var isMonitoring = false
     
     // MARK: - Initialization
     
-    /// Initialize a new network connectivity monitor
-    /// - Parameter queue: The queue to use for monitoring
-    public init(queue: DispatchQueue = DispatchQueue(label: "ai.customfit.NetworkMonitor", qos: .utility)) {
-        self.pathMonitor = NWPathMonitor()
-        self.monitorQueue = queue
+    public init() {
+        setupMonitor()
     }
     
     deinit {
         stopMonitoring()
     }
     
-    // MARK: - NetworkConnectivityMonitor Protocol
+    // MARK: - Setup
     
-    /// Start monitoring network state
-    public func startMonitoring() {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        
-        guard !isMonitoring else { return }
-        
-        pathMonitor.pathUpdateHandler = { [weak self] path in
+    private func setupMonitor() {
+        monitor.pathUpdateHandler = { [weak self] path in
             guard let self = self else { return }
-            self.handlePathUpdate(path)
-        }
-        
-        pathMonitor.start(queue: monitorQueue)
-        isMonitoring = true
-        
-        Logger.debug("Network connectivity monitoring started")
-    }
-    
-    /// Stop monitoring network state
-    public func stopMonitoring() {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        
-        guard isMonitoring else { return }
-        
-        pathMonitor.cancel()
-        isMonitoring = false
-        
-        Logger.debug("Network connectivity monitoring stopped")
-    }
-    
-    /// Add a network state listener
-    /// - Parameter listener: The listener to add
-    public func addNetworkStateListener(listener: NetworkStateListener) {
-        listenersLock.lock()
-        defer { listenersLock.unlock() }
-        
-        if !listeners.contains(where: { $0 === listener }) {
-            listeners.append(listener)
             
-            // Notify immediately with current state
-            let state = getCurrentNetworkState()
-            DispatchQueue.main.async {
-                listener.onNetworkStateChanged(state: state)
+            let state = self.mapPathToNetworkState(path)
+            
+            self.stateLock.lock()
+            let oldState = self.currentState
+            self.currentState = state
+            self.stateLock.unlock()
+            
+            // Notify listeners only if state changed
+            if oldState != state {
+                Logger.debug("Network state changed: \(self.stateToString(oldState)) -> \(self.stateToString(state))")
+                self.notifyListeners(state: state)
             }
         }
     }
     
-    /// Remove a network state listener
-    /// - Parameter listener: The listener to remove
-    public func removeNetworkStateListener(listener: NetworkStateListener) {
+    // MARK: - NetworkConnectivityMonitor Implementation
+    
+    public func addObserver(observer: NetworkConnectivityObserver) {
         listenersLock.lock()
-        defer { listenersLock.unlock() }
+        listeners[ObjectIdentifier(observer)] = observer
+        listenersLock.unlock()
         
-        listeners.removeAll(where: { $0 === listener })
+        // Notify the new observer of the current state
+        stateLock.lock()
+        let state = currentState
+        stateLock.unlock()
+        
+        callbackQueue.async {
+            observer.onNetworkStateChanged(state: state)
+        }
+        
+        Logger.debug("Added network connectivity observer")
     }
     
-    /// Get current network state
-    /// - Returns: The current network state
-    public func getCurrentNetworkState() -> NetworkState {
+    public func removeObserver(observer: NetworkConnectivityObserver) {
+        listenersLock.lock()
+        listeners.removeValue(forKey: ObjectIdentifier(observer))
+        listenersLock.unlock()
+        
+        Logger.debug("Removed network connectivity observer")
+    }
+    
+    public func getCurrentNetworkState() -> ConnectionNetworkState {
         stateLock.lock()
         defer { stateLock.unlock() }
         
         return currentState
     }
     
-    /// Check if network is connected
-    /// - Returns: Whether the network is connected
-    public func isNetworkConnected() -> Bool {
-        let state = getCurrentNetworkState()
-        return state == .wifi || state == .cellular || state == .other
+    public func isConnected() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        
+        return currentState != .disconnected && currentState != .unknown
     }
     
-    // MARK: - Private Methods
-    
-    /// Handle a network path update
-    /// - Parameter path: The updated network path
-    private func handlePathUpdate(_ path: NWPath) {
-        let newState = mapPathToNetworkState(path)
-        
-        stateLock.lock()
-        let stateChanged = currentState != newState
-        currentState = newState
-        stateLock.unlock()
-        
-        if stateChanged {
-            Logger.info("Network state changed to: \(stateToString(newState))")
-            notifyListeners(state: newState)
+    public func startMonitoring() {
+        if !isMonitoring {
+            monitor.start(queue: monitorQueue)
+            isMonitoring = true
+            
+            Logger.debug("Started network connectivity monitoring")
         }
     }
     
-    /// Map a network path to a network state
+    public func stopMonitoring() {
+        if isMonitoring {
+            monitor.cancel()
+            isMonitoring = false
+            
+            Logger.debug("Stopped network connectivity monitoring")
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Map NWPath to NetworkState
     /// - Parameter path: The network path
     /// - Returns: The network state
-    private func mapPathToNetworkState(_ path: NWPath) -> NetworkState {
+    private func mapPathToNetworkState(_ path: NWPath) -> ConnectionNetworkState {
         switch path.status {
         case .satisfied:
+            // Determine the interface type
             if path.usesInterfaceType(.wifi) {
                 return .wifi
             } else if path.usesInterfaceType(.cellular) {
                 return .cellular
+            } else if path.usesInterfaceType(.wiredEthernet) {
+                return .ethernet
             } else {
                 return .other
             }
-        case .unsatisfied:
-            return .notConnected
-        case .requiresConnection:
-            return .notConnected
+            
+        case .unsatisfied, .requiresConnection:
+            return .disconnected
+            
         @unknown default:
             return .unknown
         }
     }
     
-    /// Convert a network state to a string
+    /// Convert NetworkState to string for logging
     /// - Parameter state: The network state
     /// - Returns: The string representation
-    private func stateToString(_ state: NetworkState) -> String {
+    private func stateToString(_ state: ConnectionNetworkState) -> String {
         switch state {
         case .wifi:
             return "WiFi"
         case .cellular:
             return "Cellular"
+        case .ethernet:
+            return "Ethernet"
         case .other:
             return "Other"
-        case .notConnected:
-            return "Not Connected"
+        case .disconnected:
+            return "Disconnected"
         case .unknown:
             return "Unknown"
         }
@@ -225,13 +222,13 @@ public class DefaultNetworkConnectivityMonitor: NetworkConnectivityMonitor {
     
     /// Notify listeners of a network state change
     /// - Parameter state: The new network state
-    private func notifyListeners(state: NetworkState) {
+    private func notifyListeners(state: ConnectionNetworkState) {
         listenersLock.lock()
         let listenersCopy = listeners
         listenersLock.unlock()
         
-        DispatchQueue.main.async {
-            for listener in listenersCopy {
+        callbackQueue.async {
+            for (_, listener) in listenersCopy {
                 listener.onNetworkStateChanged(state: state)
             }
         }

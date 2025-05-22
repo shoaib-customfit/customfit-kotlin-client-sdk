@@ -1,6 +1,25 @@
 import Foundation
 import Network
 
+/// Protocol for managing network connections
+public protocol ConnectionManager {
+    /// Check if the client is connected to the network
+    /// - Returns: Whether connected to network
+    func isConnected() -> Bool
+    
+    /// Get the current connection status
+    /// - Returns: Current connection status
+    func getConnectionStatus() -> ConnectionStatus
+    
+    /// Add connection status listener
+    /// - Parameter listener: Listener to add
+    func addConnectionStatusListener(listener: ConnectionStatusListener)
+    
+    /// Remove connection status listener
+    /// - Parameter listener: Listener to remove
+    func removeConnectionStatusListener(listener: ConnectionStatusListener)
+}
+
 /// Connection Manager protocol matching Kotlin implementation
 public protocol ConnectionManagerInterface {
     /// Add a connection status listener
@@ -16,7 +35,7 @@ public protocol ConnectionManagerInterface {
     func setOfflineMode(offlineMode: Bool)
     
     /// Check if in offline mode
-    func isOfflineMode() -> Bool
+    func getOfflineMode() -> Bool
     
     /// Shutdown the connection manager
     func shutdown()
@@ -76,8 +95,8 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             
             if path.status == .satisfied {
                 // Network is available, but we still need to verify server connection
-                if self.currentStatus == .disconnected {
-                    self.updateStatus(.connecting)
+                if self.currentStatus == ConnectionStatus.disconnected {
+                    self.updateStatus(ConnectionStatus.connecting)
                     self.initiateReconnect(delayMs: 0)
                 }
             } else {
@@ -101,9 +120,9 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             
             // Immediately notify the listener of the current state
             let info = self.getConnectionInformation()
-            DispatchQueue.main.async {
+            DispatchQueue.main.async(execute: DispatchWorkItem {
                 listener.onConnectionStatusChanged(newStatus: self.currentStatus, info: info)
-            }
+            })
         }
     }
     
@@ -122,9 +141,9 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             status: currentStatus,
             isOfflineMode: isOfflineMode,
             lastError: lastErrorMessage,
-            lastSuccessfulConnectionTimeMs: lastSuccessfulConnection,
+            lastSuccessfulConnectionTimeMs: lastSuccessfulConnection > 0 ? lastSuccessfulConnection : nil,
             failureCount: failureCount,
-            nextReconnectTimeMs: nextReconnectTime,
+            nextReconnectTimeMs: nextReconnectTime > 0 ? nextReconnectTime : nil,
             connectionType: connectionType
         )
     }
@@ -134,16 +153,16 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
         
         if offlineMode {
             cancelReconnectTimer()
-            updateStatus(.offline)
+            updateStatus(ConnectionStatus.offline)
         } else {
-            updateStatus(.connecting)
+            updateStatus(ConnectionStatus.connecting)
             initiateReconnect(delayMs: 0)
         }
         
         Logger.debug("Offline mode set to \(offlineMode)")
     }
     
-    public func isOfflineMode() -> Bool {
+    public func getOfflineMode() -> Bool {
         return isOfflineMode
     }
     
@@ -158,7 +177,7 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
     
     /// Check if currently connected
     public func isConnected() -> Bool {
-        return currentStatus == .connected
+        return currentStatus == ConnectionStatus.connected
     }
     
     /// Record a connection success
@@ -166,7 +185,7 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
         failureCount = 0
         lastSuccessfulConnection = Int64(Date().timeIntervalSince1970 * 1000)
         lastErrorMessage = nil
-        updateStatus(.connected)
+        updateStatus(ConnectionStatus.connected)
     }
     
     /// Record a connection failure
@@ -175,7 +194,7 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
         lastErrorMessage = error
         
         if !isOfflineMode {
-            updateStatus(.connecting)
+            updateStatus(ConnectionStatus.connecting)
             
             // Calculate exponential backoff with jitter
             let delayMs = calculateBackoffDelay(retryCount: failureCount)
@@ -193,8 +212,8 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             guard let self = self else { return }
             
             // If we were previously connected, set status to connecting during check
-            if self.currentStatus == .connected {
-                self.updateStatus(.connecting)
+            if self.currentStatus == ConnectionStatus.connected {
+                self.updateStatus(ConnectionStatus.connecting)
             }
             
             // Trigger reconnect which will attempt to reach the server
@@ -213,31 +232,30 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             
             // Notify listeners on main thread
             let listenersCopy = listeners
-            DispatchQueue.main.async {
+            DispatchQueue.main.async(execute: DispatchWorkItem {
                 for (_, listener) in listenersCopy {
                     listener.onConnectionStatusChanged(newStatus: newStatus, info: info)
                 }
-            }
+            })
         }
     }
     
     private func getConnectionType() -> String? {
-        guard let path = monitor.currentPath else {
-            return nil
-        }
+        // Capture the current path snapshot
+        let path = monitor.currentPath
         
-        switch path.interfaceType {
-        case .wifi:
+        // Check if any interfaces are available
+        if path.usesInterfaceType(.wifi) {
             return "wifi"
-        case .cellular:
+        } else if path.usesInterfaceType(.cellular) {
             return "cellular"
-        case .wiredEthernet:
+        } else if path.usesInterfaceType(.wiredEthernet) {
             return "ethernet"
-        case .loopback:
+        } else if path.usesInterfaceType(.loopback) {
             return "loopback"
-        case .other:
+        } else if path.status == .satisfied {
             return "other"
-        @unknown default:
+        } else {
             return nil
         }
     }
@@ -331,7 +349,7 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
             guard let self = self else { return }
             
             if !self.isOfflineMode && 
-               (self.currentStatus == .disconnected || 
+               (self.currentStatus == ConnectionStatus.disconnected || 
                 Int64(Date().timeIntervalSince1970 * 1000) - self.lastSuccessfulConnection > 60000) {
                 self.checkConnection()
             }
@@ -341,5 +359,113 @@ public class ConnectionManagerImpl: ConnectionManagerInterface {
     private func stopHeartbeat() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+    }
+}
+
+/// Default implementation of ConnectionManager
+public class DefaultConnectionManager: ConnectionManager {
+    /// HTTP client
+    private let httpClient: HttpClient
+    
+    /// SDK configuration
+    private let config: CFConfig
+    
+    /// Current connection status
+    private var connectionStatus: ConnectionStatus = .failed
+    
+    /// Connection information
+    private var connectionInfo: ConnectionInformation
+    
+    /// Listeners for connection status changes
+    private var listeners = [ConnectionStatusListener]()
+    
+    /// Lock for thread safety
+    private let lock = NSLock()
+    
+    /// Initialize with HTTP client and config
+    /// - Parameters:
+    ///   - httpClient: HTTP client
+    ///   - config: SDK configuration
+    public init(httpClient: HttpClient, config: CFConfig) {
+        self.httpClient = httpClient
+        self.config = config
+        self.connectionInfo = ConnectionInformation(status: ConnectionStatus.failed)
+    }
+    
+    /// Check if connected to network
+    /// - Returns: Whether connected
+    public func isConnected() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return connectionStatus == ConnectionStatus.connected
+    }
+    
+    /// Get current connection status
+    /// - Returns: Connection status
+    public func getConnectionStatus() -> ConnectionStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        return connectionStatus
+    }
+    
+    /// Add connection status listener
+    /// - Parameter listener: Listener to add
+    public func addConnectionStatusListener(listener: ConnectionStatusListener) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        if !listeners.contains(where: { $0 === listener as AnyObject }) {
+            listeners.append(listener)
+        }
+    }
+    
+    /// Remove connection status listener
+    /// - Parameter listener: Listener to remove
+    public func removeConnectionStatusListener(listener: ConnectionStatusListener) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        listeners.removeAll(where: { $0 === listener as AnyObject })
+    }
+    
+    /// Update connection status
+    /// - Parameter status: New status
+    private func updateConnectionStatus(_ status: ConnectionStatus) {
+        lock.lock()
+        
+        // Only notify if status changed
+        let changed = connectionStatus != status
+        connectionStatus = status
+        
+        // Update connection info
+        switch status {
+        case .connected:
+            connectionInfo = ConnectionInformation(
+                status: ConnectionStatus.connected, 
+                connectionType: "wifi"
+            )
+        case .disconnected:
+            connectionInfo = ConnectionInformation(
+                status: ConnectionStatus.disconnected,
+                connectionType: "none"
+            )
+        default:
+            connectionInfo = ConnectionInformation(status: status)
+        }
+        
+        // Copy listeners before unlocking to avoid race conditions
+        let listenersCopy = listeners
+        
+        lock.unlock()
+        
+        // Only notify if status changed
+        if changed {
+            // Notify listeners on main thread
+            DispatchQueue.main.async(execute: DispatchWorkItem {
+                for listener in listenersCopy {
+                    listener.onConnectionStatusChanged(newStatus: status, info: self.connectionInfo)
+                }
+            })
+        }
     }
 } 

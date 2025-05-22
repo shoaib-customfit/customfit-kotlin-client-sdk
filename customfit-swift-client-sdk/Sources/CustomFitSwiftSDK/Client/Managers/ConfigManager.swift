@@ -9,7 +9,12 @@ public protocol ConfigManager {
     func getConfigValue<T>(key: String, fallbackValue: T, typeCheck: (Any) -> Bool) -> T
     
     /// Check and update SDK settings
-    func checkSdkSettings() throws
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    func checkSdkSettings() async throws
+    
+    /// Check and update SDK settings (older iOS compatibility version)
+    /// This is a compatibility method for older iOS versions that don't support async/await
+    func checkSdkSettingsSync() throws
     
     /// Start periodic SDK settings check
     func startPeriodicSdkSettingsCheck(interval: Int64, initialCheck: Bool)
@@ -33,7 +38,11 @@ public protocol ConfigManager {
     func shutdown()
     
     /// Force config refresh regardless of last-modified header
-    func forceRefresh() throws
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    func forceRefresh() async throws
+    
+    /// Force config refresh (older iOS compatibility version)
+    func forceRefreshSync() throws
     
     /// Get current SDK configuration
     func getConfig() -> CFConfig
@@ -61,4 +70,22 @@ public protocol ConfigManager {
     
     /// Flush all pending summaries
     func flushSummaries() -> CFResult<Int>
+    
+    /// Get boolean feature flag (alias for getBooleanFlag)
+    func getFeatureFlag(key: String, defaultValue: Bool) -> Bool
+    
+    /// Get a feature value of any type
+    func getFeatureValue<T>(key: String, defaultValue: T) -> T
+    
+    /// Get all features (alias for getAllFlags)
+    func getAllFeatures() -> [String: Any]
+    
+    /// Refresh features asynchronously with completion handler
+    func refreshFeatures(completion: ((CFResult<Bool>) -> Void)?)
+    
+    /// Set low power mode to adjust polling frequency
+    func setLowPowerMode(enabled: Bool)
+    
+    /// Clear all listeners
+    func clearAllListeners()
 } 

@@ -97,7 +97,18 @@ public struct CFConfigRequestSummary: Codable {
     ///   - sessionId: Session identifier
     public init(from config: [String: Any], customerUserId: String, sessionId: String) {
         self.configId = config["config_id"] as? String
-        self.version = config["version"]?.description
+        
+        // Safely convert version to String
+        if let versionVal = config["version"] {
+            if let versionStr = versionVal as? String {
+                self.version = versionStr
+            } else {
+                self.version = String(describing: versionVal)
+            }
+        } else {
+            self.version = nil
+        }
+        
         self.userId = config["user_id"] as? String
         self.requestedTime = CFConfigRequestSummary.timestampFormatter.string(from: Date())
         self.variationId = config["variation_id"] as? String

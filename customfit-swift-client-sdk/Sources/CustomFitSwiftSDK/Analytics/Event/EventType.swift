@@ -40,4 +40,13 @@ public enum EventType: String, Codable {
     
     /// When an impression is recorded
     case impression = "impression"
+    
+    /// Track custom event
+    case track = "track"
+    
+    /// Screen view event
+    case screen = "screen"
+    
+    /// Identify user event
+    case identify = "identify"
 } 

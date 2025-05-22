@@ -65,11 +65,12 @@ public class ConfigFetcher {
     ///   - lastModified: Optional last-modified header value for conditional requests
     ///   - etag: Optional ETag header value for conditional requests
     /// - Returns: CFResult containing configuration map or error details
+    @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
     public func fetchConfig(lastModified: String? = nil, etag: String? = nil) async -> CFResult<[String: Any]> {
         // Don't fetch if in offline mode
         if isOffline() {
             Logger.debug("Not fetching config because client is in offline mode")
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Client is in offline mode",
                 category: .network
             )
@@ -80,7 +81,7 @@ public class ConfigFetcher {
         
         if circuitBreaker.state == .open {
             Logger.warning("Circuit breaker open, not attempting config fetch")
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Circuit breaker open, not attempting config fetch",
                 category: .network
             )
@@ -93,9 +94,9 @@ public class ConfigFetcher {
         do {
             // Build the URL
             guard let url = URL(string: "\(CFConstants.Api.BASE_API_URL)\(CFConstants.Api.USER_CONFIGS_PATH)?cfenc=\(config.clientKey)") else {
-                return CFResult.error(
+                return CFResult.createError(
                     message: "Invalid URL configuration",
-                    category: .internal
+                    category: .state
                 )
             }
             
@@ -111,7 +112,7 @@ public class ConfigFetcher {
             ]
             
             guard let jsonData = try? JSONSerialization.data(withJSONObject: payload) else {
-                return CFResult.error(
+                return CFResult.createError(
                     message: "Failed to serialize payload",
                     category: .serialization
                 )
@@ -136,95 +137,105 @@ public class ConfigFetcher {
                 Logger.info("API POLL: Using If-None-Match: \(etag)")
             }
             
-            // Use RetryUtil to add retry capability with exponential backoff
-            return try await RetryUtil.withRetryAsync(
-                maxAttempts: 3,
-                retryIf: { error in
-                    // Only retry on network errors, not on validation or serialization errors
-                    if let cfError = error as? CFError {
-                        return cfError.category == .network
+            // Convert CFResult to Swift's Result for retry operation
+            return try await withCheckedThrowingContinuation { continuation in
+                httpClient.post(url: url, body: jsonData, headers: headers) { data, response, error in
+                    if let error = error {
+                        circuitBreaker.recordFailure()
+                        continuation.resume(returning: CFResult.createError(
+                            message: error.localizedDescription,
+                            error: error,
+                            category: .network
+                        ))
+                        return
                     }
-                    return true
-                },
-                operation: { completion in
-                    // Use the HTTP client to make the request
-                    self.httpClient.post(url: url, body: jsonData, headers: headers) { data, response, error in
-                        if let error = error {
-                            circuitBreaker.recordFailure()
-                            completion(.failure(error))
-                            return
-                        }
+                    
+                    guard let httpResponse = response else {
+                        circuitBreaker.recordFailure()
+                        continuation.resume(returning: CFResult.createError(
+                            message: "Invalid response",
+                            category: .network
+                        ))
+                        return
+                    }
+                    
+                    // Handle not modified response (304)
+                    if httpResponse.statusCode == 304 {
+                        Logger.info("API POLL: Config not modified (304 response)")
                         
-                        guard let httpResponse = response else {
-                            circuitBreaker.recordFailure()
-                            completion(.failure(CFError(message: "Invalid response", category: .network)))
-                            return
-                        }
+                        // Return the last config if available
+                        self.configMapLock.lock()
+                        let lastConfig = self.lastConfigMap
+                        self.configMapLock.unlock()
                         
-                        // Handle not modified response (304)
-                        if httpResponse.statusCode == 304 {
-                            Logger.info("API POLL: Config not modified (304 response)")
-                            
-                            // Return the last config if available
-                            self.configMapLock.lock()
-                            let lastConfig = self.lastConfigMap
-                            self.configMapLock.unlock()
-                            
-                            if let lastConfig = lastConfig {
-                                circuitBreaker.recordSuccess()
-                                completion(.success(lastConfig))
-                            } else {
-                                // This should not happen, but handle it gracefully
-                                Logger.warning("Received 304 but no cached config available")
-                                circuitBreaker.recordFailure()
-                                completion(.failure(CFError(message: "Received 304 but no cached config available", category: .internal)))
-                            }
-                            return
-                        }
-                        
-                        // Handle successful response
-                        if httpResponse.statusCode == 200 {
-                            guard let data = data else {
-                                circuitBreaker.recordFailure()
-                                completion(.failure(CFError(message: "Empty response data", category: .network)))
-                                return
-                            }
-                            
-                            Logger.info("API POLL: Successfully fetched config, response size: \(data.count) bytes")
-                            
-                            // Process the response
-                            do {
-                                let result = self.processConfigResponse(jsonResponse: data)
-                                
-                                // Record success or failure in the circuit breaker
-                                if result.isSuccess {
-                                    circuitBreaker.recordSuccess()
-                                } else {
-                                    circuitBreaker.recordFailure()
-                                }
-                                
-                                completion(.success(result.value ?? [:]))
-                            } catch {
-                                circuitBreaker.recordFailure()
-                                ErrorHandler.handleException(
-                                    error: error,
-                                    message: "Error processing config response",
-                                    source: ConfigFetcher.SOURCE,
-                                    severity: .high
-                                )
-                                completion(.failure(error))
-                            }
+                        if let lastConfig = lastConfig {
+                            circuitBreaker.recordSuccess()
+                            continuation.resume(returning: CFResult.createSuccess(value: lastConfig))
                         } else {
-                            // Handle error response
-                            let message = "Failed to fetch config: \(httpResponse.statusCode)"
-                            Logger.warning("API POLL: \(message)")
-                            
+                            // This should not happen, but handle it gracefully
+                            Logger.warning("Received 304 but no cached config available")
                             circuitBreaker.recordFailure()
-                            completion(.failure(CFError(message: message, code: httpResponse.statusCode, category: .network)))
+                            continuation.resume(returning: CFResult.createError(
+                                message: "Received 304 but no cached config available",
+                                category: .state
+                            ))
                         }
+                        return
+                    }
+                    
+                    // Handle successful response
+                    if httpResponse.statusCode == 200 {
+                        guard let data = data else {
+                            circuitBreaker.recordFailure()
+                            continuation.resume(returning: CFResult.createError(
+                                message: "Empty response data",
+                                category: .network
+                            ))
+                            return
+                        }
+                        
+                        Logger.info("API POLL: Successfully fetched config, response size: \(data.count) bytes")
+                        
+                        // Process the response
+                        do {
+                            let result = self.processConfigResponse(jsonResponse: data)
+                            
+                            // Record success or failure in the circuit breaker
+                            if result.isSuccess {
+                                circuitBreaker.recordSuccess()
+                            } else {
+                                circuitBreaker.recordFailure()
+                            }
+                            
+                            continuation.resume(returning: result)
+                        } catch {
+                            circuitBreaker.recordFailure()
+                            ErrorHandler.handleException(
+                                error: error,
+                                message: "Error processing config response",
+                                source: ConfigFetcher.SOURCE,
+                                severity: .high
+                            )
+                            continuation.resume(returning: CFResult.createError(
+                                message: "Error processing config response: \(error.localizedDescription)",
+                                error: error,
+                                category: .serialization
+                            ))
+                        }
+                    } else {
+                        // Handle error response
+                        let message = "Failed to fetch config: \(httpResponse.statusCode)"
+                        Logger.warning("API POLL: \(message)")
+                        
+                        circuitBreaker.recordFailure()
+                        continuation.resume(returning: CFResult.createError(
+                            message: message,
+                            code: httpResponse.statusCode,
+                            category: .network
+                        ))
                     }
                 }
-            )
+            }
         } catch {
             ErrorHandler.handleException(
                 error: error,
@@ -235,8 +246,8 @@ public class ConfigFetcher {
             
             circuitBreaker.recordFailure()
             
-            let category: ErrorHandler.ErrorCategory = error is DecodingError ? .serialization : .internal
-            return CFResult.error(
+            let category = error is DecodingError ? CFErrorCategory.serialization : .state
+            return CFResult.createError(
                 message: "Error fetching configuration: \(error.localizedDescription)",
                 error: error,
                 category: category
@@ -260,7 +271,7 @@ public class ConfigFetcher {
                     category: .serialization,
                     severity: .high
                 )
-                return CFResult.error(
+                return CFResult.createError(
                     message: message,
                     category: .serialization
                 )
@@ -274,7 +285,7 @@ public class ConfigFetcher {
                     category: .validation,
                     severity: .medium
                 )
-                return CFResult.success(value: [:])
+                return CFResult.createSuccess(value: [:])
             }
             
             // Iterate through each config entry
@@ -332,7 +343,7 @@ public class ConfigFetcher {
                 }
             }
             
-            return CFResult.success(value: finalConfigMap as! [String: Any])
+            return CFResult.createSuccess(value: finalConfigMap as! [String: Any])
         } catch {
             ErrorHandler.handleException(
                 error: error,
@@ -341,7 +352,7 @@ public class ConfigFetcher {
                 severity: .high
             )
             
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Error parsing configuration response: \(error.localizedDescription)",
                 error: error,
                 category: .serialization
@@ -355,10 +366,11 @@ public class ConfigFetcher {
     /// Optimized to use HEAD requests first to minimize bandwidth usage
     /// - Parameter url: The URL to fetch metadata from
     /// - Returns: CFResult containing metadata headers or error details
+    @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
     public func fetchMetadata(url: URL) async -> CFResult<[String: String]> {
         if isOffline() {
             Logger.debug("Not fetching metadata because client is in offline mode")
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Client is in offline mode",
                 category: .network
             )
@@ -368,50 +380,37 @@ public class ConfigFetcher {
             // First try a lightweight HEAD request
             Logger.info("API POLL: Fetch metadata strategy - First trying HEAD request: \(url.absoluteString)")
             
-            // Use RetryUtil for robustness
-            let headResult = try await RetryUtil.withRetryAsync(
-                maxAttempts: 2,
-                operation: { completion in
-                    self.httpClient.makeHeadRequest(url: url) { result in
-                        completion(result)
-                    }
-                }
-            )
-            
-            if headResult.isSuccess, let data = headResult.value {
-                Logger.info("API POLL: HEAD request successful, using result: \(data)")
-                return CFResult.success(value: data)
-            } else {
-                // If HEAD fails, fall back to the original GET method
-                Logger.info("API POLL: HEAD request failed, falling back to GET: \(url.absoluteString)")
-                
-                let getResult = try await RetryUtil.withRetryAsync(
-                    maxAttempts: 2,
-                    operation: { completion in
-                        self.httpClient.fetchMetadata(url: url) { result in
-                            completion(result)
+            return try await withCheckedThrowingContinuation { continuation in
+                self.httpClient.makeHeadRequest(url: url) { result in
+                    switch result {
+                    case .success(let value):
+                        Logger.info("API POLL: HEAD request successful")
+                        continuation.resume(returning: CFResult.createSuccess(value: value))
+                    case .error(let message, let error, let code, let category):
+                        // If HEAD fails, fall back to the original GET method
+                        Logger.info("API POLL: HEAD request failed (\(message)), falling back to GET")
+                        
+                        self.httpClient.fetchMetadata(url: url) { getResult in
+                            switch getResult {
+                            case .success(let value):
+                                Logger.info("API POLL: Fallback GET successful")
+                                continuation.resume(returning: CFResult.createSuccess(value: value))
+                            case .error(let getMsg, let getError, let getCode, let getCategory):
+                                Logger.warning("API POLL: Both HEAD and GET failed: \(getMsg)")
+                                continuation.resume(returning: CFResult.createError(
+                                    message: getMsg,
+                                    error: getError,
+                                    code: getCode,
+                                    category: getCategory
+                                ))
+                            }
                         }
                     }
-                )
-                
-                if getResult.isSuccess {
-                    Logger.info("API POLL: Fallback GET successful: \(getResult.value ?? [:])")
-                } else {
-                    Logger.warning("API POLL: Both HEAD and GET failed for \(url.absoluteString)")
                 }
-                
-                return getResult
             }
         } catch {
-            Logger.error("API POLL: Exception during metadata fetch attempts: \(error.localizedDescription)")
-            ErrorHandler.handleException(
-                error: error,
-                message: "Error fetching metadata from \(url.absoluteString)",
-                source: ConfigFetcher.SOURCE,
-                severity: .high
-            )
-            
-            return CFResult.error(
+            Logger.warning("API POLL: Exception during metadata fetch: \(error.localizedDescription)")
+            return CFResult.createError(
                 message: "Error fetching metadata: \(error.localizedDescription)",
                 error: error,
                 category: .network
@@ -425,10 +424,11 @@ public class ConfigFetcher {
     /// This is preferred over fetchMetadata when you need to process the actual settings content
     /// - Parameter url: The URL to fetch SDK settings from
     /// - Returns: CFResult containing both headers and parsed SdkSettings object, or error details
+    @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
     public func fetchSdkSettingsWithMetadata(url: URL) async -> CFResult<(headers: [String: String], settings: SdkSettings?)> {
         if isOffline() {
             Logger.debug("Not fetching SDK settings because client is in offline mode")
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Client is in offline mode",
                 category: .network
             )
@@ -438,62 +438,69 @@ public class ConfigFetcher {
             // Always use GET for this method since we need the full response body
             Logger.info("API POLL: Fetching full SDK settings with GET: \(url.absoluteString)")
             
-            return try await RetryUtil.withRetryAsync(
-                maxAttempts: 3,
-                operation: { completion in
-                    self.httpClient.get(url: url) { data, response, error in
-                        if let error = error {
-                            Logger.error("API POLL: Exception during SDK settings fetch: \(error.localizedDescription)")
-                            completion(.failure(error))
-                            return
+            return try await withCheckedThrowingContinuation { continuation in
+                self.httpClient.get(url: url) { data, response, error in
+                    if let error = error {
+                        Logger.error("API POLL: Exception during SDK settings fetch: \(error.localizedDescription)")
+                        continuation.resume(returning: CFResult.createError(
+                            message: "Error fetching SDK settings: \(error.localizedDescription)",
+                            error: error,
+                            category: .network
+                        ))
+                        return
+                    }
+                    
+                    guard let httpResponse = response else {
+                        continuation.resume(returning: CFResult.createError(
+                            message: "Invalid response",
+                            category: .network
+                        ))
+                        return
+                    }
+                    
+                    if httpResponse.statusCode == 200 {
+                        // Extract headers
+                        var headers: [String: String] = [:]
+                        
+                        if let lastModified = httpResponse.allHeaderFields[CFConstants.Http.HEADER_LAST_MODIFIED] as? String {
+                            headers[CFConstants.Http.HEADER_LAST_MODIFIED] = lastModified
                         }
                         
-                        guard let httpResponse = response else {
-                            completion(.failure(CFError(message: "Invalid response", category: .network)))
-                            return
+                        if let etag = httpResponse.allHeaderFields[CFConstants.Http.HEADER_ETAG] as? String {
+                            headers[CFConstants.Http.HEADER_ETAG] = etag
                         }
                         
-                        if httpResponse.statusCode == 200 {
-                            // Extract headers
-                            var headers: [String: String] = [:]
-                            
-                            if let lastModified = httpResponse.allHeaderFields[CFConstants.Http.HEADER_LAST_MODIFIED] as? String {
-                                headers[CFConstants.Http.HEADER_LAST_MODIFIED] = lastModified
-                            }
-                            
-                            if let etag = httpResponse.allHeaderFields[CFConstants.Http.HEADER_ETAG] as? String {
-                                headers[CFConstants.Http.HEADER_ETAG] = etag
-                            }
-                            
-                            // Read the response body
-                            guard let data = data else {
-                                completion(.failure(CFError(message: "Empty response body", category: .network)))
-                                return
-                            }
-                            
-                            Logger.info("API POLL: SDK settings response received, size: \(data.count) bytes")
-                            
-                            // Parse the settings
-                            let sdkSettings = self.parseSdkSettings(jsonData: data)
-                            
-                            if let sdkSettings = sdkSettings {
-                                Logger.info("API POLL: SDK settings parsed successfully, account enabled: \(sdkSettings.cf_account_enabled)")
-                            } else {
-                                Logger.warning("API POLL: Failed to parse SDK settings response")
-                            }
-                            
-                            completion(.success((headers: headers, settings: sdkSettings)))
-                        } else {
-                            Logger.warning("API POLL: Failed to fetch SDK settings from \(url.absoluteString): \(httpResponse.statusCode)")
-                            completion(.failure(CFError(
-                                message: "Failed to fetch SDK settings",
-                                code: httpResponse.statusCode,
+                        // Read the response body
+                        guard let data = data else {
+                            continuation.resume(returning: CFResult.createError(
+                                message: "Empty response body",
                                 category: .network
-                            )))
+                            ))
+                            return
                         }
+                        
+                        Logger.info("API POLL: SDK settings response received, size: \(data.count) bytes")
+                        
+                        // Parse the settings
+                        let sdkSettings = self.parseSdkSettings(jsonData: data)
+                        
+                        if let sdkSettings = sdkSettings {
+                            Logger.info("API POLL: SDK settings parsed successfully, account enabled: \(sdkSettings.cf_account_enabled)")
+                        } else {
+                            Logger.warning("API POLL: Failed to parse SDK settings response")
+                        }
+                        
+                        continuation.resume(returning: CFResult.createSuccess(value: (headers: headers, settings: sdkSettings)))
+                    } else {
+                        Logger.warning("API POLL: Failed to fetch SDK settings from \(url.absoluteString): \(httpResponse.statusCode)")
+                        continuation.resume(returning: CFResult.createError(
+                            message: "Failed to fetch SDK settings",
+                            code: httpResponse.statusCode,
+                            category: .network
+                        ))
                     }
                 }
-            )
+            }
         } catch {
             Logger.error("API POLL: Exception during SDK settings fetch: \(error.localizedDescription)")
             ErrorHandler.handleException(
@@ -503,7 +510,7 @@ public class ConfigFetcher {
                 severity: .high
             )
             
-            return CFResult.error(
+            return CFResult.createError(
                 message: "Error fetching SDK settings: \(error.localizedDescription)",
                 error: error,
                 category: .network

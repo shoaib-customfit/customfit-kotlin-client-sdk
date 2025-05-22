@@ -1,106 +1,230 @@
 import Foundation
 
-/// Event data structure
-public struct EventData: Codable {
-    /// Unique identifier for the event
-    public let eventId: String
+/// Event data model for tracking user activities
+public class EventData: Codable {
     
-    /// Type of event
-    public let eventType: EventType
+    // MARK: - Properties
+    
+    /// Unique event ID
+    public var eventId: String
+    
+    /// Event name
+    public var name: String
+    
+    /// Event type
+    public var eventType: EventType
     
     /// Timestamp when the event occurred
-    public let timestamp: Date
+    public var timestamp: Date
     
-    /// User identifier
-    public let userId: String?
+    /// Session ID to group events
+    public var sessionId: String
+    
+    /// User ID for the event
+    public var userId: String?
     
     /// Whether the user is anonymous
-    public let isAnonymous: Bool
+    public var isAnonymous: Bool
     
-    /// Device context
-    public let deviceContext: DeviceContext?
+    /// Device context information
+    public var deviceContext: DeviceContext?
     
     /// Application information
-    public let applicationInfo: ApplicationInfo?
+    public var applicationInfo: ApplicationInfo?
     
-    /// Event-specific properties
-    public let properties: [String: Any]
+    /// Event properties
+    public var properties: [String: Any]
     
-    /// Event metadata
-    public let metadata: [String: Any]?
+    // MARK: - Coding Keys
     
-    enum CodingKeys: String, CodingKey {
-        case eventId, eventType, timestamp, userId, isAnonymous, deviceContext, applicationInfo
-        case properties, metadata
+    private enum CodingKeys: String, CodingKey {
+        case eventId
+        case name
+        case eventType
+        case timestamp
+        case sessionId
+        case userId
+        case isAnonymous
+        case deviceContext
+        case applicationInfo
+        case properties
     }
     
+    // MARK: - Initialization
+    
+    /// Initialize with all required fields
+    /// - Parameters:
+    ///   - eventId: Unique event ID
+    ///   - name: Event name
+    ///   - eventType: Event type
+    ///   - timestamp: Timestamp when the event occurred
+    ///   - sessionId: Session ID to group events
+    ///   - userId: User ID for the event
+    ///   - isAnonymous: Whether the user is anonymous
+    ///   - deviceContext: Device context information
+    ///   - applicationInfo: Application information
+    ///   - properties: Event properties
     public init(
-        eventId: String = UUID().uuidString,
+        eventId: String,
+        name: String,
         eventType: EventType,
-        timestamp: Date = Date(),
-        userId: String?,
-        isAnonymous: Bool,
-        deviceContext: DeviceContext?,
-        applicationInfo: ApplicationInfo?,
-        properties: [String: Any],
-        metadata: [String: Any]? = nil
+        timestamp: Date,
+        sessionId: String,
+        userId: String? = nil,
+        isAnonymous: Bool = true,
+        deviceContext: DeviceContext? = nil,
+        applicationInfo: ApplicationInfo? = nil,
+        properties: [String: Any] = [:]
     ) {
         self.eventId = eventId
+        self.name = name
         self.eventType = eventType
         self.timestamp = timestamp
+        self.sessionId = sessionId
         self.userId = userId
         self.isAnonymous = isAnonymous
         self.deviceContext = deviceContext
         self.applicationInfo = applicationInfo
         self.properties = properties
-        self.metadata = metadata
     }
     
-    public init(from decoder: Decoder) throws {
+    // MARK: - Decodable
+    
+    public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        
         eventId = try container.decode(String.self, forKey: .eventId)
+        name = try container.decode(String.self, forKey: .name)
         eventType = try container.decode(EventType.self, forKey: .eventType)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
         userId = try container.decodeIfPresent(String.self, forKey: .userId)
         isAnonymous = try container.decode(Bool.self, forKey: .isAnonymous)
-        deviceContext = try container.decodeIfPresent(DeviceContext.self, forKey: .deviceContext)
-        applicationInfo = try container.decodeIfPresent(ApplicationInfo.self, forKey: .applicationInfo)
+        
+        // Handle the complex types with optional decoding
+        if let deviceContextData = try container.decodeIfPresent(Data.self, forKey: .deviceContext) {
+            deviceContext = try JSONDecoder().decode(DeviceContext.self, from: deviceContextData)
+        }
+        
+        if let appInfoData = try container.decodeIfPresent(Data.self, forKey: .applicationInfo) {
+            applicationInfo = try JSONDecoder().decode(ApplicationInfo.self, from: appInfoData)
+        }
         
         let propertiesData = try container.decode(Data.self, forKey: .properties)
-        let metadataData = try container.decodeIfPresent(Data.self, forKey: .metadata)
-        
-        guard let propertiesDict = try JSONSerialization.jsonObject(with: propertiesData) as? [String: Any] else {
-            throw DecodingError.dataCorruptedError(forKey: .properties, in: container, debugDescription: "Could not decode properties")
+        if let propertiesDict = try JSONSerialization.jsonObject(with: propertiesData, options: []) as? [String: Any] {
+            properties = propertiesDict
+        } else {
+            properties = [:]
         }
-        
-        var metadataDict: [String: Any]? = nil
-        if let metadataData = metadataData {
-            guard let decodedMetadata = try JSONSerialization.jsonObject(with: metadataData) as? [String: Any] else {
-                throw DecodingError.dataCorruptedError(forKey: .metadata, in: container, debugDescription: "Could not decode metadata")
-            }
-            metadataDict = decodedMetadata
-        }
-        
-        self.properties = propertiesDict
-        self.metadata = metadataDict
     }
+    
+    // MARK: - Encodable
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        
         try container.encode(eventId, forKey: .eventId)
+        try container.encode(name, forKey: .name)
         try container.encode(eventType, forKey: .eventType)
         try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(sessionId, forKey: .sessionId)
         try container.encodeIfPresent(userId, forKey: .userId)
         try container.encode(isAnonymous, forKey: .isAnonymous)
-        try container.encodeIfPresent(deviceContext, forKey: .deviceContext)
-        try container.encodeIfPresent(applicationInfo, forKey: .applicationInfo)
+        
+        // Handle complex types by serializing to Data
+        if let deviceContext = deviceContext {
+            let deviceContextData = try JSONEncoder().encode(deviceContext)
+            try container.encode(deviceContextData, forKey: .deviceContext)
+        }
+        
+        if let applicationInfo = applicationInfo {
+            let appInfoData = try JSONEncoder().encode(applicationInfo)
+            try container.encode(appInfoData, forKey: .applicationInfo)
+        }
         
         let propertiesData = try JSONSerialization.data(withJSONObject: properties)
         try container.encode(propertiesData, forKey: .properties)
+    }
+    
+    // MARK: - Serialization
+    
+    /// Convert to dictionary for serialization
+    /// - Returns: Dictionary representation of the event
+    public func toDictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "event_id": eventId,
+            "name": name,
+            "event_type": eventType.rawValue,
+            "timestamp": Int64(timestamp.timeIntervalSince1970 * 1000),
+            "session_id": sessionId,
+            "is_anonymous": isAnonymous
+        ]
         
-        if let metadata = metadata {
-            let metadataData = try JSONSerialization.data(withJSONObject: metadata)
-            try container.encode(metadataData, forKey: .metadata)
+        // Add optional fields
+        if let userId = userId {
+            dict["user_id"] = userId
         }
+        
+        // Add device context if available
+        if let deviceContext = deviceContext {
+            dict["device_context"] = deviceContext.toDictionary()
+        }
+        
+        // Add application info if available
+        if let appInfo = applicationInfo {
+            dict["application_info"] = appInfo.toDictionary()
+        }
+        
+        // Add properties
+        dict["properties"] = properties
+        
+        return dict
+    }
+    
+    /// Create from dictionary representation
+    /// - Parameter dict: Dictionary to create from
+    /// - Returns: EventData instance or nil if conversion fails
+    public static func fromDictionary(_ dict: [String: Any]) -> EventData? {
+        guard
+            let eventId = dict["event_id"] as? String,
+            let name = dict["name"] as? String,
+            let eventTypeStr = dict["event_type"] as? String,
+            let eventType = EventType(rawValue: eventTypeStr),
+            let timestampMs = dict["timestamp"] as? Int64,
+            let sessionId = dict["session_id"] as? String,
+            let isAnonymous = dict["is_anonymous"] as? Bool
+        else {
+            return nil
+        }
+        
+        // Convert timestamp
+        let timestamp = Date(timeIntervalSince1970: Double(timestampMs) / 1000.0)
+        
+        // Extract optional fields
+        let userId = dict["user_id"] as? String
+        
+        // Create device context if available
+        let deviceContextDict = dict["device_context"] as? [String: Any]
+        let deviceContext = deviceContextDict.flatMap(DeviceContext.fromDictionary)
+        
+        // Create application info if available
+        let appInfoDict = dict["application_info"] as? [String: Any]
+        let applicationInfo = appInfoDict.flatMap(ApplicationInfo.fromDictionary)
+        
+        // Extract properties
+        let properties = dict["properties"] as? [String: Any] ?? [:]
+        
+        return EventData(
+            eventId: eventId,
+            name: name,
+            eventType: eventType,
+            timestamp: timestamp,
+            sessionId: sessionId,
+            userId: userId,
+            isAnonymous: isAnonymous,
+            deviceContext: deviceContext,
+            applicationInfo: applicationInfo,
+            properties: properties
+        )
     }
 } 

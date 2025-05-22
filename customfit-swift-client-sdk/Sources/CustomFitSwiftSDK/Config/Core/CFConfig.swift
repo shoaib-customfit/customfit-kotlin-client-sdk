@@ -5,6 +5,12 @@ public class CFConfig {
     /// Client API key
     public let clientKey: String
     
+    /// API base URL
+    public let apiBaseUrl: String
+    
+    /// API key for authentication (if different from client key)
+    public let apiKey: String
+    
     // Event tracker configuration
     public let eventsQueueSize: Int
     public let eventsFlushTimeSeconds: Int
@@ -54,6 +60,8 @@ public class CFConfig {
     /// Initialize with all configuration parameters
     /// - Parameters:
     ///   - clientKey: Client API key
+    ///   - apiBaseUrl: API base URL
+    ///   - apiKey: API key for authentication (if different from client key)
     ///   - eventsQueueSize: Events queue size
     ///   - eventsFlushTimeSeconds: Events flush time in seconds
     ///   - eventsFlushIntervalMs: Events flush interval in milliseconds
@@ -79,6 +87,8 @@ public class CFConfig {
     ///   - autoEnvAttributesEnabled: Auto environment attributes enabled
     public init(
         clientKey: String,
+        apiBaseUrl: String,
+        apiKey: String,
         eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
         eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
         eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
@@ -104,6 +114,8 @@ public class CFConfig {
         autoEnvAttributesEnabled: Bool = false
     ) {
         self.clientKey = clientKey
+        self.apiBaseUrl = apiBaseUrl
+        self.apiKey = apiKey
         self.eventsQueueSize = eventsQueueSize
         self.eventsFlushTimeSeconds = eventsFlushTimeSeconds
         self.eventsFlushIntervalMs = eventsFlushIntervalMs
@@ -135,12 +147,18 @@ public class CFConfig {
     /// - Parameter clientKey: Client API key
     /// - Returns: A new CFConfig instance
     public static func fromClientKey(_ clientKey: String) -> CFConfig {
-        return CFConfig(clientKey: clientKey)
+        return CFConfig(
+            clientKey: clientKey, 
+            apiBaseUrl: CFConstants.Api.BASE_API_URL,
+            apiKey: clientKey
+        )
     }
     
     /// Create a configuration with basic settings
     /// - Parameters:
     ///   - clientKey: Client API key
+    ///   - apiBaseUrl: API base URL (optional, defaults to standard endpoint)
+    ///   - apiKey: API key for authentication (optional, defaults to client key)
     ///   - eventsQueueSize: Events queue size
     ///   - eventsFlushTimeSeconds: Events flush time in seconds
     ///   - eventsFlushIntervalMs: Events flush interval in milliseconds
@@ -150,6 +168,8 @@ public class CFConfig {
     /// - Returns: A new CFConfig instance
     public static func fromClientKey(
         _ clientKey: String,
+        apiBaseUrl: String = CFConstants.Api.BASE_API_URL,
+        apiKey: String? = nil,
         eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE,
         eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS,
         eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS,
@@ -159,6 +179,8 @@ public class CFConfig {
     ) -> CFConfig {
         return CFConfig(
             clientKey: clientKey,
+            apiBaseUrl: apiBaseUrl,
+            apiKey: apiKey ?? clientKey,
             eventsQueueSize: eventsQueueSize,
             eventsFlushTimeSeconds: eventsFlushTimeSeconds,
             eventsFlushIntervalMs: eventsFlushIntervalMs,
@@ -214,6 +236,8 @@ public class CFConfig {
     /// Builder for creating a CFConfig instance
     public class Builder {
         private let clientKey: String
+        private var apiBaseUrl: String = CFConstants.Api.BASE_API_URL
+        private var apiKey: String
         private var eventsQueueSize: Int = CFConstants.EventDefaults.QUEUE_SIZE
         private var eventsFlushTimeSeconds: Int = CFConstants.EventDefaults.FLUSH_TIME_SECONDS
         private var eventsFlushIntervalMs: Int64 = CFConstants.EventDefaults.FLUSH_INTERVAL_MS
@@ -242,6 +266,23 @@ public class CFConfig {
         /// - Parameter clientKey: Client API key
         public init(_ clientKey: String) {
             self.clientKey = clientKey
+            self.apiKey = clientKey
+        }
+        
+        /// Set API base URL
+        /// - Parameter url: API base URL
+        /// - Returns: Builder instance
+        public func apiBaseUrl(_ url: String) -> Builder {
+            self.apiBaseUrl = url
+            return self
+        }
+        
+        /// Set API key for authentication (if different from client key)
+        /// - Parameter key: API key for authentication (if different from client key)
+        /// - Returns: Builder instance
+        public func apiKey(_ key: String) -> Builder {
+            self.apiKey = key
+            return self
         }
         
         /// Set events queue size
@@ -433,6 +474,8 @@ public class CFConfig {
         public func build() -> CFConfig {
             return CFConfig(
                 clientKey: clientKey,
+                apiBaseUrl: apiBaseUrl,
+                apiKey: apiKey,
                 eventsQueueSize: eventsQueueSize,
                 eventsFlushTimeSeconds: eventsFlushTimeSeconds,
                 eventsFlushIntervalMs: eventsFlushIntervalMs,

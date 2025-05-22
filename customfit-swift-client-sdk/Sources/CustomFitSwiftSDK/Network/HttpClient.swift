@@ -5,7 +5,7 @@ public class HttpClient {
     
     // MARK: - Properties
     
-    private let session: URLSession
+    private var session: URLSession
     private let config: CFConfig
     
     /// Default source identification for error handling
@@ -175,7 +175,7 @@ public class HttpClient {
         
         if circuitBreaker.state == .open {
             Logger.warning("Circuit breaker open, not attempting fetch JSON")
-            completion(CFResult.error(message: "Circuit breaker open", category: .network))
+            completion(CFResult<[String: Any]>.createError(message: "Circuit breaker open", category: .network))
             return
         }
         
@@ -203,7 +203,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Network error fetching JSON", error: error, category: .network))
+                completion(CFResult<[String: Any]>.createError(message: "Network error fetching JSON", error: error, category: .network))
                 return
             }
             
@@ -213,7 +213,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Invalid response", category: .network))
+                completion(CFResult<[String: Any]>.createError(message: "Invalid response", category: .network))
                 return
             }
             
@@ -224,7 +224,7 @@ public class HttpClient {
                     circuitBreaker.recordFailure()
                     self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                     
-                    completion(CFResult.error(message: "Empty response data", category: .serialization))
+                    completion(CFResult<[String: Any]>.createError(message: "Empty response data", category: .serialization))
                     return
                 }
                 
@@ -235,7 +235,7 @@ public class HttpClient {
                         circuitBreaker.recordSuccess()
                         self.recordMetrics(endpoint: endpoint, duration: duration, success: true)
                         
-                        completion(CFResult.success(value: json))
+                        completion(CFResult.createSuccess(value: json))
                     } else {
                         let message = "Parsed JSON from \(url.absoluteString) is not an object"
                         Logger.warning("GET JSON FAILED: \(message)")
@@ -248,7 +248,7 @@ public class HttpClient {
                         circuitBreaker.recordFailure()
                         self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                         
-                        completion(CFResult.error(message: message, category: .serialization))
+                        completion(CFResult<[String: Any]>.createError(message: message, category: .serialization))
                     }
                 } catch {
                     Logger.error("GET JSON FAILED: \(error.localizedDescription)")
@@ -262,7 +262,7 @@ public class HttpClient {
                     circuitBreaker.recordFailure()
                     self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                     
-                    completion(CFResult.error(message: "Error parsing JSON response", error: error, category: .serialization))
+                    completion(CFResult<[String: Any]>.createError(message: "Error parsing JSON response", error: error, category: .serialization))
                 }
             } else {
                 let message = "Failed to fetch JSON from \(url.absoluteString): \(httpResponse.statusCode)"
@@ -276,7 +276,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: message, code: httpResponse.statusCode, category: .network))
+                completion(CFResult<[String: Any]>.createError(message: message, code: httpResponse.statusCode, category: .network))
             }
         }
         
@@ -300,7 +300,7 @@ public class HttpClient {
         
         if circuitBreaker.state == .open {
             Logger.warning("Circuit breaker open, not attempting POST JSON")
-            completion(CFResult.error(message: "Circuit breaker open", category: .network))
+            completion(CFResult<Bool>.createError(message: "Circuit breaker open", category: .network))
             return
         }
         
@@ -347,7 +347,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Network error posting JSON", error: error, category: .network))
+                completion(CFResult<Bool>.createError(message: "Network error posting JSON", error: error, category: .network))
                 return
             }
             
@@ -357,7 +357,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Invalid response", category: .network))
+                completion(CFResult<Bool>.createError(message: "Invalid response", category: .network))
                 return
             }
             
@@ -375,7 +375,7 @@ public class HttpClient {
                 circuitBreaker.recordSuccess()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: true)
                 
-                completion(CFResult.success(value: true))
+                completion(CFResult<Bool>.createSuccess(value: true))
             } else {
                 let errorMessage = data != nil ? String(data: data!, encoding: .utf8) ?? "No error body" : "No error body"
                 
@@ -402,7 +402,7 @@ public class HttpClient {
                 circuitBreaker.recordFailure()
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: message, code: httpResponse.statusCode, category: .network))
+                completion(CFResult<Bool>.createError(message: message, code: httpResponse.statusCode, category: .network))
             }
         }
         
@@ -442,7 +442,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Network error fetching metadata", error: error, category: .network))
+                completion(CFResult<[String: String]>.createError(message: "Network error fetching metadata", error: error, category: .network))
                 return
             }
             
@@ -451,7 +451,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Invalid response", category: .network))
+                completion(CFResult<[String: String]>.createError(message: "Invalid response", category: .network))
                 return
             }
             
@@ -470,7 +470,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: true)
                 
-                completion(CFResult.success(value: metadata))
+                completion(CFResult<[String: String]>.createSuccess(value: metadata))
             } else {
                 let message = "Failed to fetch metadata from \(url.absoluteString): \(httpResponse.statusCode)"
                 Logger.warning("GET METADATA FAILED: \(message)")
@@ -482,7 +482,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: message, code: httpResponse.statusCode, category: .network))
+                completion(CFResult<[String: String]>.createError(message: message, code: httpResponse.statusCode, category: .network))
             }
         }
         
@@ -517,7 +517,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(
+                completion(CFResult<[String: String]>.createError(
                     message: "HEAD request failed with exception: \(error.localizedDescription)",
                     error: error,
                     category: .network
@@ -530,7 +530,7 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(message: "Invalid response", category: .network))
+                completion(CFResult<[String: String]>.createError(message: "Invalid response", category: .network))
                 return
             }
             
@@ -551,13 +551,13 @@ public class HttpClient {
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: true)
                 
-                completion(CFResult.success(value: headers))
+                completion(CFResult<[String: String]>.createSuccess(value: headers))
             } else {
                 Logger.warning("API POLL: HEAD request failed with code: \(httpResponse.statusCode)")
                 
                 self.recordMetrics(endpoint: endpoint, duration: duration, success: false)
                 
-                completion(CFResult.error(
+                completion(CFResult<[String: String]>.createError(
                     message: "HEAD request failed with code: \(httpResponse.statusCode)",
                     code: httpResponse.statusCode,
                     category: .network
@@ -582,41 +582,41 @@ public class HttpClient {
         headers: [String: String]? = nil,
         completion: @escaping (Data?, HTTPURLResponse?, Error?) -> Void
     ) {
-        // Create a retriable operation
-        RetryUtil.withRetry(
-            maxAttempts: 3,
-            initialDelayMs: 200,
-            retryIf: { error in
-                // Only retry on network errors, not HTTP errors
-                return (error as NSError).domain == NSURLErrorDomain
-            },
-            operation: { () -> (Data?, HTTPURLResponse?, Error?) in
-                // Create semaphore for synchronous operation
-                let semaphore = DispatchSemaphore(value: 0)
-                var resultData: Data?
-                var resultResponse: HTTPURLResponse?
-                var resultError: Error?
-                
-                // Perform actual request
-                self.performRequest(url: url, method: method, body: body, headers: headers) { data, response, error in
-                    resultData = data
-                    resultResponse = response
-                    resultError = error
-                    semaphore.signal()
+        // Try synchronously to simplify code
+        do {
+            // Execute with retry
+            let result = try RetryUtil.withRetry(
+                maxAttempts: 3,
+                delay: 200,
+                maxDelay: 5000,
+                factor: 2.0,
+                jitter: 0.2,
+                operation: {
+                    // Create semaphore for synchronous operation
+                    let semaphore = DispatchSemaphore(value: 0)
+                    var resultData: Data?
+                    var resultResponse: HTTPURLResponse?
+                    var resultError: Error?
+                    
+                    // Perform actual request
+                    self.performRequest(url: url, method: method, body: body, headers: headers) { data, response, error in
+                        resultData = data
+                        resultResponse = response
+                        resultError = error
+                        semaphore.signal()
+                    }
+                    
+                    // Wait for completion
+                    _ = semaphore.wait(timeout: .distantFuture)
+                    return (resultData, resultResponse, resultError)
                 }
-                
-                // Wait for completion
-                _ = semaphore.wait(timeout: .distantFuture)
-                return (resultData, resultResponse, resultError)
-            },
-            fallback: (nil, nil, NSError(domain: "CustomFit", code: -1, userInfo: [NSLocalizedDescriptionKey: "All retry attempts failed"]))
-        ) { result in
-            switch result {
-            case .success(let value):
-                completion(value.0, value.1, value.2)
-            case .failure(let error):
-                completion(nil, nil, error)
-            }
+            )
+            
+            // Return the result
+            completion(result.0, result.1, result.2)
+        } catch {
+            // All retry attempts failed
+            completion(nil, nil, error)
         }
     }
     
@@ -628,24 +628,24 @@ public class HttpClient {
     public func postJSON(url: URL, body: Data, completion: @escaping (CFResult<[String: Any]>) -> Void) {
         performRequestWithRetry(url: url, method: "POST", body: body, headers: [CFConstants.Http.HEADER_CONTENT_TYPE: CFConstants.Http.CONTENT_TYPE_JSON]) { data, response, error in
             if let error = error {
-                completion(CFResult.error(message: "Network error", error: error, category: .network))
+                completion(CFResult<[String: Any]>.createError(message: "Network error", error: error, category: .network))
                 return
             }
             
             guard let httpResponse = response else {
-                completion(CFResult.error(message: "Invalid response", category: .network))
+                completion(CFResult<[String: Any]>.createError(message: "Invalid response", category: .network))
                 return
             }
             
             if httpResponse.statusCode == 200 || httpResponse.statusCode == 202 {
                 guard let data = data else {
-                    completion(CFResult.error(message: "Empty response data", category: .network))
+                    completion(CFResult<[String: Any]>.createError(message: "Empty response data", category: .network))
                     return
                 }
                 
                 do {
                     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        completion(CFResult.error(message: "Invalid JSON response", category: .serialization))
+                        completion(CFResult<[String: Any]>.createError(message: "Invalid JSON response", category: .serialization))
                         return
                     }
                     
@@ -678,13 +678,13 @@ public class HttpClient {
                         processedJson["configs"] = processedConfigs
                     }
                     
-                    completion(CFResult.success(value: processedJson))
+                    completion(CFResult<[String: Any]>.createSuccess(value: processedJson))
                 } catch {
-                    completion(CFResult.error(message: "Error parsing JSON response", error: error, category: .serialization))
+                    completion(CFResult<[String: Any]>.createError(message: "Error parsing JSON response", error: error, category: .serialization))
                 }
             } else {
                 let errorMessage = data != nil ? String(data: data!, encoding: .utf8) ?? "No error body" : "No error body"
-                completion(CFResult.error(message: "API error: \(httpResponse.statusCode) - \(errorMessage)", code: httpResponse.statusCode, category: .network))
+                completion(CFResult<[String: Any]>.createError(message: "API error: \(httpResponse.statusCode) - \(errorMessage)", code: httpResponse.statusCode, category: .network))
             }
         }
     }
