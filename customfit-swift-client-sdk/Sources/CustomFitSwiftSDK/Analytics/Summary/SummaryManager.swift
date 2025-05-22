@@ -19,11 +19,21 @@ public class SummaryManager {
     /// Lock for thread-safe operations
     private let lock = NSLock()
     
+    /// Timer for periodic flushing
+    private var flushTimer: Timer?
+    private let timerLock = NSLock()
+    
     /// Last flush time
     private var lastFlushTime: Date = Date()
     
     /// Work queue for background operations
     private let workQueue: DispatchQueue
+    
+    /// Summary flush interval in milliseconds
+    private let summariesFlushIntervalMs: Int64
+    
+    /// Summary flush time in seconds
+    private let summariesFlushTimeSeconds: Int
     
     /// Metrics tracking
     private let metricsLock = NSLock()
@@ -74,7 +84,15 @@ public class SummaryManager {
         // Create background queue
         self.workQueue = DispatchQueue(label: "ai.customfit.SummaryManager", qos: .utility)
         
-        Logger.info("📊 SUMMARY: SummaryManager initialized with summaryQueueSize=\(config.summariesQueueSize)")
+        // Initialize timer
+        self.summariesFlushIntervalMs = config.summariesFlushIntervalMs
+        self.summariesFlushTimeSeconds = config.summariesFlushTimeSeconds
+        
+        Logger.info("📊 SUMMARY: SummaryManager initialized with summaryQueueSize=\(config.summariesQueueSize), summariesFlushTimeSeconds=\(config.summariesFlushTimeSeconds), flushIntervalMs=\(config.summariesFlushIntervalMs)")
+        
+        // Start periodic flushing
+        startPeriodicFlush()
+        Logger.info("📊 SUMMARY: Started periodic summary flush with interval \(summariesFlushIntervalMs) ms")
     }
     
     // MARK: - Public Methods
@@ -460,5 +478,75 @@ public class SummaryManager {
             "currentQueueSize": summaryQueue.count,
             "queueCapacity": config.summariesQueueSize
         ]
+    }
+    
+    // MARK: - Periodic Flush Timer Management
+    
+    /// Timer for periodic flushing using DispatchSourceTimer for CLI compatibility
+    private var dispatchTimer: DispatchSourceTimer?
+    
+    /// Starts the periodic flush timer
+    private func startPeriodicFlush() {
+        workQueue.async {
+            self.timerLock.lock()
+            defer { self.timerLock.unlock() }
+            
+            // Cancel existing timer
+            self.dispatchTimer?.cancel()
+            self.dispatchTimer = nil
+            
+            // Get current flush interval
+            let interval = TimeInterval(self.summariesFlushIntervalMs) / 1000.0
+            
+            Logger.debug("📊 SUMMARY: Creating DispatchSourceTimer with interval: \(interval) seconds")
+            
+            // Create dispatch timer for better CLI compatibility
+            self.dispatchTimer = DispatchSource.makeTimerSource(
+                flags: [],
+                queue: self.workQueue
+            )
+            
+            // Configure timer
+            self.dispatchTimer?.schedule(
+                deadline: .now() + interval,
+                repeating: interval,
+                leeway: .milliseconds(100)
+            )
+            
+            // Set timer event handler
+            self.dispatchTimer?.setEventHandler { [weak self] in
+                guard let self = self else { return }
+                Logger.debug("📊 SUMMARY: Periodic flush triggered for summaries")
+                self.flushSummaries()
+            }
+            
+            // Start the timer
+            self.dispatchTimer?.resume()
+            
+            Logger.info("📊 SUMMARY: Started DispatchSourceTimer for periodic summary flush")
+        }
+    }
+    
+    /// Stops the periodic flush timer
+    private func stopPeriodicFlush() {
+        timerLock.lock()
+        defer { timerLock.unlock() }
+        
+        dispatchTimer?.cancel()
+        dispatchTimer = nil
+        
+        // Also clean up the old Timer if it exists
+        flushTimer?.invalidate()
+        flushTimer = nil
+        
+        Logger.debug("📊 SUMMARY: Stopped periodic summary flush timer")
+    }
+    
+    /// Restarts the periodic flush timer with updated interval
+    private func restartPeriodicFlush() {
+        stopPeriodicFlush()
+        startPeriodicFlush()
+        
+        Logger.debug("📊 SUMMARY: Restarted periodic summary flush timer")
     }
 } 

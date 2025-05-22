@@ -124,7 +124,51 @@ public class ConfigManagerImpl: ConfigManager {
             // Check if the type is valid according to the provided check
             if typeCheck(variation) {
                 // The variation is valid, so we can safely cast it
-                Logger.info("CONFIG VALUE: \(key): \(variation)")
+                Logger.info("🔧 CONFIG VALUE: \(key): \(variation)")
+                
+                // Track summary for this config access (like Kotlin does)
+                Logger.debug("📊 SUMMARY: Processing summary for config: \(key)")
+                if let summaryManager = summaryManager {
+                    // Extract experience and config IDs for summary tracking
+                    if let experienceId = configData["experience_id"] as? String,
+                       let configId = configData["config_id"] as? String {
+                        
+                        Logger.debug("📊 SUMMARY: Created summary for experience: \(experienceId), config: \(configId)")
+                        
+                        // Create summary data for this config access
+                        let summaryData = SummaryData(
+                            name: "config_access",
+                            count: 1,
+                            properties: [
+                                "config_key": key,
+                                "experience_id": experienceId,
+                                "config_id": configId,
+                                "variation": variation
+                            ]
+                        )
+                        
+                        let result = summaryManager.trackSummary(summary: summaryData)
+                        if case .success = result {
+                            Logger.debug("📊 SUMMARY: Summary pushed for key: \(key)")
+                            Logger.debug("📊 SUMMARY: Added to queue: experience=\(experienceId), queue size=\(summaryManager.totalSummariesTracked)")
+                        }
+                    } else {
+                        // If experience/config IDs are missing, track a basic config access summary
+                        let summaryData = SummaryData(
+                            name: "config_access",
+                            count: 1,
+                            properties: [
+                                "config_key": key,
+                                "variation": variation
+                            ]
+                        )
+                        _ = summaryManager.trackSummary(summary: summaryData)
+                        Logger.debug("📊 SUMMARY: Summary pushed for key: \(key)")
+                    }
+                } else {
+                    Logger.debug("📊 SUMMARY: SummaryManager not available for tracking config access")
+                }
+                
                 return variation as! T
             } else {
                 // Type check failed, log warning and return fallback

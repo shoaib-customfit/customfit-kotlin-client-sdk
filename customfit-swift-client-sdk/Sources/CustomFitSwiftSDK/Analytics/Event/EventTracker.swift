@@ -63,6 +63,7 @@ public class EventTracker {
     
     /// Timer for periodic event flushing
     private var flushTimer: Timer?
+    private var dispatchTimer: DispatchSourceTimer?
     
     /// Last time events were flushed
     private var lastFlushTime: Date = Date()
@@ -215,14 +216,22 @@ public class EventTracker {
         // Using Logger for consistent logging
         Logger.info("🔔 🔔 TRACK: Tracking event: \(eventName) with properties: \(properties ?? [:])")
         
-        // Always flush summaries first before tracking a new event
-        workQueue.async {
-            Logger.info("🔔 🔔 TRACK: Flushing summaries before tracking event: \(eventName)")
-            let result = self.summaryManager.flushSummaries()
+        // Always flush summaries first before tracking a new event (SYNCHRONOUSLY like Kotlin)
+        Logger.info("🔔 🔔 TRACK: Beginning event flush process")
+        let summaryResult = summaryManager.flushSummaries()
+        
+        switch summaryResult {
+        case .success:
+            Logger.debug("🔔 🔔 TRACK: Successfully flushed summaries before tracking event")
             
-            if case .error(let message, _, _, _) = result {
-                Logger.warning("🔔 🔔 TRACK: Failed to flush summaries before tracking event: \(message)")
-            }
+        case .error(let message, _, _, let category):
+            Logger.warning("🔔 🔔 TRACK: Failed to flush summaries before flushing events: \(message)")
+            ErrorHandler.handleError(
+                message: "Failed to flush summaries before flushing events: \(message)",
+                source: EventTracker.SOURCE,
+                category: category.toErrorHandlerCategory,
+                severity: .medium
+            )
         }
         
         // Validate event name
@@ -585,38 +594,46 @@ public class EventTracker {
             self.timerLock.lock()
             defer { self.timerLock.unlock() }
             
-            // Cancel existing timer
+            // Cancel existing timers
+            self.dispatchTimer?.cancel()
+            self.dispatchTimer = nil
             self.flushTimer?.invalidate()
             self.flushTimer = nil
             
             // Get current flush interval
             let interval = TimeInterval(self.eventsFlushIntervalMs) / 1000.0
             
-            // Create new timer on main thread
-            DispatchQueue.main.async {
-                self.flushTimer = Timer.scheduledTimer(
-                    withTimeInterval: interval,
-                    repeats: true
-                ) { [weak self] _ in
-                    guard let self = self else { return }
-                    
-                    self.workQueue.async {
-                        // Check for events that are older than flush time threshold
-                        if let firstEvent = self.eventQueue.peek(),
-                           Date().timeIntervalSince(firstEvent.timestamp) >= TimeInterval(self.eventsFlushTimeSeconds) {
-                            Logger.debug("🔔 TRACK: Event age threshold reached, triggering flush")
-                            self.flushEvents()
-                        }
-                    }
-                }
+            Logger.debug("🔔 TRACK: Creating DispatchSourceTimer with interval: \(interval) seconds")
+            
+            // Create dispatch timer for better CLI compatibility
+            self.dispatchTimer = DispatchSource.makeTimerSource(
+                flags: [],
+                queue: self.workQueue
+            )
+            
+            // Configure timer
+            self.dispatchTimer?.schedule(
+                deadline: .now() + interval,
+                repeating: interval,
+                leeway: .milliseconds(100)
+            )
+            
+            // Set timer event handler
+            self.dispatchTimer?.setEventHandler { [weak self] in
+                guard let self = self else { return }
                 
-                // Add to common run loop modes to ensure timer fires during scrolling, etc.
-                if let timer = self.flushTimer {
-                    RunLoop.current.add(timer, forMode: .common)
+                // Check for events that are older than flush time threshold
+                if let firstEvent = self.eventQueue.peek(),
+                   Date().timeIntervalSince(firstEvent.timestamp) >= TimeInterval(self.eventsFlushTimeSeconds) {
+                    Logger.debug("🔔 TRACK: Event age threshold reached, triggering flush")
+                    self.flushEvents()
                 }
             }
             
-            Logger.debug("Started periodic event flush timer with interval \(interval) seconds")
+            // Start the timer
+            self.dispatchTimer?.resume()
+            
+            Logger.debug("🔔 TRACK: Started DispatchSourceTimer for periodic event flush")
         }
     }
     
@@ -625,10 +642,13 @@ public class EventTracker {
         timerLock.lock()
         defer { timerLock.unlock() }
         
+        dispatchTimer?.cancel()
+        dispatchTimer = nil
+        
         flushTimer?.invalidate()
         flushTimer = nil
         
-        Logger.debug("Stopped periodic event flush timer")
+        Logger.debug("🔔 TRACK: Stopped periodic event flush timer")
     }
     
     /// Restarts the periodic flush timer with updated interval
@@ -636,7 +656,7 @@ public class EventTracker {
         stopPeriodicFlush()
         startPeriodicFlush()
         
-        Logger.debug("Restarted periodic event flush timer")
+        Logger.debug("🔔 TRACK: Restarted periodic event flush timer")
     }
     
     /// Builds the event API payload
