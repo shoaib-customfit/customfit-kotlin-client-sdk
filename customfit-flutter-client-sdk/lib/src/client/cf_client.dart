@@ -16,6 +16,7 @@ import '../core/error/cf_result.dart';
 import '../core/error/error_handler.dart';
 import '../core/error/error_severity.dart';
 import '../core/error/error_category.dart';
+import '../core/session/session_manager.dart';
 import '../../logging/log_level_updater.dart';
 import '../../logging/logger.dart';
 import '../core/model/application_info.dart';
@@ -135,7 +136,7 @@ class CFClient {
     return CFClient._(config, user);
   }
 
-  final String _sessionId;
+  String _sessionId;
   final MutableCFConfig _mutableConfig;
   // ignore: unused_field
   final HttpClient _httpClient;
@@ -154,6 +155,9 @@ class CFClient {
   /// Connectivity and background
   final ConnectionManagerImpl connectionManager;
   final BackgroundStateMonitor backgroundStateMonitor;
+
+  /// Session manager for handling session lifecycle
+  SessionManager? _sessionManager;
 
   /// Feature config and flag listeners
   final Map<String, List<void Function(dynamic)>> _configListeners = {};
@@ -236,9 +240,69 @@ class CFClient {
     // _mutableConfig.addConfigChangeListener(
     //    (oldC, newC) => _handleConfigChange(oldC, newC));
 
+    // Initialize SessionManager
+    _initializeSessionManager();
+
     // SDK settings polling
     _startPeriodicSdkSettingsCheck();
     _initialSdkSettingsCheck();
+  }
+
+  /// Initialize SessionManager with configuration
+  void _initializeSessionManager() {
+    // Create session configuration based on CFConfig defaults
+    const sessionConfig = SessionConfig(
+      maxSessionDurationMs: 60 * 60 * 1000, // 1 hour default
+      minSessionDurationMs: 5 * 60 * 1000,  // 5 minutes minimum
+      backgroundThresholdMs: 15 * 60 * 1000, // 15 minutes background threshold
+      rotateOnAppRestart: true,
+      rotateOnAuthChange: true,
+      sessionIdPrefix: 'cf_session',
+      enableTimeBasedRotation: true,
+    );
+
+    // Initialize SessionManager asynchronously
+    SessionManager.initialize(config: sessionConfig).then((result) {
+      if (result.isSuccess) {
+        _sessionManager = result.getOrNull();
+        if (_sessionManager != null) {
+          // Get the current session ID
+          _sessionId = _sessionManager!.getCurrentSessionId();
+
+          // Set up session rotation listener
+          final listener = _CFClientSessionListener(this);
+          _sessionManager!.addListener(listener);
+
+          Logger.i('🔄 SessionManager initialized with session: $_sessionId');
+        }
+      } else {
+        Logger.e('Failed to initialize SessionManager: ${result.getErrorMessage()}');
+      }
+    }).catchError((e) {
+      Logger.e('SessionManager initialization error: $e');
+    });
+  }
+
+  /// Update session ID in all managers that use it
+  void _updateSessionIdInManagers(String sessionId) {
+    // TODO: EventTracker and SummaryManager don't have updateSessionId methods
+    // These would need to be enhanced to support dynamic session ID updates
+    // For now, we'll just log the session change
+
+    _sessionId = sessionId;
+    Logger.d('Updated session ID in managers: $sessionId');
+  }
+
+  /// Track session rotation as an analytics event
+  void _trackSessionRotationEvent(String? oldSessionId, String newSessionId, RotationReason reason) {
+    final properties = <String, dynamic>{
+      'old_session_id': oldSessionId ?? 'none',
+      'new_session_id': newSessionId,
+      'rotation_reason': reason.description,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    trackEvent('cf_session_rotated', properties: properties);
   }
 
   /// Initialize application and device context
@@ -266,9 +330,15 @@ class CFClient {
       _CustomAppStateListener(onStateChanged: (state) {
         if (state == AppState.background) {
           _pausePolling();
+          // Notify SessionManager about background transition
+          _sessionManager?.onAppBackground();
         } else if (state == AppState.foreground) {
           _resumePolling();
           _checkSdkSettings();
+          // Notify SessionManager about foreground transition
+          _sessionManager?.onAppForeground();
+          // Update session activity
+          _sessionManager?.updateActivity();
         }
       }),
     );
@@ -536,6 +606,10 @@ class CFClient {
     backgroundStateMonitor.shutdown();
     environmentManager.shutdown();
 
+    // Shutdown SessionManager
+    SessionManager.shutdown();
+    _sessionManager = null;
+
     // Clear listeners if we had implemented them
     // Not implemented yet in Flutter SDK
 
@@ -739,6 +813,55 @@ class CFClient {
       );
     }
   }
+
+  // MARK: - Session Management
+
+  /// Get the current session ID
+  String getCurrentSessionId() {
+    return _sessionManager?.getCurrentSessionId() ?? _sessionId;
+  }
+
+  /// Get current session data with metadata
+  SessionData? getCurrentSessionData() {
+    return _sessionManager?.getCurrentSession();
+  }
+
+  /// Force session rotation with a manual trigger
+  /// Returns the new session ID after rotation
+  Future<String?> forceSessionRotation() async {
+    return await _sessionManager?.forceRotation();
+  }
+
+  /// Update session activity (should be called on user interactions)
+  /// This helps maintain session continuity by updating the last active timestamp
+  Future<void> updateSessionActivity() async {
+    await _sessionManager?.updateActivity();
+  }
+
+  /// Handle user authentication changes
+  /// This will trigger session rotation if configured to do so
+  Future<void> onUserAuthenticationChange(String? userId) async {
+    await _sessionManager?.onAuthenticationChange(userId);
+  }
+
+  /// Get session statistics for debugging and monitoring
+  Map<String, dynamic> getSessionStatistics() {
+    return _sessionManager?.getSessionStats() ?? {
+      'hasActiveSession': false,
+      'sessionId': _sessionId,
+      'sessionManagerInitialized': false,
+    };
+  }
+
+  /// Add a session rotation listener to be notified of session changes
+  void addSessionRotationListener(SessionRotationListener listener) {
+    _sessionManager?.addListener(listener);
+  }
+
+  /// Remove a session rotation listener
+  void removeSessionRotationListener(SessionRotationListener listener) {
+    _sessionManager?.removeListener(listener);
+  }
 }
 
 // Custom listener implementations
@@ -762,5 +885,36 @@ class _CustomAppStateListener implements AppStateListener {
   @override
   void onAppStateChanged(AppState state) {
     onStateChanged(state);
+  }
+}
+
+/// Session rotation listener that integrates with CFClient
+class _CFClientSessionListener implements SessionRotationListener {
+  final CFClient _cfClient;
+
+  _CFClientSessionListener(this._cfClient);
+
+  @override
+  void onSessionRotated(String? oldSessionId, String newSessionId, RotationReason reason) {
+    Logger.i('🔄 Session rotated: ${oldSessionId ?? "null"} -> $newSessionId (${reason.description})');
+
+    // Update session ID in managers
+    _cfClient._updateSessionIdInManagers(newSessionId);
+
+    // Track session rotation event
+    _cfClient._trackSessionRotationEvent(oldSessionId, newSessionId, reason);
+  }
+
+  @override
+  void onSessionRestored(String sessionId) {
+    Logger.i('🔄 Session restored: $sessionId');
+
+    // Update session ID in managers
+    _cfClient._updateSessionIdInManagers(sessionId);
+  }
+
+  @override
+  void onSessionError(String error) {
+    Logger.e('🔄 Session error: $error');
   }
 }

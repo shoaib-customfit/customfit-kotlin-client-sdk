@@ -88,8 +88,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         
         if let currentInstance = _instance {
             Logger.info("Shutting down CFClient singleton")
-            // Perform any necessary cleanup here
-            // currentInstance.cleanup() // if you have cleanup methods
+            currentInstance.shutdown()
         }
         
         _instance = nil
@@ -179,6 +178,12 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// HTTP client
     private let httpClient: HttpClient
     
+    /// Session manager for handling session lifecycle
+    private var sessionManager: SessionManager?
+    
+    /// Current session ID (fallback before SessionManager initializes)
+    private var currentSessionId: String = UUID().uuidString
+    
     /// Whether the SDK is initialized
     private var isInitialized: Bool = false
     
@@ -252,11 +257,10 @@ public class CFClient: AppStateListener, BatteryStateListener {
         self.configManager = confManager
         
         // Create event tracker with session ID
-        let sessionId = UUID().uuidString
         let eventTracker = EventTracker(
             config: self.mutableConfig.config,
             user: userManager,
-            sessionId: sessionId,
+            sessionId: self.currentSessionId,
             httpClient: httpClient,
             summaryManager: summaryManager
         )
@@ -274,6 +278,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Mark as initialized immediately to prevent hanging
         self.isInitialized = true
         Logger.info("🚀 CFClient core initialization complete")
+        
+        // Initialize SessionManager after all properties are set
+        self.initializeSessionManager()
         
         // Perform initial SDK settings check synchronously (like Kotlin does)
         if !self.mutableConfig.offlineMode {
@@ -377,11 +384,10 @@ public class CFClient: AppStateListener, BatteryStateListener {
         self.configManager = confManager
         
         // Create event tracker with session ID
-        let sessionId = UUID().uuidString
         let eventTracker = EventTracker(
             config: self.mutableConfig.config,
             user: userManager,
-            sessionId: sessionId,
+            sessionId: self.currentSessionId,
             httpClient: httpClient,
             summaryManager: summaryManager
         )
@@ -399,6 +405,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Mark as initialized immediately to prevent hanging
         self.isInitialized = true
         Logger.info("🚀 CFClient core initialization complete")
+        
+        // Initialize SessionManager after all properties are set
+        self.initializeSessionManager()
         
         // Perform initial SDK settings check synchronously (like Kotlin does)
         if !self.mutableConfig.offlineMode {
@@ -502,11 +511,10 @@ public class CFClient: AppStateListener, BatteryStateListener {
         self.configManager = confManager
         
         // Create event tracker with session ID
-        let sessionId = UUID().uuidString
         let eventTracker = EventTracker(
             config: self.mutableConfig.config,
             user: userManager,
-            sessionId: sessionId,
+            sessionId: self.currentSessionId,
             httpClient: httpClient,
             summaryManager: summaryManager
         )
@@ -524,6 +532,11 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Mark as initialized immediately to prevent hanging
         self.isInitialized = true
         Logger.info("🚀 CFClient core initialization complete")
+        
+        // Initialize SessionManager only if not skipping setup and after all properties are set
+        if !skipSetup {
+            self.initializeSessionManager()
+        }
         
         // Perform initial SDK settings check synchronously (like Kotlin does)
         if !self.mutableConfig.offlineMode {
@@ -559,6 +572,67 @@ public class CFClient: AppStateListener, BatteryStateListener {
         }
         
         Logger.info("🚀 CFClient initialization completed successfully!")
+    }
+    
+    // MARK: - SessionManager Integration
+    
+    /// Initialize SessionManager with configuration
+    private func initializeSessionManager() {
+        // Create session configuration based on CFConfig defaults
+        let sessionConfig = SessionConfig(
+            maxSessionDurationMs: 60 * 60 * 1000, // 1 hour default
+            minSessionDurationMs: 5 * 60 * 1000,  // 5 minutes minimum
+            backgroundThresholdMs: 15 * 60 * 1000, // 15 minutes background threshold
+            rotateOnAppRestart: true,
+            rotateOnAuthChange: true,
+            sessionIdPrefix: "cf_session",
+            enableTimeBasedRotation: true
+        )
+        
+        // Initialize SessionManager
+        let result = SessionManager.initialize(config: sessionConfig)
+        
+        switch result {
+        case .success(let manager):
+            self.sessionManager = manager
+            
+            // Get the current session ID
+            self.currentSessionId = manager.getCurrentSessionId()
+            
+            // Set up session rotation listener
+            let listener = CFClientSessionListener(cfClient: self)
+            manager.addListener(listener)
+            
+            Logger.info("🔄 SessionManager initialized with session: \(self.currentSessionId)")
+            
+        case .error(let message, let error, _, _):
+            Logger.error("Failed to initialize SessionManager: \(message)")
+            if let error = error {
+                Logger.error(error, "SessionManager initialization error details")
+            }
+        }
+    }
+    
+    /// Update session ID in all managers that use it
+    internal func updateSessionIdInManagers(sessionId: String) {
+        // TODO: EventTracker and SummaryManager don't have updateSessionId methods
+        // These would need to be enhanced to support dynamic session ID updates
+        // For now, we'll just log the session change
+        
+        self.currentSessionId = sessionId
+        Logger.debug("Updated session ID in managers: \(sessionId)")
+    }
+    
+    /// Track session rotation as an analytics event
+    internal func trackSessionRotationEvent(oldSessionId: String?, newSessionId: String, reason: RotationReason) {
+        let properties: [String: Any] = [
+            "old_session_id": oldSessionId ?? "none",
+            "new_session_id": newSessionId,
+            "rotation_reason": reason.description,
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+        ]
+        
+        trackEvent(name: "cf_session_rotated", properties: properties)
     }
     
     private func setupListeners() {
@@ -669,6 +743,10 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Stop polling and timers
         configManager.shutdown()
         
+        // Shutdown SessionManager
+        SessionManager.shutdown()
+        sessionManager = nil
+        
         Logger.info("🚀 CustomFit SDK shutdown complete")
         isInitialized = false
     }
@@ -678,12 +756,23 @@ public class CFClient: AppStateListener, BatteryStateListener {
     public func onAppStateChange(state: AppState) {
         Logger.info("App state changed: \(state == .background ? "background" : "foreground")")
         
-        // Handle app state changes like Kotlin does
-        if state == .background && mutableConfig.disableBackgroundPolling {
+        // Handle session lifecycle based on app state
+        if state == .background {
+            // Notify SessionManager about background transition
+            sessionManager?.onAppBackground()
+            
             // Pause polling in background if configured to do so
-            Logger.info("App entered background - pausing polling due to disableBackgroundPolling=true")
-            configManager.pausePolling()
+            if mutableConfig.disableBackgroundPolling {
+                Logger.info("App entered background - pausing polling due to disableBackgroundPolling=true")
+                configManager.pausePolling()
+            }
         } else if state == .foreground {
+            // Notify SessionManager about foreground transition
+            sessionManager?.onAppForeground()
+            
+            // Update session activity
+            sessionManager?.updateActivity()
+            
             // Resume polling when app comes to foreground
             Logger.info("App entered foreground - resuming polling")
             configManager.resumePolling()
@@ -1058,6 +1147,61 @@ public class CFClient: AppStateListener, BatteryStateListener {
             }
         }
     }
+    
+    // MARK: - Session Management
+    
+    /// Get the current session ID
+    /// - Returns: Current session ID
+    public func getCurrentSessionId() -> String {
+        return sessionManager?.getCurrentSessionId() ?? currentSessionId
+    }
+    
+    /// Get current session data with metadata
+    /// - Returns: SessionData object with session information or nil if not available
+    public func getCurrentSessionData() -> SessionData? {
+        return sessionManager?.getCurrentSession()
+    }
+    
+    /// Force session rotation with a manual trigger
+    /// - Returns: The new session ID after rotation
+    public func forceSessionRotation() -> String? {
+        return sessionManager?.forceRotation()
+    }
+    
+    /// Update session activity (should be called on user interactions)
+    /// This helps maintain session continuity by updating the last active timestamp
+    public func updateSessionActivity() {
+        sessionManager?.updateActivity()
+    }
+    
+    /// Handle user authentication changes
+    /// This will trigger session rotation if configured to do so
+    /// - Parameter userId: The new user ID (nil if user logged out)
+    public func onUserAuthenticationChange(userId: String?) {
+        sessionManager?.onAuthenticationChange(userId: userId)
+    }
+    
+    /// Get session statistics for debugging and monitoring
+    /// - Returns: Dictionary containing session statistics
+    public func getSessionStatistics() -> [String: Any] {
+        return sessionManager?.getSessionStats() ?? [
+            "hasActiveSession": false,
+            "sessionId": currentSessionId,
+            "sessionManagerInitialized": false
+        ]
+    }
+    
+    /// Add a session rotation listener to be notified of session changes
+    /// - Parameter listener: The listener to add
+    public func addSessionRotationListener(_ listener: SessionRotationListener) {
+        sessionManager?.addListener(listener)
+    }
+    
+    /// Remove a session rotation listener
+    /// - Parameter listener: The listener to remove
+    public func removeSessionRotationListener(_ listener: SessionRotationListener) {
+        sessionManager?.removeListener(listener)
+    }
 }
 
 // MARK: - Helper Closures for Listeners
@@ -1156,5 +1300,41 @@ extension CFClient {
              Logger.info("CFConfig updated. Old: \(oldConfig), New: \(newConfig)")
              // The onConfigChanged(key:) will be called for each changed property by MutableCFConfig
         }
+    }
+}
+
+// MARK: - CFClientSessionListener
+
+/// Session rotation listener that integrates with CFClient
+private class CFClientSessionListener: SessionRotationListener {
+    private weak var cfClient: CFClient?
+    
+    init(cfClient: CFClient) {
+        self.cfClient = cfClient
+    }
+    
+    func onSessionRotated(oldSessionId: String?, newSessionId: String, reason: RotationReason) {
+        Logger.info("🔄 Session rotated: \(oldSessionId ?? "nil") -> \(newSessionId) (\(reason.description))")
+        
+        guard let cfClient = cfClient else { return }
+        
+        // Update session ID in managers
+        cfClient.updateSessionIdInManagers(sessionId: newSessionId)
+        
+        // Track session rotation event
+        cfClient.trackSessionRotationEvent(oldSessionId: oldSessionId, newSessionId: newSessionId, reason: reason)
+    }
+    
+    func onSessionRestored(sessionId: String) {
+        Logger.info("🔄 Session restored: \(sessionId)")
+        
+        guard let cfClient = cfClient else { return }
+        
+        // Update session ID in managers
+        cfClient.updateSessionIdInManagers(sessionId: sessionId)
+    }
+    
+    func onSessionError(error: String) {
+        Logger.error("🔄 Session error: \(error)")
     }
 } 

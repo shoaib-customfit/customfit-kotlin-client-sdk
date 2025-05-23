@@ -53,6 +53,18 @@ export { PerformanceTimer, ScopedTimer, PerformanceMetricsCollector } from './ut
 // Lifecycle management
 export { CFLifecycleManager } from './lifecycle/CFLifecycleManager';
 
+// Session management
+export { 
+  SessionManager, 
+  SessionData, 
+  SessionConfig, 
+  SessionRotationListener, 
+  RotationReason, 
+  DEFAULT_SESSION_CONFIG,
+  createSessionData,
+  updateSessionActivity
+} from './core/session/SessionManager';
+
 // Additional exports for complete API coverage
 export * from './core/types/CFTypes';
 

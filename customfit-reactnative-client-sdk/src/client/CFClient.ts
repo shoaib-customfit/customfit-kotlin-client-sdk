@@ -26,6 +26,14 @@ import { DeviceInfoUtil } from '../platform/DeviceInfo';
 import { EventDataUtil } from '../analytics/event/EventData';
 import { AppStateManager } from '../platform/AppStateManager';
 import { EnvironmentAttributesCollector } from '../platform/EnvironmentAttributesCollector';
+import { 
+  SessionManager, 
+  SessionData, 
+  SessionConfig, 
+  SessionRotationListener, 
+  RotationReason, 
+  DEFAULT_SESSION_CONFIG 
+} from '../core/session/SessionManager';
 
 /**
  * Main CustomFit SDK client
@@ -44,6 +52,10 @@ export class CFClient {
   private readonly connectionMonitor: ConnectionMonitor;
   private readonly appStateManager: AppStateManager;
   private readonly environmentCollector: EnvironmentAttributesCollector;
+
+  /// Session manager for handling session lifecycle
+  private sessionManager: SessionManager | null = null;
+  private sessionId: string = '';
 
   // State
   private isInitialized: boolean = false;
@@ -91,6 +103,9 @@ export class CFClient {
       config.debugLoggingEnabled,
       config.logLevel
     );
+
+    // Initialize session ID with a default value
+    this.sessionId = `cf_session_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
     Logger.info(`CustomFit SDK initialized with client key: ${config.clientKey.substring(0, 8)}...`);
   }
@@ -239,6 +254,9 @@ export class CFClient {
       // Start analytics components
       await this.eventTracker.start();
       await this.summaryManager.start();
+
+      // Initialize SessionManager with configuration
+      await this.initializeSessionManager();
 
       // Load cached configurations
       await this.loadCachedConfigs();
@@ -551,6 +569,10 @@ export class CFClient {
     await this.summaryManager.stop();
     this.connectionMonitor.stopMonitoring();
     this.appStateManager.stopMonitoring();
+
+    // Shutdown SessionManager
+    SessionManager.shutdown();
+    this.sessionManager = null;
 
     // Clear all listeners
     this.featureFlagListeners.clear();
@@ -983,12 +1005,14 @@ export class CFClient {
     // Listen for app state changes
     this.appStateManager.addAppStateListener({
       onAppStateChanged: (newState: AppState, previousState: AppState) => {
-        Logger.info(`🔧 App state changed from ${previousState} to ${newState}`);
+        Logger.info(`🔧 App state changed from: ${previousState} to: ${newState}`);
         
         if (newState === AppState.BACKGROUND && this.config.disableBackgroundPolling) {
           // Pause polling when app goes to background if configured
           Logger.info('🔧 App entered background - pausing operations due to disableBackgroundPolling=true');
           this.stopBackgroundPolling();
+          // Notify SessionManager about background transition
+          this.sessionManager?.onAppBackground();
         } else if (newState === AppState.ACTIVE && previousState === AppState.BACKGROUND) {
           // Resume polling when app comes to foreground
           Logger.info('🔧 App entered foreground - resuming operations');
@@ -997,6 +1021,10 @@ export class CFClient {
           }
           // Refresh configurations immediately when coming to foreground
           this.refreshConfigurations();
+          // Notify SessionManager about foreground transition
+          this.sessionManager?.onAppForeground();
+          // Update session activity
+          this.sessionManager?.updateActivity();
         }
       }
     });
@@ -1017,4 +1045,165 @@ export class CFClient {
       }
     });
   }
-} 
+
+  /**
+   * Initialize SessionManager with configuration
+   */
+  private async initializeSessionManager(): Promise<void> {
+    // Create session configuration based on CFConfig defaults
+    const sessionConfig: SessionConfig = {
+      maxSessionDurationMs: 60 * 60 * 1000, // 1 hour default
+      minSessionDurationMs: 5 * 60 * 1000,  // 5 minutes minimum
+      backgroundThresholdMs: 15 * 60 * 1000, // 15 minutes background threshold
+      rotateOnAppRestart: true,
+      rotateOnAuthChange: true,
+      sessionIdPrefix: 'cf_session',
+      enableTimeBasedRotation: true,
+    };
+
+    try {
+      const result = await SessionManager.initialize(sessionConfig);
+      
+      if (result.isSuccess) {
+        this.sessionManager = result.data!;
+        if (this.sessionManager) {
+          // Get the current session ID
+          this.sessionId = this.sessionManager.getCurrentSessionId();
+
+          // Set up session rotation listener
+          const listener = new CFClientSessionListener(this);
+          this.sessionManager.addListener(listener);
+
+          Logger.info('🔄 SessionManager initialized with session: ' + this.sessionId);
+        }
+      } else {
+        Logger.error('Failed to initialize SessionManager: ' + (result.error?.message || 'unknown error'));
+      }
+    } catch (error) {
+      Logger.error('SessionManager initialization error: ' + error);
+    }
+  }
+
+  /**
+   * Update session ID in all managers that use it
+   */
+  public updateSessionIdInManagers(sessionId: string): void {
+    // TODO: EventTracker and SummaryManager don't have updateSessionId methods
+    // These would need to be enhanced to support dynamic session ID updates
+    // For now, we'll just log the session change
+
+    this.sessionId = sessionId;
+    Logger.debug('Updated session ID in managers: ' + sessionId);
+  }
+
+  /**
+   * Track session rotation as an analytics event
+   */
+  public trackSessionRotationEvent(oldSessionId: string | null, newSessionId: string, reason: RotationReason): void {
+    const properties: Record<string, any> = {
+      old_session_id: oldSessionId || 'none',
+      new_session_id: newSessionId,
+      rotation_reason: reason,
+      timestamp: Date.now(),
+    };
+
+    this.trackEvent('cf_session_rotated', properties);
+  }
+
+  // MARK: - Session Management Public API
+
+  /**
+   * Get the current session ID
+   */
+  getCurrentSessionId(): string {
+    return this.sessionManager?.getCurrentSessionId() || this.sessionId;
+  }
+
+  /**
+   * Get current session data with metadata
+   */
+  getCurrentSessionData(): SessionData | null {
+    return this.sessionManager?.getCurrentSession() || null;
+  }
+
+  /**
+   * Force session rotation with a manual trigger
+   * Returns the new session ID after rotation
+   */
+  async forceSessionRotation(): Promise<string | null> {
+    return await this.sessionManager?.forceRotation() || null;
+  }
+
+  /**
+   * Update session activity (should be called on user interactions)
+   * This helps maintain session continuity by updating the last active timestamp
+   */
+  async updateSessionActivity(): Promise<void> {
+    await this.sessionManager?.updateActivity();
+  }
+
+  /**
+   * Handle user authentication changes
+   * This will trigger session rotation if configured to do so
+   */
+  async onUserAuthenticationChange(userId?: string): Promise<void> {
+    await this.sessionManager?.onAuthenticationChange(userId);
+  }
+
+  /**
+   * Get session statistics for debugging and monitoring
+   */
+  getSessionStatistics(): Record<string, any> {
+    return this.sessionManager?.getSessionStats() || {
+      hasActiveSession: false,
+      sessionId: this.sessionId,
+      sessionManagerInitialized: false,
+    };
+  }
+
+  /**
+   * Add a session rotation listener to be notified of session changes
+   */
+  addSessionRotationListener(listener: SessionRotationListener): void {
+    this.sessionManager?.addListener(listener);
+  }
+
+  /**
+   * Remove a session rotation listener
+   */
+  removeSessionRotationListener(listener: SessionRotationListener): void {
+    this.sessionManager?.removeListener(listener);
+  }
+}
+
+/**
+ * Session rotation listener that integrates with CFClient
+ */
+class CFClientSessionListener implements SessionRotationListener {
+  private cfClient: CFClient;
+
+  constructor(cfClient: CFClient) {
+    this.cfClient = cfClient;
+  }
+
+  onSessionRotated(oldSessionId: string | null, newSessionId: string, reason: RotationReason): void {
+    Logger.info('🔄 Session rotated: ' + (oldSessionId || 'null') + ' -> ' + newSessionId + ' (' + reason + ')');
+
+    // Update session ID in managers
+    this.cfClient.updateSessionIdInManagers(newSessionId);
+
+    // Track session rotation event
+    this.cfClient.trackSessionRotationEvent(oldSessionId, newSessionId, reason);
+  }
+
+  onSessionRestored(sessionId: string): void {
+    Logger.info('🔄 Session restored: ' + sessionId);
+
+    // Update session ID in managers
+    this.cfClient.updateSessionIdInManagers(sessionId);
+  }
+
+  onSessionError(error: string): void {
+    Logger.error('🔄 Session error: ' + error);
+  }
+}

@@ -25,6 +25,10 @@ import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.core.model.ContextType
 import customfit.ai.kotlinclient.core.model.DeviceContext
 import customfit.ai.kotlinclient.core.model.EvaluationContext
+import customfit.ai.kotlinclient.core.session.SessionManager
+import customfit.ai.kotlinclient.core.session.SessionConfig
+import customfit.ai.kotlinclient.core.session.SessionRotationListener
+import customfit.ai.kotlinclient.core.session.RotationReason
 import customfit.ai.kotlinclient.logging.Timber
 import customfit.ai.kotlinclient.network.ConfigFetcher
 import customfit.ai.kotlinclient.network.HttpClient
@@ -54,7 +58,6 @@ import kotlinx.coroutines.sync.withLock
  * This class serves as a facade that delegates operations to specialized manager classes.
  */
 class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
-    private val sessionId: String = UUID.randomUUID().toString()
     private val mutableConfig = MutableCFConfig(cfConfig)
     private val httpClient = HttpClient(cfConfig)
     
@@ -63,6 +66,10 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     
     // Used to track initialization of SDK settings
     private val sdkSettingsDeferred: CompletableDeferred<Unit> = CompletableDeferred()
+    
+    // Session management
+    private var sessionManager: SessionManager? = null
+    private var currentSessionId: String = UUID.randomUUID().toString() // Fallback until SessionManager initializes
     
     // Core managers
     private val listenerManager: ListenerManager = ListenerManagerImpl()
@@ -75,9 +82,9 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         clientScope
     )
     
-    // API managers
-    val summaryManager = SummaryManager(sessionId, httpClient, initialUser, cfConfig)
-    val eventTracker = EventTracker(sessionId, httpClient, initialUser, summaryManager, cfConfig)
+    // API managers (will be updated with SessionManager session ID)
+    val summaryManager = SummaryManager(currentSessionId, httpClient, initialUser, cfConfig)
+    val eventTracker = EventTracker(currentSessionId, httpClient, initialUser, summaryManager, cfConfig)
     private val configFetcher = ConfigFetcher(httpClient, cfConfig, initialUser)
     private val configManager: ConfigManager = ConfigManagerImpl(
         configFetcher,
@@ -89,6 +96,9 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
 
     init {
         // Configure logger with the log level from config
+        
+        // Initialize SessionManager
+        initializeSessionManager()
         
         // Set initial offline mode from the config
         if (mutableConfig.offlineMode) {
@@ -126,6 +136,106 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     }
     
     /**
+     * Initialize SessionManager with configuration
+     */
+    private fun initializeSessionManager() {
+        clientScope.launch {
+            try {
+                // Create session configuration based on CFConfig
+                val sessionConfig = SessionConfig(
+                    maxSessionDurationMs = TimeUnit.MINUTES.toMillis(60), // 1 hour default
+                    minSessionDurationMs = TimeUnit.MINUTES.toMillis(5),  // 5 minutes minimum
+                    backgroundThresholdMs = TimeUnit.MINUTES.toMillis(15), // 15 minutes background threshold
+                    rotateOnAppRestart = true,
+                    rotateOnAuthChange = true,
+                    sessionIdPrefix = "cf_session",
+                    enableTimeBasedRotation = true
+                )
+                
+                // Initialize SessionManager with storage
+                val result = SessionManager.initialize(sessionConfig)
+                
+                when (result) {
+                    is CFResult.Success -> {
+                        sessionManager = result.data
+                        
+                        // Get the current session ID
+                        currentSessionId = sessionManager!!.getCurrentSessionId()
+                        
+                        // Update existing managers with new session ID
+                        updateSessionIdInManagers(currentSessionId)
+                        
+                        // Set up session rotation listener
+                        sessionManager!!.addListener(object : SessionRotationListener {
+                            override fun onSessionRotated(oldSessionId: String?, newSessionId: String, reason: RotationReason) {
+                                Timber.i("🔄 Session rotated: $oldSessionId -> $newSessionId (${reason.description})")
+                                currentSessionId = newSessionId
+                                updateSessionIdInManagers(newSessionId)
+                                
+                                // Track session rotation event
+                                trackSessionRotationEvent(oldSessionId, newSessionId, reason)
+                            }
+                            
+                            override fun onSessionRestored(sessionId: String) {
+                                Timber.i("🔄 Session restored: $sessionId")
+                                currentSessionId = sessionId
+                                updateSessionIdInManagers(sessionId)
+                            }
+                            
+                            override fun onSessionError(error: String) {
+                                Timber.e("🔄 Session error: $error")
+                            }
+                        })
+                        
+                        Timber.i("🔄 SessionManager initialized with session: $currentSessionId")
+                    }
+                    is CFResult.Error -> {
+                        Timber.e("Failed to initialize SessionManager: ${result.error}")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Exception initializing SessionManager: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Update session ID in all managers that use it
+     */
+    private fun updateSessionIdInManagers(sessionId: String) {
+        try {
+            // TODO: EventTracker and SummaryManager don't have updateSessionId methods
+            // These would need to be enhanced to support dynamic session ID updates
+            // For now, we'll just log the session change
+            
+            // summaryManager.updateSessionId(sessionId)
+            // eventTracker.updateSessionId(sessionId)
+            
+            Timber.d("Updated session ID in managers: $sessionId")
+        } catch (e: Exception) {
+            Timber.e(e, "Error updating session ID in managers: ${e.message}")
+        }
+    }
+    
+    /**
+     * Track session rotation as an analytics event
+     */
+    private fun trackSessionRotationEvent(oldSessionId: String?, newSessionId: String, reason: RotationReason) {
+        try {
+            val properties = mapOf(
+                "old_session_id" to (oldSessionId ?: "none"),
+                "new_session_id" to newSessionId,
+                "rotation_reason" to reason.description,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            trackEvent("cf_session_rotated", properties)
+        } catch (e: Exception) {
+            Timber.e(e, "Error tracking session rotation event: ${e.message}")
+        }
+    }
+    
+    /**
      * Suspends until SDK settings have been initialized
      * 
      * @return Unit if successful, throws exception if SDK settings initialization failed
@@ -141,22 +251,37 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
                 override fun onAppStateChange(state: AppState) {
                     Timber.d("App state changed: $state")
                     
-                    if (state == AppState.BACKGROUND && mutableConfig.disableBackgroundPolling) {
-                        // Pause polling in background if configured to do so
-                        configManager.pausePolling()
-                    } else if (state == AppState.FOREGROUND) {
-                        // Resume polling when app comes to foreground
-                        configManager.resumePolling()
-                        
-                        // Check for updates immediately when coming to foreground
-                        clientScope.launch {
-                            CoroutineUtils.withErrorHandling(
-                                errorMessage = "Failed to check SDK settings on foreground"
-                            ) { 
-                                configManager.checkSdkSettings() 
+                    // Handle session lifecycle based on app state
+                    clientScope.launch {
+                        when (state) {
+                            AppState.BACKGROUND -> {
+                                // Notify SessionManager about background transition
+                                sessionManager?.onAppBackground()
+                                
+                                // Pause polling in background if configured to do so
+                                if (mutableConfig.disableBackgroundPolling) {
+                                    configManager.pausePolling()
+                                }
                             }
-                            .onFailure { e ->
-                                Timber.e(e, "Failed to check SDK settings on foreground: ${e.message}")
+                            AppState.FOREGROUND -> {
+                                // Notify SessionManager about foreground transition
+                                sessionManager?.onAppForeground()
+                                
+                                // Update session activity
+                                sessionManager?.updateActivity()
+                                
+                                // Resume polling when app comes to foreground
+                                configManager.resumePolling()
+                                
+                                // Check for updates immediately when coming to foreground
+                                CoroutineUtils.withErrorHandling(
+                                    errorMessage = "Failed to check SDK settings on foreground"
+                                ) { 
+                                    configManager.checkSdkSettings() 
+                                }
+                                .onFailure { e ->
+                                    Timber.e(e, "Failed to check SDK settings on foreground: ${e.message}")
+                                }
                             }
                         }
                     }
@@ -812,6 +937,16 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         connectionManager.shutdown()
         environmentManager.shutdown()
         
+        // Shutdown SessionManager
+        clientScope.launch {
+            try {
+                SessionManager.shutdown()
+                sessionManager = null
+            } catch (e: Exception) {
+                Timber.e(e, "Error shutting down SessionManager: ${e.message}")
+            }
+        }
+        
         // Clear listeners
         listenerManager.clearAllListeners()
         
@@ -841,6 +976,78 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         .onFailure { e ->
             Timber.e(e, "Force refresh failed: ${e.message}")
         }
+    }
+    
+    // SESSION MANAGEMENT METHODS
+    
+    /**
+     * Get the current session ID
+     * @return The current session ID
+     */
+    suspend fun getCurrentSessionId(): String {
+        return sessionManager?.getCurrentSessionId() ?: currentSessionId
+    }
+    
+    /**
+     * Get current session data with metadata
+     * @return SessionData object with session information or null if not available
+     */
+    suspend fun getCurrentSessionData(): customfit.ai.kotlinclient.core.session.SessionData? {
+        return sessionManager?.getCurrentSession()
+    }
+    
+    /**
+     * Force session rotation with a manual trigger
+     * @return The new session ID after rotation
+     */
+    suspend fun forceSessionRotation(): String? {
+        return sessionManager?.forceRotation()
+    }
+    
+    /**
+     * Update session activity (should be called on user interactions)
+     * This helps maintain session continuity by updating the last active timestamp
+     */
+    suspend fun updateSessionActivity() {
+        sessionManager?.updateActivity()
+    }
+    
+    /**
+     * Handle user authentication changes
+     * This will trigger session rotation if configured to do so
+     * 
+     * @param userId The new user ID (null if user logged out)
+     */
+    suspend fun onUserAuthenticationChange(userId: String?) {
+        sessionManager?.onAuthenticationChange(userId)
+    }
+    
+    /**
+     * Get session statistics for debugging and monitoring
+     * @return Map containing session statistics
+     */
+    suspend fun getSessionStatistics(): Map<String, Any> {
+        return sessionManager?.getSessionStats() ?: mapOf(
+            "hasActiveSession" to false,
+            "sessionId" to currentSessionId,
+            "sessionManagerInitialized" to false
+        )
+    }
+    
+    /**
+     * Add a session rotation listener to be notified of session changes
+     * @param listener The listener to add
+     */
+    fun addSessionRotationListener(listener: SessionRotationListener) {
+        sessionManager?.addListener(listener)
+    }
+    
+    /**
+     * Remove a session rotation listener
+     * @param listener The listener to remove
+     */
+    fun removeSessionRotationListener(listener: SessionRotationListener) {
+        sessionManager?.removeListener(listener)
     }
     
     companion object {

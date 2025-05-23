@@ -20,6 +20,9 @@ export 'src/core/error/error_severity.dart';
 export 'src/core/model/device_context.dart';
 export 'src/core/model/application_info.dart';
 
+// Session management exports
+export 'src/core/session/session_manager.dart';
+
 // Manager exports
 export 'src/client/managers/config_manager.dart';
 export 'src/client/managers/user_manager.dart';
