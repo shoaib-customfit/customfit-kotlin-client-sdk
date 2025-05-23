@@ -270,11 +270,11 @@ class ConfigCache {
   void synchronized(void Function() action) {
     // This is a simple synchronization mechanism
     // In more complex scenarios, consider using a proper lock
-    synchronized_inner(_cacheLock, action);
+    synchronizedInner(_cacheLock, action);
   }
 
   // Helper for synchronization
-  void synchronized_inner(Object lock, void Function() action) {
+  void synchronizedInner(Object lock, void Function() action) {
     action();
   }
 }

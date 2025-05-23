@@ -16,6 +16,22 @@ export { CFConfigImpl as CFConfig } from './config/core/CFConfig';
 // User model
 export { CFUserImpl as CFUser } from './core/model/CFUser';
 
+// Context management - export from CFTypes
+export { 
+  EvaluationContext, 
+  evaluationContextFromMap, 
+  evaluationContextToMap,
+  DeviceContext, 
+  deviceContextFromMap, 
+  deviceContextToMap, 
+  createBasicDeviceContext,
+  ApplicationInfo, 
+  applicationInfoFromMap, 
+  applicationInfoToMap,
+  ContextType, 
+  contextTypeFromString 
+} from './core/types/CFTypes';
+
 // Main client
 export { CFClient } from './client/CFClient';
 

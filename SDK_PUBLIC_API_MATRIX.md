@@ -47,32 +47,32 @@ This document provides a comprehensive comparison of all public functions expose
 
 | Function | Kotlin | Swift | Flutter | React Native | Usage Example | Notes |
 |----------|--------|-------|---------|--------------|---------------|-------|
-| `addUserProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addUserProperty("age", 25)` | Add single property |
-| `addStringProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addStringProperty("name", "John")` | Type-specific property |
-| `addNumberProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addNumberProperty("score", 100)` | Type-specific property |
-| `addBooleanProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addBooleanProperty("premium", true)` | Type-specific property |
-| `addDateProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addDateProperty("signup", Date())` | Type-specific property |
-| `addGeoPointProperty(key, lat, lon)` | ✅ | ✅ | ❌ | ❌ | `client.addGeoPointProperty("location", 37.7749, -122.4194)` | Geo property |
-| `addJsonProperty(key, value)` | ✅ | ✅ | ❌ | ❌ | `client.addJsonProperty("preferences", {"theme": "dark"})` | JSON property |
-| `addUserProperties(properties)` | ✅ | ✅ | ❌ | ❌ | `client.addUserProperties({"age": 25, "city": "SF"})` | Bulk properties |
-| `getUserProperties()` | ✅ | ✅ | ❌ | ❌ | `client.getUserProperties()` | Get all properties |
-| `setUserAttribute(key, value)` | ❌ | ❌ | ❌ | ✅ | `client.setUserAttribute("age", 25)` | Set single attribute |
-| `setUserAttributes(attributes)` | ❌ | ❌ | ❌ | ✅ | `client.setUserAttributes({"age": 25, "city": "SF"})` | Set multiple attributes |
+| `addUserProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addUserProperty("age", 25)` | Add single property |
+| `addStringProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addStringProperty("name", "John")` | Type-specific property |
+| `addNumberProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addNumberProperty("score", 100)` | Type-specific property |
+| `addBooleanProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addBooleanProperty("premium", true)` | Type-specific property |
+| `addDateProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addDateProperty("signup", Date())` | Type-specific property |
+| `addGeoPointProperty(key, lat, lon)` | ✅ | ✅ | ❌ | ✅ | `client.addGeoPointProperty("location", 37.7749, -122.4194)` | Geo property |
+| `addJsonProperty(key, value)` | ✅ | ✅ | ❌ | ✅ | `client.addJsonProperty("preferences", {"theme": "dark"})` | JSON property |
+| `addUserProperties(properties)` | ✅ | ✅ | ❌ | ✅ | `client.addUserProperties({"age": 25, "city": "SF"})` | Bulk properties |
+| `getUserProperties()` | ✅ | ✅ | ❌ | ✅ | `client.getUserProperties()` | Get all properties |
+| `setUserAttribute(key, value)` | ❌ | 🟡 | ❌ | 🟡 | `client.setUserAttribute("age", 25)` | **DEPRECATED** - Use `addUserProperty` |
+| `setUserAttributes(attributes)` | ❌ | 🟡 | ❌ | 🟡 | `client.setUserAttributes({"age": 25, "city": "SF"})` | **DEPRECATED** - Use `addUserProperties` |
 | `setUser(user)` | ❌ | ❌ | ❌ | ✅ | `client.setUser(newUser)` | Replace user |
 | `getUser()` | ❌ | ❌ | ❌ | ✅ | `client.getUser()` | Get current user |
-| `incrementAppLaunchCount()` | ✅ | ✅ | ❌ | ✅ | `client.incrementAppLaunchCount()` | Increment launch count |
+| `incrementAppLaunchCount()` | ✅ | ✅ | ✅ | ✅ | `client.incrementAppLaunchCount()` | Increment launch count |
 
 ### Context Management
 
 | Function | Kotlin | Swift | Flutter | React Native | Usage Example | Notes |
 |----------|--------|-------|---------|--------------|---------------|-------|
-| `addContext(context)` | ✅ | ✅ | ❌ | ❌ | `client.addContext(locationContext)` | Add evaluation context |
-| `removeContext(type, key)` | ✅ | ✅ | ❌ | ❌ | `client.removeContext(ContextType.LOCATION, "user_location")` | Remove context |
-| `getContexts()` | ✅ | ✅ | ❌ | ❌ | `client.getContexts()` | Get all contexts |
-| `setDeviceContext(context)` | ✅ | ✅ | ❌ | ❌ | `client.setDeviceContext(deviceInfo)` | Set device context |
-| `getDeviceContext()` | ✅ | ✅ | ❌ | ❌ | `client.getDeviceContext()` | Get device context |
-| `setApplicationInfo(info)` | ✅ | ✅ | ❌ | ❌ | `client.setApplicationInfo(appInfo)` | Set app info |
-| `getApplicationInfo()` | ✅ | ✅ | ❌ | ❌ | `client.getApplicationInfo()` | Get app info |
+| `addContext(context)` | ✅ | ✅ | ✅ | ✅ | `client.addContext(locationContext)` | Add evaluation context |
+| `removeContext(type, key)` | ✅ | ✅ | ✅ | ✅ | `client.removeContext(ContextType.LOCATION, "user_location")` | Remove context |
+| `getContexts()` | ✅ | ✅ | ✅ | ✅ | `client.getContexts()` | Get all contexts |
+| `setDeviceContext(context)` | ❌ | ❌ | ❌ | ❌ | N/A | **REMOVED** - Auto-collected when `autoEnvAttributesEnabled=true` |
+| `getDeviceContext()` | ❌ | ❌ | ❌ | ❌ | N/A | **REMOVED** - Auto-collected when `autoEnvAttributesEnabled=true` |
+| `setApplicationInfo(info)` | ❌ | ❌ | ❌ | ❌ | N/A | **REMOVED** - Auto-collected when `autoEnvAttributesEnabled=true` |
+| `getApplicationInfo()` | ❌ | ❌ | ❌ | ❌ | N/A | **REMOVED** - Auto-collected when `autoEnvAttributesEnabled=true` |
 
 ### Listener Management
 
@@ -106,10 +106,10 @@ This document provides a comprehensive comparison of all public functions expose
 
 | Function | Kotlin | Swift | Flutter | React Native | Usage Example | Notes |
 |----------|--------|-------|---------|--------------|---------------|-------|
-| `forceRefresh()` | ❌ | ❌ | ❌ | ✅ | `client.forceRefresh()` | Force config refresh |
-| `fetchConfigs()` | ❌ | ❌ | ✅ | ❌ | `client.fetchConfigs()` | Manual config fetch |
-| `getMutableConfig()` | ❌ | ❌ | ❌ | ✅ | `client.getMutableConfig()` | Get mutable config |
-| `awaitSdkSettingsCheck()` | ✅ | ❌ | ❌ | ✅ | `client.awaitSdkSettingsCheck()` | Wait for SDK settings |
+| `forceRefresh()` | ❌ | ❌ (private) | ✅ | ✅ | `client.forceRefresh()` | Force config refresh |
+| `fetchConfigs()` | ❌ | ❌ | ❌ (private) | ❌ | `client.fetchConfigs()` | Manual config fetch |
+| `getMutableConfig()` | ❌ | ❌ | ❌ | ❌ (private) | `client.getMutableConfig()` | Get mutable config |
+| `awaitSdkSettingsCheck()` | ❌ (private) | ❌ (private) | ❌ | ✅ | `client.awaitSdkSettingsCheck()` | Wait for SDK settings |
 
 ### Runtime Configuration Updates
 
@@ -127,9 +127,9 @@ This document provides a comprehensive comparison of all public functions expose
 
 | Function | Kotlin | Swift | Flutter | React Native | Usage Example | Notes |
 |----------|--------|-------|---------|--------------|---------------|-------|
-| `enableAutoEnvAttributes()` | ✅ | ✅ | ❌ | ✅ | `client.enableAutoEnvAttributes()` | Enable auto env attributes |
-| `disableAutoEnvAttributes()` | ❌ | ❌ | ❌ | ✅ | `client.disableAutoEnvAttributes()` | Disable auto env attributes |
-| `getEnvironmentAttributes()` | ❌ | ❌ | ❌ | ✅ | `client.getEnvironmentAttributes()` | Get env attributes |
+| `enableAutoEnvAttributes()` | ❌ (private) | ❌ | ❌ | ❌ (private) | `client.enableAutoEnvAttributes()` | Enable auto env attributes |
+| `disableAutoEnvAttributes()` | ❌ (private) | ❌ | ❌ | ❌ (private) | `client.disableAutoEnvAttributes()` | Disable auto env attributes |
+| `getEnvironmentAttributes()` | ❌ | ❌ | ❌ | ❌ (private) | `client.getEnvironmentAttributes()` | Get env attributes |
 
 ### Lifecycle Management
 
@@ -185,17 +185,14 @@ This document provides a comprehensive comparison of all public functions expose
 
 ### 🔴 Critical Inconsistencies (Should be standardized)
 
-1. **User Management**: Kotlin/Swift use `addUserProperty()` while React Native uses `setUserAttribute()`
-2. **Feature Flag Access**: Mixed naming between `getFeatureFlag()`, `getBoolean()`, etc.
-3. **Listener Management**: Some SDKs have both `register/unregister` and `add/remove` patterns
-4. **Configuration Management**: Inconsistent refresh methods across SDKs
+1. **Feature Flag Access**: Mixed naming between `getFeatureFlag()`, `getBoolean()`, etc.
+2. **Listener Management**: Some SDKs have both `register/unregister` and `add/remove` patterns
+3. **Configuration Management**: Inconsistent refresh methods across SDKs
 
 ### 🟡 Medium Priority Inconsistencies (Consider standardizing)
 
-1. **Context Management**: Missing from Flutter and React Native
-2. **Environment Attributes**: Not fully implemented in all SDKs
-3. **Runtime Configuration Updates**: Missing from Flutter
-4. **Lifecycle Management**: Only in React Native
+1. **Runtime Configuration Updates**: Missing from Flutter
+2. **Lifecycle Management**: Only in React Native
 
 ### 🟢 Minor Inconsistencies (Platform-specific, acceptable)
 
@@ -203,19 +200,24 @@ This document provides a comprehensive comparison of all public functions expose
 2. **Type Safety**: Varies based on language capabilities
 3. **Builder Patterns**: Kotlin-specific features
 
+### ✅ Recently Fixed Issues
+
+1. **Device Context & Application Info**: ✅ **FIXED** - Removed public methods from all SDKs. Now automatically collected when `autoEnvAttributesEnabled=true`
+2. **Session Management**: ✅ **IMPLEMENTED** - Consistent session management APIs across all SDKs
+3. **Singleton Pattern**: ✅ **STANDARDIZED** - All SDKs now have consistent singleton initialization patterns
+4. **User Management**: ✅ **FIXED** - All SDKs now use `addUserProperty()` methods following Kotlin naming convention. Old `setUserAttribute()` methods deprecated in Swift and React Native
+
 ### Recommendations for Standardization
 
 #### High Priority (API Consistency)
-1. **Standardize user management methods** across all SDKs
-2. **Align feature flag access methods** to consistent naming
-3. **Unify listener management patterns** (prefer `add/remove` over `register/unregister`)
-4. **Standardize configuration refresh methods**
+1. **Align feature flag access methods** to consistent naming
+2. **Unify listener management patterns** (prefer `add/remove` over `register/unregister`)
+3. **Standardize configuration refresh methods**
 
 #### Medium Priority (Feature Parity)
-1. **Add context management** to Flutter and React Native
-2. **Complete environment attributes** implementation in all SDKs
-3. **Add runtime configuration updates** to Flutter
-4. **Consider lifecycle management** for other SDKs
+1. **Add runtime configuration updates** to Flutter
+2. **Consider lifecycle management** for other SDKs
+3. **Add user management methods** to Flutter SDK for consistency
 
 #### Low Priority (Nice to Have)
 1. **Add convenience methods** like `trackScreenView()` to other SDKs

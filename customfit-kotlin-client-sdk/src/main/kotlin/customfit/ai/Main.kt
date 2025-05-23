@@ -65,9 +65,7 @@ fun main(args: Array<String>) {
                 println(
                         "[${timestamp()}] Debug logging enabled - watch for SDK settings checks in logs"
                 )
-                println("[${timestamp()}] Waiting for initial SDK settings check...")
-                cfClient.awaitSdkSettingsCheck()
-                println("[${timestamp()}] Initial SDK settings check complete.")
+                println("[${timestamp()}] SDK initialization complete.")
 
                 println(
                         "\n[${timestamp()}] Testing event tracking is disabled to reduce POST requests..."

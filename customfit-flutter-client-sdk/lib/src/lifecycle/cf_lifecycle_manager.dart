@@ -100,9 +100,7 @@ class CFLifecycleManager {
   /// Initialize the CFClient with lifecycle management using singleton pattern.
   /// This should be called when your application starts.
   static Future<void> initializeInstance(CFConfig config, CFUser user) async {
-    if (_instance == null) {
-      _instance = CFLifecycleManager._();
-    }
+    _instance ??= CFLifecycleManager._();
     await _instance!.initialize(config, user);
     Logger.i('CFLifecycleManager initialized with singleton pattern');
   }

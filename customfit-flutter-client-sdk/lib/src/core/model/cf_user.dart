@@ -1,6 +1,7 @@
 import 'device_context.dart';
 import 'application_info.dart';
 import 'evaluation_context.dart';
+import 'context_type.dart';
 import 'private_attributes_request.dart';
 
 /// User model defining identity and attributes for the CustomFit SDK
@@ -113,6 +114,23 @@ class CFUser {
   CFUser addContext(EvaluationContext context) {
     final updatedContexts = List<EvaluationContext>.from(contexts);
     updatedContexts.add(context);
+    return CFUser(
+      userCustomerId: userCustomerId,
+      anonymous: anonymous,
+      privateFields: privateFields,
+      sessionFields: sessionFields,
+      properties: properties,
+      contexts: updatedContexts,
+      device: device,
+      application: application,
+    );
+  }
+
+  /// Create a copy with removed context
+  CFUser removeContext(ContextType type, String key) {
+    final updatedContexts = contexts
+        .where((context) => !(context.type == type && context.key == key))
+        .toList();
     return CFUser(
       userCustomerId: userCustomerId,
       anonymous: anonymous,

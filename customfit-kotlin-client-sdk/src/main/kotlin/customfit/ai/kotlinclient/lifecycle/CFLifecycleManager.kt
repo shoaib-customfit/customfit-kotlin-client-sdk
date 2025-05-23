@@ -37,9 +37,7 @@ class CFLifecycleManager private constructor(
         if (isInitialized.compareAndSet(false, true)) {
             try {
                 val client = CFClient.init(cfConfig, user)
-                if (cfConfig.autoEnvAttributesEnabled) {
-                    client.enableAutoEnvAttributes()
-                }
+                // Auto environment attributes are now handled automatically via config.autoEnvAttributesEnabled
                 client.setOnline()
                 Timber.i("CFClient singleton initialized through lifecycle manager")
             } catch (e: Exception) {

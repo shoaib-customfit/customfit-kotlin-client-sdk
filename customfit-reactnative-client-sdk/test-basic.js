@@ -189,9 +189,7 @@ try {
       'shutdown',
       'pause',
       'resume',
-      'awaitSdkSettingsCheck',
-      'updateNetworkConnectionTimeout',
-      'updateEventsFlushInterval'
+      'awaitSdkSettingsCheck'
     ];
     
     console.log('✓ CFClient methods:');

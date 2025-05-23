@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/model/cf_user.dart';
 import '../../core/model/evaluation_context.dart';
+import '../../core/model/context_type.dart';
 import '../../core/model/device_context.dart';
 import '../../core/model/application_info.dart';
 
@@ -27,6 +28,9 @@ abstract class UserManager {
 
   /// Add a context to the user
   void addContext(EvaluationContext context);
+
+  /// Remove a context from the user
+  void removeContext(ContextType type, String key);
 
   /// Update the device context
   void updateDeviceContext(DeviceContext deviceContext);
@@ -81,6 +85,12 @@ class UserManagerImpl implements UserManager {
   @override
   void addContext(EvaluationContext context) {
     _user = _user.addContext(context);
+    _notifyUserChangeListeners();
+  }
+
+  @override
+  void removeContext(ContextType type, String key) {
+    _user = _user.removeContext(type, key);
     _notifyUserChangeListeners();
   }
 

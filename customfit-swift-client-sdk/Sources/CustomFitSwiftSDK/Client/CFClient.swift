@@ -845,20 +845,88 @@ public class CFClient: AppStateListener, BatteryStateListener {
         userManager.updateUser(userManager.getUser().withUserId(userId))
     }
     
-    /// Set user attributes
-    /// - Parameter attributes: User attributes
-    public func setUserAttributes(attributes: [String: Any]) {
-        Logger.info("Setting user attributes: \(attributes)")
-        userManager.updateUser(userManager.getUser().withProperties(attributes))
+    /// Add user property (matches Kotlin naming)
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Property value
+    public func addUserProperty(key: String, value: Any) {
+        Logger.info("Adding user property: \(key)=\(value)")
+        userManager.updateUser(userManager.getUser().withAttribute(key: key, value: value))
     }
     
-    /// Set a single user attribute
+    /// Add string property
     /// - Parameters:
-    ///   - key: Attribute key
-    ///   - value: Attribute value
+    ///   - key: Property key
+    ///   - value: String value
+    public func addStringProperty(key: String, value: String) {
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// Add number property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Number value
+    public func addNumberProperty(key: String, value: NSNumber) {
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// Add boolean property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Boolean value
+    public func addBooleanProperty(key: String, value: Bool) {
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// Add date property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: Date value
+    public func addDateProperty(key: String, value: Date) {
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// Add geo point property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - lat: Latitude
+    ///   - lon: Longitude
+    public func addGeoPointProperty(key: String, lat: Double, lon: Double) {
+        let geoPoint = ["lat": lat, "lon": lon]
+        addUserProperty(key: key, value: geoPoint)
+    }
+    
+    /// Add JSON property
+    /// - Parameters:
+    ///   - key: Property key
+    ///   - value: JSON object as dictionary
+    public func addJsonProperty(key: String, value: [String: Any]) {
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// Add multiple user properties (matches Kotlin naming)
+    /// - Parameter properties: User properties dictionary
+    public func addUserProperties(properties: [String: Any]) {
+        Logger.info("Adding user properties: \(properties)")
+        userManager.updateUser(userManager.getUser().withProperties(properties))
+    }
+    
+    /// Get user properties (matches Kotlin naming)
+    /// - Returns: User properties dictionary
+    public func getUserProperties() -> [String: Any] {
+        return userManager.getUser().getCurrentProperties()
+    }
+    
+    /// @deprecated Use addUserProperty instead
     public func setUserAttribute(key: String, value: Any) {
-        Logger.info("Setting user attribute: \(key)=\(value)")
-        userManager.updateUser(userManager.getUser().withAttribute(key: key, value: value))
+        Logger.warning("setUserAttribute is deprecated, use addUserProperty instead")
+        addUserProperty(key: key, value: value)
+    }
+    
+    /// @deprecated Use addUserProperties instead
+    public func setUserAttributes(attributes: [String: Any]) {
+        Logger.warning("setUserAttributes is deprecated, use addUserProperties instead")
+        addUserProperties(properties: attributes)
     }
     
     /// Set the device ID
@@ -873,6 +941,12 @@ public class CFClient: AppStateListener, BatteryStateListener {
     public func setAnonymousId(anonymousId: String) {
         Logger.info("Setting anonymous ID: \(anonymousId)")
         userManager.updateUser(userManager.getUser().withAnonymousId(anonymousId))
+    }
+    
+    /// Increment the application launch count
+    public func incrementAppLaunchCount() {
+        // TODO: Implement actual launch count tracking
+        Logger.info("App launch count incremented")
     }
     
     // MARK: - Feature Management
@@ -1040,7 +1114,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// Waits for SDK settings to be initialized
     /// This is a Swift equivalent to Kotlin's suspend function
     /// - Parameter completion: Completion handler called when SDK settings have been initialized
-    public func awaitSdkSettingsCheck(completion: @escaping (Error?) -> Void) {
+    private func awaitSdkSettingsCheck(completion: @escaping (Error?) -> Void) {
         Logger.debug("CFClient: Waiting for SDK settings check initialization...")
         
         // Create a background queue that doesn't block the main thread
@@ -1122,7 +1196,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     /// Force a refresh of the configuration regardless of Last-Modified header
     /// - Parameter completion: Optional completion handler
-    public func forceRefresh(completion: ((Error?) -> Void)? = nil) {
+    private func forceRefresh(completion: ((Error?) -> Void)? = nil) {
         Logger.info("Force refreshing configurations")
         
         // For iOS 13+, use async/await

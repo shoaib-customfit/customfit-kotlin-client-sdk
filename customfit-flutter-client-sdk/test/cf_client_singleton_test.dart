@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customfit_flutter_client_sdk/customfit_flutter_client_sdk.dart';
-import 'dart:async';
 
 void main() {
   // Initialize Flutter bindings for testing
@@ -220,9 +219,8 @@ void main() {
       
       expect(CFClient.isInitialized(), isFalse);
       
-      // Use deprecated create method
-      // ignore: deprecated_member_use
-      final detachedClient = CFClient.create(testConfig, testUser);
+      // Use createDetached method instead of deprecated create
+      final detachedClient = CFClient.createDetached(testConfig, testUser);
       expect(detachedClient, isNotNull);
       
       // Should not affect singleton state

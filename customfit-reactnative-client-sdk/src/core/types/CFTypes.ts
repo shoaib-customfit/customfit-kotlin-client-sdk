@@ -2,6 +2,192 @@
  * Core types and interfaces for the CustomFit React Native SDK
  */
 
+// Forward declarations to avoid circular dependencies
+export interface EvaluationContext {
+  type: string;
+  key: string;
+  name?: string;
+  properties: Record<string, any>;
+  privateAttributes?: string[];
+}
+
+export interface DeviceContext {
+  manufacturer?: string;
+  model?: string;
+  osName?: string;
+  osVersion?: string;
+  sdkVersion?: string;
+  appId?: string;
+  appVersion?: string;
+  locale?: string;
+  timezone?: string;
+  screenWidth?: number;
+  screenHeight?: number;
+  screenDensity?: number;
+  networkType?: string;
+  networkCarrier?: string;
+  customAttributes?: Record<string, any>;
+}
+
+export interface ApplicationInfo {
+  appName?: string;
+  packageName?: string;
+  versionName?: string;
+  versionCode?: number;
+  buildNumber?: string;
+  launchCount?: number;
+  installDate?: Date;
+  updateDate?: Date;
+  customAttributes?: Record<string, any>;
+}
+
+export enum ContextType {
+  USER = 'user',
+  DEVICE = 'device',
+  APP = 'app',
+  SESSION = 'session',
+  ORGANIZATION = 'organization',
+  CUSTOM = 'custom',
+}
+
+/**
+ * Helper functions for EvaluationContext
+ */
+export function evaluationContextFromMap(map: Record<string, any>): EvaluationContext {
+  return {
+    type: (map.type as string) || ContextType.CUSTOM,
+    key: map.key as string,
+    name: map.name as string | undefined,
+    properties: (map.properties as Record<string, any>) || {},
+    privateAttributes: (map.private_attributes as string[]) || [],
+  };
+}
+
+export function evaluationContextToMap(context: EvaluationContext): Record<string, any> {
+  const result: Record<string, any> = {
+    type: context.type,
+    key: context.key,
+    properties: context.properties,
+  };
+
+  if (context.name) {
+    result.name = context.name;
+  }
+
+  if (context.privateAttributes && context.privateAttributes.length > 0) {
+    result.private_attributes = context.privateAttributes;
+  }
+
+  return result;
+}
+
+/**
+ * Helper functions for DeviceContext
+ */
+export function createBasicDeviceContext(): DeviceContext {
+  return {
+    sdkVersion: '1.0.0',
+    customAttributes: {},
+  };
+}
+
+export function deviceContextFromMap(map: Record<string, any>): DeviceContext {
+  return {
+    manufacturer: map.manufacturer as string | undefined,
+    model: map.model as string | undefined,
+    osName: map.os_name as string | undefined,
+    osVersion: map.os_version as string | undefined,
+    sdkVersion: (map.sdk_version as string) || '1.0.0',
+    appId: map.app_id as string | undefined,
+    appVersion: map.app_version as string | undefined,
+    locale: map.locale as string | undefined,
+    timezone: map.timezone as string | undefined,
+    screenWidth: map.screen_width as number | undefined,
+    screenHeight: map.screen_height as number | undefined,
+    screenDensity: map.screen_density as number | undefined,
+    networkType: map.network_type as string | undefined,
+    networkCarrier: map.network_carrier as string | undefined,
+    customAttributes: (map.custom_attributes as Record<string, any>) || {},
+  };
+}
+
+export function deviceContextToMap(context: DeviceContext): Record<string, any> {
+  const result: Record<string, any> = {};
+
+  if (context.manufacturer) result.manufacturer = context.manufacturer;
+  if (context.model) result.model = context.model;
+  if (context.osName) result.os_name = context.osName;
+  if (context.osVersion) result.os_version = context.osVersion;
+  if (context.sdkVersion) result.sdk_version = context.sdkVersion;
+  if (context.appId) result.app_id = context.appId;
+  if (context.appVersion) result.app_version = context.appVersion;
+  if (context.locale) result.locale = context.locale;
+  if (context.timezone) result.timezone = context.timezone;
+  if (context.screenWidth) result.screen_width = context.screenWidth;
+  if (context.screenHeight) result.screen_height = context.screenHeight;
+  if (context.screenDensity) result.screen_density = context.screenDensity;
+  if (context.networkType) result.network_type = context.networkType;
+  if (context.networkCarrier) result.network_carrier = context.networkCarrier;
+  if (context.customAttributes) result.custom_attributes = context.customAttributes;
+
+  return result;
+}
+
+/**
+ * Helper functions for ApplicationInfo
+ */
+export function applicationInfoFromMap(map: Record<string, any>): ApplicationInfo {
+  return {
+    appName: map.app_name as string | undefined,
+    packageName: map.package_name as string | undefined,
+    versionName: map.version_name as string | undefined,
+    versionCode: map.version_code as number | undefined,
+    buildNumber: map.build_number as string | undefined,
+    launchCount: map.launch_count as number | undefined,
+    installDate: map.install_date ? new Date(map.install_date) : undefined,
+    updateDate: map.update_date ? new Date(map.update_date) : undefined,
+    customAttributes: (map.custom_attributes as Record<string, any>) || {},
+  };
+}
+
+export function applicationInfoToMap(info: ApplicationInfo): Record<string, any> {
+  const result: Record<string, any> = {};
+
+  if (info.appName) result.app_name = info.appName;
+  if (info.packageName) result.package_name = info.packageName;
+  if (info.versionName) result.version_name = info.versionName;
+  if (info.versionCode) result.version_code = info.versionCode;
+  if (info.buildNumber) result.build_number = info.buildNumber;
+  if (info.launchCount) result.launch_count = info.launchCount;
+  if (info.installDate) result.install_date = info.installDate.toISOString();
+  if (info.updateDate) result.update_date = info.updateDate.toISOString();
+  if (info.customAttributes) result.custom_attributes = info.customAttributes;
+
+  return result;
+}
+
+/**
+ * Convert string to ContextType enum
+ */
+export function contextTypeFromString(value: string): ContextType | null {
+  switch (value.toLowerCase()) {
+    case 'user':
+      return ContextType.USER;
+    case 'device':
+      return ContextType.DEVICE;
+    case 'app':
+      return ContextType.APP;
+    case 'session':
+      return ContextType.SESSION;
+    case 'organization':
+      return ContextType.ORGANIZATION;
+    case 'custom':
+      return ContextType.CUSTOM;
+    default:
+      return null;
+  }
+}
+
 /**
  * Result type for operations that can succeed or fail
  */
@@ -64,6 +250,9 @@ export interface CFUser {
   deviceId?: string;
   anonymous?: boolean;
   properties?: Record<string, any>;
+  contexts?: EvaluationContext[];
+  device?: DeviceContext;
+  application?: ApplicationInfo;
   
   // Immutable update methods
   withUserCustomerId(userCustomerId: string): CFUser;
@@ -72,6 +261,10 @@ export interface CFUser {
   withAnonymous(anonymous: boolean): CFUser;
   withProperties(properties: Record<string, any>): CFUser;
   withProperty(key: string, value: any): CFUser;
+  withContext(context: EvaluationContext): CFUser;
+  withDeviceContext(device: DeviceContext): CFUser;
+  withApplicationInfo(application: ApplicationInfo): CFUser;
+  removeContext(type: ContextType, key: string): CFUser;
   toUserMap(): Record<string, any>;
 }
 
@@ -300,5 +493,8 @@ export interface CFUserBuilder {
   anonymous(isAnonymous: boolean): CFUserBuilder;
   properties(props: Record<string, any>): CFUserBuilder;
   property(key: string, value: any): CFUserBuilder;
+  context(context: EvaluationContext): CFUserBuilder;
+  deviceContext(device: DeviceContext): CFUserBuilder;
+  applicationInfo(application: ApplicationInfo): CFUserBuilder;
   build(): CFUser;
 } 

@@ -11,7 +11,11 @@ import {
   AllFlagsChangeListener,
   ConnectionStatusListener,
   AppState,
-  BatteryState
+  BatteryState,
+  EvaluationContext,
+  DeviceContext,
+  ApplicationInfo,
+  ContextType
 } from '../core/types/CFTypes';
 import { CFConfigImpl } from '../config/core/CFConfig';
 import { CFUserImpl } from '../core/model/CFUser';
@@ -258,6 +262,11 @@ export class CFClient {
       // Initialize SessionManager with configuration
       await this.initializeSessionManager();
 
+      // Auto-collect environment attributes if enabled
+      if (this.config.autoEnvAttributesEnabled) {
+        this.enableAutoEnvironmentAttributes();
+      }
+
       // Load cached configurations
       await this.loadCachedConfigs();
 
@@ -407,19 +416,84 @@ export class CFClient {
   }
 
   /**
-   * Set user attribute
+   * Add user property (matches Kotlin naming)
    */
-  setUserAttribute(key: string, value: any): void {
+  addUserProperty(key: string, value: any): void {
     this.currentUser = this.currentUser.withProperty(key, value);
-    Logger.debug(`🔧 User attribute set: ${key} = ${value}`);
+    Logger.debug(`🔧 User property added: ${key} = ${value}`);
   }
 
   /**
-   * Set multiple user attributes
+   * Add string property
+   */
+  addStringProperty(key: string, value: string): void {
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * Add number property
+   */
+  addNumberProperty(key: string, value: number): void {
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * Add boolean property
+   */
+  addBooleanProperty(key: string, value: boolean): void {
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * Add date property
+   */
+  addDateProperty(key: string, value: Date): void {
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * Add geo point property
+   */
+  addGeoPointProperty(key: string, lat: number, lon: number): void {
+    this.addUserProperty(key, { lat, lon });
+  }
+
+  /**
+   * Add JSON property
+   */
+  addJsonProperty(key: string, value: Record<string, any>): void {
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * Add multiple user properties (matches Kotlin naming)
+   */
+  addUserProperties(properties: Record<string, any>): void {
+    this.currentUser = this.currentUser.withProperties(properties);
+    Logger.debug(`🔧 User properties added: ${Object.keys(properties).join(', ')}`);
+  }
+
+  /**
+   * Get user properties (matches Kotlin naming)
+   */
+  getUserProperties(): Record<string, any> {
+    return this.currentUser.properties || {};
+  }
+
+  /**
+   * @deprecated Use addUserProperty instead
+   */
+  setUserAttribute(key: string, value: any): void {
+    Logger.warning('setUserAttribute is deprecated, use addUserProperty instead');
+    this.addUserProperty(key, value);
+  }
+
+  /**
+   * @deprecated Use addUserProperties instead
    */
   setUserAttributes(attributes: Record<string, any>): void {
-    this.currentUser = this.currentUser.withProperties(attributes);
-    Logger.debug(`🔧 User attributes set: ${Object.keys(attributes).join(', ')}`);
+    Logger.warning('setUserAttributes is deprecated, use addUserProperties instead');
+    this.addUserProperties(attributes);
   }
 
   /**
@@ -496,7 +570,7 @@ export class CFClient {
   /**
    * Get the mutable configuration (matches Kotlin)
    */
-  getMutableConfig(): CFConfig {
+  private getMutableConfig(): CFConfig {
     return this.config;
   }
 
@@ -543,7 +617,7 @@ export class CFClient {
   incrementAppLaunchCount(): void {
     // Update user properties with app launch count
     const currentLaunchCount = (this.currentUser.properties?.launch_count || 0) as number;
-    this.setUserAttribute('launch_count', currentLaunchCount + 1);
+    this.addUserProperty('launch_count', currentLaunchCount + 1);
     Logger.debug(`🔧 App launch count incremented to: ${currentLaunchCount + 1}`);
   }
 
@@ -595,107 +669,23 @@ export class CFClient {
   /**
    * Get environment attributes
    */
-  async getEnvironmentAttributes(): Promise<Record<string, any>> {
+  private async getEnvironmentAttributes(): Promise<Record<string, any>> {
     return await this.environmentCollector.getAllAttributes();
   }
 
   /**
    * Enable automatic environment attributes collection (matches Kotlin)
    */
-  enableAutoEnvAttributes(): void {
+  private enableAutoEnvAttributes(): void {
     this.enableAutoEnvironmentAttributes();
   }
 
   /**
    * Disable automatic environment attributes collection (matches Kotlin)
    */
-  disableAutoEnvAttributes(): void {
+  private disableAutoEnvAttributes(): void {
     Logger.info('🔧 Auto environment attributes disabled');
     // Implementation would stop including environment attributes
-  }
-
-  /**
-   * Set logging enabled/disabled (matches Kotlin)
-   */
-  setLoggingEnabled(enabled: boolean): void {
-    Logger.setLoggingEnabled(enabled);
-  }
-
-  /**
-   * Set debug logging enabled/disabled (matches Kotlin)
-   */
-  setDebugLoggingEnabled(enabled: boolean): void {
-    Logger.setDebugLoggingEnabled(enabled);
-  }
-
-  /**
-   * Update network connection timeout (matches Kotlin)
-   */
-  updateNetworkConnectionTimeout(timeoutMs: number): void {
-    if (timeoutMs <= 0) {
-      Logger.warning('🔧 Connection timeout must be greater than 0');
-      return;
-    }
-    // Update HttpClient timeout - would need to implement in HttpClient
-    Logger.info(`🔧 Network connection timeout updated to: ${timeoutMs}ms`);
-  }
-
-  /**
-   * Update network read timeout (matches Kotlin)
-   */
-  updateNetworkReadTimeout(timeoutMs: number): void {
-    if (timeoutMs <= 0) {
-      Logger.warning('🔧 Read timeout must be greater than 0');
-      return;
-    }
-    // Update HttpClient timeout - would need to implement in HttpClient
-    Logger.info(`🔧 Network read timeout updated to: ${timeoutMs}ms`);
-  }
-
-  /**
-   * Update SDK settings check interval (matches Kotlin)
-   */
-  updateSdkSettingsCheckInterval(intervalMs: number): void {
-    if (intervalMs <= 0) {
-      Logger.warning('🔧 SDK settings interval must be greater than 0');
-      return;
-    }
-    
-    // Restart background polling with new interval
-    this.stopBackgroundPolling();
-    this.startBackgroundPolling();
-    
-    Logger.info(`🔧 SDK settings check interval updated to: ${intervalMs}ms`);
-  }
-
-  /**
-   * Update events flush interval (matches Kotlin)
-   */
-  updateEventsFlushInterval(intervalMs: number): void {
-    if (intervalMs <= 0) {
-      Logger.warning('🔧 Events flush interval must be greater than 0');
-      return;
-    }
-    
-    // Restart event tracker with new interval
-    this.eventTracker.updateFlushInterval(intervalMs);
-    
-    Logger.info(`🔧 Events flush interval updated to: ${intervalMs}ms`);
-  }
-
-  /**
-   * Update summaries flush interval (matches Kotlin)
-   */
-  updateSummariesFlushInterval(intervalMs: number): void {
-    if (intervalMs <= 0) {
-      Logger.warning('🔧 Summaries flush interval must be greater than 0');
-      return;
-    }
-    
-    // Restart summary manager with new interval
-    this.summaryManager.updateFlushInterval(intervalMs);
-    
-    Logger.info(`🔧 Summaries flush interval updated to: ${intervalMs}ms`);
   }
 
   /**
@@ -707,8 +697,66 @@ export class CFClient {
       return;
     }
     
-    Logger.info('🔧 Auto environment attributes enabled');
-    // Implementation would automatically include environment attributes in events
+    Logger.info('🔧 Auto environment attributes enabled, collecting device and application info');
+    
+    // Collect and set device context automatically
+    const deviceContext = this.collectDeviceContext(this.currentUser.device);
+    if (deviceContext) {
+      this.currentUser = this.currentUser.withDeviceContext(deviceContext);
+      Logger.debug('Auto-collected device context: ' + (deviceContext.manufacturer || 'unknown') + ' ' + (deviceContext.model || 'unknown'));
+    }
+
+    // Collect and set application info automatically
+    const appInfo = this.collectApplicationInfo(this.currentUser.application);
+    if (appInfo) {
+      this.currentUser = this.currentUser.withApplicationInfo(appInfo);
+      Logger.debug('Auto-collected application info: ' + (appInfo.appName || 'unknown') + ' v' + (appInfo.versionName || 'unknown'));
+    }
+  }
+
+  /**
+   * Collect device context information automatically
+   */
+  private collectDeviceContext(existingContext?: DeviceContext): DeviceContext | null {
+    try {
+      // TODO: Implement actual device info collection using React Native APIs
+      // For now, return basic React Native information
+      return {
+        manufacturer: existingContext?.manufacturer || 'Unknown',
+        model: existingContext?.model || 'Unknown',
+        osName: existingContext?.osName || 'React Native',
+        osVersion: existingContext?.osVersion || 'Unknown',
+        sdkVersion: '1.0.0',
+        locale: existingContext?.locale,
+        timezone: existingContext?.timezone,
+        customAttributes: existingContext?.customAttributes || {},
+      };
+    } catch (error) {
+      Logger.error('Failed to collect device context: ' + error);
+      return null;
+    }
+  }
+
+  /**
+   * Collect application info automatically
+   */
+  private collectApplicationInfo(existingInfo?: ApplicationInfo): ApplicationInfo | null {
+    try {
+      // TODO: Implement actual app info collection using React Native APIs
+      // For now, return basic information
+      return {
+        appName: existingInfo?.appName || 'React Native App',
+        packageName: existingInfo?.packageName || 'com.example.app',
+        versionName: existingInfo?.versionName || '1.0.0',
+        versionCode: existingInfo?.versionCode || 1,
+        buildNumber: existingInfo?.buildNumber || '1',
+        launchCount: (existingInfo?.launchCount || 0) + 1,
+        customAttributes: existingInfo?.customAttributes || {},
+      };
+    } catch (error) {
+      Logger.error('Failed to collect application info: ' + error);
+      return null;
+    }
   }
 
   /**
@@ -1173,6 +1221,44 @@ export class CFClient {
    */
   removeSessionRotationListener(listener: SessionRotationListener): void {
     this.sessionManager?.removeListener(listener);
+  }
+
+  // MARK: - Context Management Public API
+
+  /**
+   * Add an evaluation context to the user
+   */
+  addContext(context: EvaluationContext): void {
+    try {
+      this.currentUser = this.currentUser.withContext(context);
+      Logger.debug('Added evaluation context: ' + context.type + ':' + context.key);
+    } catch (error) {
+      Logger.error('Failed to add context: ' + error);
+    }
+  }
+
+  /**
+   * Remove an evaluation context from the user
+   */
+  removeContext(type: ContextType, key: string): void {
+    try {
+      this.currentUser = this.currentUser.removeContext(type, key);
+      Logger.debug('Removed evaluation context: ' + type + ':' + key);
+    } catch (error) {
+      Logger.error('Failed to remove context: ' + error);
+    }
+  }
+
+  /**
+   * Get all evaluation contexts for the user
+   */
+  getContexts(): EvaluationContext[] {
+    try {
+      return this.currentUser.contexts || [];
+    } catch (error) {
+      Logger.error('Failed to get contexts: ' + error);
+      return [];
+    }
   }
 }
 

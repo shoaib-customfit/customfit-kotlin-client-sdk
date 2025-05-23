@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customfit_flutter_client_sdk/src/core/model/cf_user.dart';
 import 'package:customfit_flutter_client_sdk/src/core/model/evaluation_context.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/context_type.dart';
 import 'package:customfit_flutter_client_sdk/src/core/model/device_context.dart';
 import 'package:customfit_flutter_client_sdk/src/core/model/application_info.dart';
 import 'package:customfit_flutter_client_sdk/src/core/model/private_attributes_request.dart';

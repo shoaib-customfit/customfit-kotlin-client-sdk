@@ -1,20 +1,4 @@
-/// Represents a context type for evaluation
-enum ContextType {
-  /// User context
-  user,
-
-  /// Device context
-  device,
-
-  /// Session context
-  session,
-
-  /// Organization context
-  organization,
-
-  /// Custom context
-  custom
-}
+import 'context_type.dart';
 
 /// An evaluation context that can be used for targeting
 class EvaluationContext {

@@ -236,11 +236,12 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     }
     
     /**
-     * Suspends until SDK settings have been initialized
+     * Wait for SDK settings to be initialized
+     * This is a suspend function that will wait until the SDK settings have been fetched and processed
      * 
      * @return Unit if successful, throws exception if SDK settings initialization failed
      */
-    suspend fun awaitSdkSettingsCheck() = sdkSettingsDeferred.await()
+    private suspend fun awaitSdkSettingsCheck() = sdkSettingsDeferred.await()
     
     /**
      * Set up background state monitoring
@@ -531,32 +532,6 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      */
     fun getContexts(): List<EvaluationContext> = userManager.getContexts()
     
-    // DEVICE AND APPLICATION INFO METHODS
-    
-    /**
-     * Set the device context
-     */
-    fun setDeviceContext(deviceContext: DeviceContext) {
-        userManager.setDeviceContext(deviceContext)
-    }
-    
-    /**
-     * Get the current device context
-     */
-    fun getDeviceContext(): DeviceContext = userManager.getDeviceContext()
-    
-    /**
-     * Set the application info
-     */
-    fun setApplicationInfo(appInfo: ApplicationInfo) {
-        userManager.setApplicationInfo(appInfo)
-    }
-    
-    /**
-     * Get the current application info
-     */
-    fun getApplicationInfo(): ApplicationInfo? = userManager.getApplicationInfo()
-    
     /**
      * Increment the application launch count
      */
@@ -799,89 +774,9 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     // CONFIGURATION UPDATES
     
     /**
-     * Updates the SDK settings check interval
-     * @param intervalMs the new interval in milliseconds
-     */
-    fun updateSdkSettingsCheckInterval(intervalMs: Long) {
-        require(intervalMs > 0) { "Interval must be greater than 0" }
-        clientScope.launch {
-            CoroutineUtils.withErrorHandling(
-                errorMessage = "Failed to update SDK settings check interval"
-            ) { 
-                mutableConfig.setSdkSettingsCheckIntervalMs(intervalMs)
-                configManager.restartPeriodicSdkSettingsCheck(intervalMs)
-            }
-            .onFailure { e ->
-                Timber.e(e, "Failed to update SDK settings check interval: ${e.message}")
-            }
-        }
-    }
-    
-    /**
-     * Updates the events flush interval
-     * @param intervalMs the new interval in milliseconds
-     */
-    fun updateEventsFlushInterval(intervalMs: Long) {
-        require(intervalMs > 0) { "Interval must be greater than 0" }
-        clientScope.launch {
-            CoroutineUtils.withErrorHandling(
-                errorMessage = "Failed to update events flush interval"
-            ) { mutableConfig.setEventsFlushIntervalMs(intervalMs) }
-            .onFailure { e ->
-                Timber.e(e, "Failed to update events flush interval: ${e.message}")
-            }
-        }
-    }
-    
-    /**
-     * Updates the network connection timeout
-     * @param timeoutMs the new timeout in milliseconds
-     */
-    fun updateNetworkConnectionTimeout(timeoutMs: Int) {
-        require(timeoutMs > 0) { "Timeout must be greater than 0" }
-        clientScope.launch {
-            CoroutineUtils.withErrorHandling(
-                errorMessage = "Failed to update network connection timeout"
-            ) { mutableConfig.setNetworkConnectionTimeoutMs(timeoutMs) }
-            .onFailure { e ->
-                Timber.e(e, "Failed to update network connection timeout: ${e.message}")
-            }
-        }
-    }
-    
-    /**
-     * Updates the network read timeout
-     * @param timeoutMs the new timeout in milliseconds
-     */
-    fun updateNetworkReadTimeout(timeoutMs: Int) {
-        require(timeoutMs > 0) { "Timeout must be greater than 0" }
-        clientScope.launch {
-            CoroutineUtils.withErrorHandling(
-                errorMessage = "Failed to update network read timeout"
-            ) { mutableConfig.setNetworkReadTimeoutMs(timeoutMs) }
-            .onFailure { e ->
-                Timber.e(e, "Failed to update network read timeout: ${e.message}")
-            }
-        }
-    }
-    
-    /**
-     * Updates the debug logging setting
-     * @param enabled true to enable debug logging, false to disable
-     */
-    fun setDebugLoggingEnabled(enabled: Boolean) {
-        clientScope.launch {
-            CoroutineUtils.withErrorHandling(errorMessage = "Failed to set debug logging") {
-                mutableConfig.setDebugLoggingEnabled(enabled)
-            }
-            .onFailure { e -> Timber.e(e, "Failed to set debug logging: ${e.message}") }
-        }
-    }
-    
-    /**
      * Enables automatic environment attributes collection
      */
-    fun enableAutoEnvAttributes() {
+    private fun enableAutoEnvAttributes() {
         clientScope.launch {
             CoroutineUtils.withErrorHandling(
                 errorMessage = "Failed to enable auto environment attributes"
@@ -899,7 +794,7 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     /**
      * Disables automatic environment attributes collection
      */
-    fun disableAutoEnvAttributes() {
+    private fun disableAutoEnvAttributes() {
         clientScope.launch {
             CoroutineUtils.withErrorHandling(
                 errorMessage = "Failed to disable auto environment attributes"

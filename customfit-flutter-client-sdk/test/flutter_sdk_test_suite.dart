@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/src/core/model/cf_user.dart';
-import '../lib/src/core/model/evaluation_context.dart';
-import '../lib/src/core/model/context_type.dart';
-import '../lib/src/core/model/device_context.dart';
-import '../lib/src/core/model/application_info.dart';
-import '../lib/src/core/model/private_attributes_request.dart';
-import '../lib/src/config/core/cf_config.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/cf_user.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/evaluation_context.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/context_type.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/device_context.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/application_info.dart';
+import 'package:customfit_flutter_client_sdk/src/core/model/private_attributes_request.dart';
+import 'package:customfit_flutter_client_sdk/src/config/core/cf_config.dart';
 
 void main() {
   group('CustomFit Flutter SDK - Comprehensive Test Suite', () {

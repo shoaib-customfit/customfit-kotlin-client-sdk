@@ -12,6 +12,9 @@ enum ContextType {
   /// Session context type for session-specific targeting
   session,
 
+  /// Organization context type for organization-specific targeting
+  organization,
+
   /// Custom context type for custom targeting rules
   custom;
 
@@ -26,6 +29,8 @@ enum ContextType {
         return 'app';
       case ContextType.session:
         return 'session';
+      case ContextType.organization:
+        return 'organization';
       case ContextType.custom:
         return 'custom';
     }
@@ -42,6 +47,8 @@ enum ContextType {
         return ContextType.app;
       case 'session':
         return ContextType.session;
+      case 'organization':
+        return ContextType.organization;
       case 'custom':
         return ContextType.custom;
       default:

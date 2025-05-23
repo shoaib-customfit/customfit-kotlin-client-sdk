@@ -179,7 +179,7 @@ class CustomFitProvider with ChangeNotifier {
     }
 
     // Fetch latest flags from server
-    final success = await _client!.fetchConfigs();
+    final success = await _client!.forceRefresh();
     if (success) {
       // Values will be updated through listeners
       debugPrint('✅ Flags refreshed successfully');

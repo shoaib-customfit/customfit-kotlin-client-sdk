@@ -23,6 +23,7 @@ import '../core/model/application_info.dart';
 import '../core/model/cf_user.dart';
 import '../core/model/device_context.dart';
 import '../core/model/evaluation_context.dart';
+import '../core/model/context_type.dart';
 import '../network/config_fetcher.dart';
 import '../network/http_client.dart';
 import '../network/connection/connection_information.dart';
@@ -236,10 +237,6 @@ class CFClient {
     // Add main user context
     _addMainUserContext(user);
 
-    // Config change listener
-    // _mutableConfig.addConfigChangeListener(
-    //    (oldC, newC) => _handleConfigChange(oldC, newC));
-
     // Initialize SessionManager
     _initializeSessionManager();
 
@@ -305,14 +302,76 @@ class CFClient {
     trackEvent('cf_session_rotated', properties: properties);
   }
 
-  /// Initialize application and device context
+  /// Initialize application and device context automatically when autoEnvAttributesEnabled is true
   void _initializeEnvironmentAttributes(CFUser user) {
-    _deviceContext = user.device ?? DeviceContext();
-    _updateUserWithDeviceContext(user);
+    if (!_mutableConfig.autoEnvAttributesEnabled) {
+      Logger.d('Auto environment attributes disabled, skipping automatic collection');
+      return;
+    }
 
-    final existingApp = user.application;
-    final appInfo = existingApp ?? ApplicationInfo();
-    _updateUserWithApplicationInfo(user, appInfo);
+    Logger.d('Auto environment attributes enabled, collecting device and application info');
+
+    // Collect device context automatically
+    final deviceContext = _collectDeviceContext(user.device);
+    if (deviceContext != null) {
+      userManager.updateDeviceContext(deviceContext);
+      _deviceContext = deviceContext;
+      Logger.d('Auto-collected device context: ${deviceContext.manufacturer} ${deviceContext.model}');
+    }
+
+    // Collect application info automatically
+    final appInfo = _collectApplicationInfo(user.application);
+    if (appInfo != null) {
+      userManager.updateApplicationInfo(appInfo);
+      Logger.d('Auto-collected application info: ${appInfo.appName} v${appInfo.versionName}');
+    }
+  }
+
+  /// Collect device context information automatically
+  DeviceContext? _collectDeviceContext(DeviceContext? existingContext) {
+    try {
+      // Start with existing context or create new one
+      final context = existingContext ?? DeviceContext();
+      
+      // TODO: Implement actual device info collection using platform channels
+      // For now, return basic Flutter/Dart information
+      return DeviceContext(
+        manufacturer: context.manufacturer ?? 'Unknown',
+        model: context.model ?? 'Unknown',
+        osName: context.osName ?? 'Flutter',
+        osVersion: context.osVersion ?? 'Unknown',
+        sdkVersion: '1.0.0',
+        locale: context.locale,
+        timezone: context.timezone,
+        customAttributes: context.customAttributes,
+      );
+    } catch (e) {
+      Logger.e('Failed to collect device context: $e');
+      return null;
+    }
+  }
+
+  /// Collect application info automatically
+  ApplicationInfo? _collectApplicationInfo(ApplicationInfo? existingInfo) {
+    try {
+      // Start with existing info or create new one
+      final info = existingInfo ?? ApplicationInfo();
+      
+      // TODO: Implement actual app info collection using package_info_plus
+      // For now, return basic information
+      return ApplicationInfo(
+        appName: info.appName ?? 'Flutter App',
+        packageName: info.packageName ?? 'com.example.app',
+        versionName: info.versionName ?? '1.0.0',
+        versionCode: info.versionCode ?? 1,
+        buildType: info.buildType ?? 'debug',
+        launchCount: info.launchCount + 1,
+        customAttributes: info.customAttributes,
+      );
+    } catch (e) {
+      Logger.e('Failed to collect application info: $e');
+      return null;
+    }
   }
 
   /// Setup connection status forwarding
@@ -348,25 +407,6 @@ class CFClient {
     final ctx = EvaluationContext(
         type: ContextType.user, key: user.userCustomerId ?? _sessionId);
     _contexts['user'] = ctx;
-    _updateUserWithDeviceContext(user);
-  }
-
-  void _updateUserWithDeviceContext(CFUser user) {
-    Logger.d('Device context updated');
-  }
-
-  void _updateUserWithApplicationInfo(CFUser user, ApplicationInfo info) {
-    Logger.d('Application info updated');
-  }
-
-  /// Handle dynamic config changes
-  // ignore: unused_element
-  void _handleConfigChange(CFConfig oldC, CFConfig newC) {
-    if (oldC.offlineMode != newC.offlineMode) {
-      configFetcher.setOffline(newC.offlineMode);
-      connectionManager.setOfflineMode(true);
-    }
-    // other change handlers omitted for brevity
   }
 
   /// Periodic SDK settings
@@ -414,14 +454,6 @@ class CFClient {
     // No-op since we're using ConfigManager for polling
     Logger.d(
         'Resume polling request ignored - using ConfigManager for polling');
-  }
-
-  // ignore: unused_element
-  void _adjustPollingForBattery(bool low) {
-    // No-op since we're using ConfigManager for polling
-    // ConfigManager already has battery-aware polling functionality
-    Logger.d(
-        'Battery polling adjustment ignored - using ConfigManager for polling');
   }
 
   void _initialSdkSettingsCheck() async {
@@ -569,11 +601,6 @@ class CFClient {
   }
 
   /// Force a manual fetch of configs
-  Future<bool> fetchConfigs() async {
-    Logger.i('Manually refreshing configurations');
-    return await configManager.refreshConfigs();
-  }
-
   Future<CFResult<void>> trackEvent(
     String eventType, {
     Map<String, dynamic>? properties,
@@ -736,52 +763,6 @@ class CFClient {
     return await configManager.refreshConfigs();
   }
 
-  /// Updates the events flush interval
-  Future<CFResult<void>> updateEventsFlushInterval(int intervalMs) async {
-    try {
-      if (intervalMs <= 0) throw ArgumentError('Interval must be > 0');
-
-      // TODO: Implement EventTracker.updateFlushInterval
-      Logger.i('Updated events flush interval to $intervalMs ms');
-      return CFResult.success(null);
-    } catch (e) {
-      ErrorHandler.handleException(
-        e,
-        'Failed to update events flush interval',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-      return CFResult.error(
-        'Failed to update events flush interval',
-        exception: e,
-        category: ErrorCategory.validation,
-      );
-    }
-  }
-
-  /// Updates the summaries flush interval
-  Future<CFResult<void>> updateSummariesFlushInterval(int intervalMs) async {
-    try {
-      if (intervalMs <= 0) throw ArgumentError('Interval must be > 0');
-
-      // TODO: Implement SummaryManager.updateFlushInterval
-      Logger.i('Updated summaries flush interval to $intervalMs ms');
-      return CFResult.success(null);
-    } catch (e) {
-      ErrorHandler.handleException(
-        e,
-        'Failed to update summaries flush interval',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-      return CFResult.error(
-        'Failed to update summaries flush interval',
-        exception: e,
-        category: ErrorCategory.validation,
-      );
-    }
-  }
-
   /// Increment the application launch count
   void incrementAppLaunchCount() {
     try {
@@ -861,6 +842,57 @@ class CFClient {
   /// Remove a session rotation listener
   void removeSessionRotationListener(SessionRotationListener listener) {
     _sessionManager?.removeListener(listener);
+  }
+
+  // MARK: - Context Management
+
+  /// Add an evaluation context to the user
+  void addContext(EvaluationContext context) {
+    try {
+      userManager.addContext(context);
+      Logger.d('Added evaluation context: ${context.type}:${context.key}');
+    } catch (e) {
+      Logger.e('Failed to add context: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add evaluation context',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Remove an evaluation context from the user
+  void removeContext(ContextType type, String key) {
+    try {
+      userManager.removeContext(type, key);
+      Logger.d('Removed evaluation context: $type:$key');
+    } catch (e) {
+      Logger.e('Failed to remove context: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to remove evaluation context',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Get all evaluation contexts for the user
+  List<EvaluationContext> getContexts() {
+    try {
+      final user = userManager.getUser();
+      return user.contexts;
+    } catch (e) {
+      Logger.e('Failed to get contexts: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to get evaluation contexts',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+      return [];
+    }
   }
 }
 

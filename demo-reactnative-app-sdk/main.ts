@@ -181,10 +181,7 @@ class CustomFitDemo {
 
     if (this.client) {
       log('✓ SDK initialized successfully with lifecycle manager');
-
-      // Wait for SDK settings check
-      await this.client.awaitSdkSettingsCheck();
-      log('✓ SDK settings check completed');
+      log('✓ SDK initialization complete');
     } else {
       throw new Error('Failed to initialize SDK');
     }
@@ -416,32 +413,10 @@ class CustomFitDemo {
 
     if (!this.client) return;
 
-    // Update network timeouts
-    this.client.updateNetworkConnectionTimeout(15000);
-    this.client.updateNetworkReadTimeout(15000);
-    log('✓ Network timeouts updated');
+    // Auto environment attributes are now handled automatically via config
+    log('✓ Auto environment attributes handled via config.autoEnvAttributesEnabled');
 
-    // Update flush intervals
-    this.client.updateEventsFlushInterval(5000);
-    this.client.updateSummariesFlushInterval(30000);
-    log('✓ Flush intervals updated');
-
-    // Update SDK settings check interval
-    this.client.updateSdkSettingsCheckInterval(600000); // 10 minutes
-    log('✓ SDK settings check interval updated');
-
-    // Update logging settings
-    this.client.setDebugLoggingEnabled(true);
-    this.client.setLoggingEnabled(true);
-    log('✓ Logging settings updated');
-
-    // Auto environment attributes
-    this.client.enableAutoEnvAttributes();
-    log('✓ Auto environment attributes enabled');
-
-    // Get mutable config
-    const mutableConfig = this.client.getMutableConfig();
-    log(`✓ Mutable config retrieved: ${mutableConfig.clientKey.substring(0, 8)}...`);
+    log('✓ Dynamic configuration updates completed');
   }
 
   /**
@@ -496,12 +471,8 @@ class CustomFitDemo {
     log(`  - Average response time: ${metrics.averageResponseTime.toFixed(2)}ms`);
     log(`  - Failure rate: ${(metrics.failureRate * 100).toFixed(2)}%`);
 
-    // Get environment attributes
-    const envAttributes = await this.client.getEnvironmentAttributes();
-    log('✓ Environment Attributes:');
-    Object.entries(envAttributes).forEach(([key, value]) => {
-      log(`  - ${key}: ${value}`);
-    });
+    // Environment attributes are now private - they're collected automatically when autoEnvAttributesEnabled=true
+    log('✓ Environment Attributes: Collected automatically when autoEnvAttributesEnabled=true');
 
     // Lifecycle manager metrics
     const lifecycleMetrics = this.lifecycleManager.getMetrics();
