@@ -27,14 +27,14 @@ export class CFResultImpl<T> implements CFResult<T> {
    * Create a successful result with no data
    */
   static successVoid(): CFResult<void> {
-    return new CFResultImpl(true);
+    return new CFResultImpl<void>(true);
   }
 
   /**
    * Create an error result
    */
   static error<T>(error: CFError): CFResult<T> {
-    return new CFResultImpl(false, undefined, error);
+    return new CFResultImpl<T>(false, undefined, error);
   }
 
   /**
@@ -46,7 +46,7 @@ export class CFResultImpl<T> implements CFResult<T> {
       category,
       originalError,
     };
-    return new CFResultImpl(false, undefined, error);
+    return new CFResultImpl<T>(false, undefined, error);
   }
 
   /**
@@ -58,7 +58,7 @@ export class CFResultImpl<T> implements CFResult<T> {
       category,
       originalError: exception,
     };
-    return new CFResultImpl(false, undefined, error);
+    return new CFResultImpl<T>(false, undefined, error);
   }
 
   /**

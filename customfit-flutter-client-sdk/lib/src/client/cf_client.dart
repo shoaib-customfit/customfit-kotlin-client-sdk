@@ -38,7 +38,99 @@ import '../constants/cf_constants.dart';
 class CFClient {
   static const _source = 'CFClient';
 
+  // Singleton implementation
+  static CFClient? _instance;
+  static bool _isInitializing = false;
+  static Completer<CFClient>? _initializationCompleter;
+
+  /// Initialize or get the singleton instance of CFClient
+  /// This method ensures only one instance exists and handles concurrent initialization attempts
+  static Future<CFClient> init(CFConfig config, CFUser user) async {
+    // Fast path: if already initialized, return existing instance
+    if (_instance != null) {
+      Logger.i('CFClient singleton already exists, returning existing instance');
+      return _instance!;
+    }
+
+    // If currently initializing, wait for existing initialization
+    if (_isInitializing && _initializationCompleter != null) {
+      Logger.i('CFClient initialization in progress, waiting for completion...');
+      return _initializationCompleter!.future;
+    }
+
+    // Start new initialization
+    Logger.i('Starting CFClient singleton initialization...');
+    _isInitializing = true;
+    _initializationCompleter = Completer<CFClient>();
+
+    try {
+      // Create the instance
+      final newInstance = CFClient._(config, user);
+
+      // Wait for SDK settings initialization to complete
+      await newInstance._sdkSettingsCompleter.future;
+
+      // Store the singleton instance
+      _instance = newInstance;
+      _isInitializing = false;
+
+      Logger.i('CFClient singleton initialized successfully');
+      _initializationCompleter!.complete(newInstance);
+      return newInstance;
+    } catch (e) {
+      _isInitializing = false;
+      _initializationCompleter = null;
+
+      Logger.e('Failed to initialize CFClient singleton: $e');
+      _initializationCompleter!.completeError(e);
+      rethrow;
+    }
+  }
+
+  /// Get the current singleton instance if it exists
+  static CFClient? getInstance() {
+    return _instance;
+  }
+
+  /// Check if the singleton instance is initialized
+  static bool isInitialized() {
+    return _instance != null;
+  }
+
+  /// Check if initialization is currently in progress
+  static bool isInitializing() {
+    return _isInitializing;
+  }
+
+  /// Shutdown and clear the singleton instance
+  static Future<void> shutdownSingleton() async {
+    if (_instance != null) {
+      Logger.i('Shutting down CFClient singleton...');
+      await _instance!.shutdown();
+      _instance = null;
+      _isInitializing = false;
+      _initializationCompleter = null;
+      Logger.i('CFClient singleton shutdown complete');
+    }
+  }
+
+  /// Force reinitialize the singleton with new configuration
+  static Future<CFClient> reinitialize(CFConfig config, CFUser user) async {
+    Logger.i('Reinitializing CFClient singleton...');
+    await shutdownSingleton();
+    return init(config, user);
+  }
+
+  /// Create a detached (non-singleton) instance of CFClient
+  /// Use this only if you specifically need multiple instances (not recommended)
+  /// Most applications should use init() for singleton pattern
+  static CFClient createDetached(CFConfig config, CFUser user) {
+    Logger.w('Creating detached CFClient instance - this bypasses singleton pattern!');
+    return CFClient._(config, user);
+  }
+
   /// Factory method to create a new CFClient instance
+  @Deprecated('Use init() for singleton pattern or createDetached() for non-singleton instances')
   static CFClient create(CFConfig config, CFUser user) {
     return CFClient._(config, user);
   }

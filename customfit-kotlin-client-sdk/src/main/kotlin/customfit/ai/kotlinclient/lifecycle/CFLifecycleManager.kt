@@ -4,37 +4,61 @@ import customfit.ai.kotlinclient.client.CFClient
 import customfit.ai.kotlinclient.config.core.CFConfig
 import customfit.ai.kotlinclient.core.model.CFUser
 import customfit.ai.kotlinclient.logging.Timber
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * A lifecycle manager that handles the CFClient's lifecycle in JVM applications.
- * This class provides methods to initialize, manage, and cleanup the CFClient.
+ * This class provides methods to initialize, manage, and cleanup the CFClient using the singleton pattern.
  */
 class CFLifecycleManager private constructor(
     private val cfConfig: CFConfig,
     private val user: CFUser
 ) {
-    private var client: CFClient? = null
     private val isInitialized = AtomicBoolean(false)
+    private val lifecycleScope = CoroutineScope(Dispatchers.IO)
 
     init {
         Runtime.getRuntime().addShutdownHook(Thread {
-            cleanup()
+            runBlocking {
+                cleanup()
+            }
         })
     }
 
     /**
-     * Initializes the CFClient if it hasn't been initialized yet.
+     * Initializes the CFClient singleton if it hasn't been initialized yet.
      * This should be called when your application starts.
      */
-    fun initialize() {
+    suspend fun initialize() {
         if (isInitialized.compareAndSet(false, true)) {
-            client = CFClient.init(cfConfig, user)
-            if (cfConfig.autoEnvAttributesEnabled) {
-                client?.enableAutoEnvAttributes()
+            try {
+                val client = CFClient.init(cfConfig, user)
+                if (cfConfig.autoEnvAttributesEnabled) {
+                    client.enableAutoEnvAttributes()
+                }
+                client.setOnline()
+                Timber.i("CFClient singleton initialized through lifecycle manager")
+            } catch (e: Exception) {
+                isInitialized.set(false)
+                Timber.e(e, "Failed to initialize CFClient through lifecycle manager")
+                throw e
             }
-            client?.setOnline()
-            Timber.i("CFClient initialized through lifecycle manager")
+        } else {
+            Timber.i("CFClient singleton already initialized")
+        }
+    }
+
+    /**
+     * Initializes the CFClient singleton asynchronously.
+     * Use this for fire-and-forget initialization.
+     */
+    fun initializeAsync() {
+        lifecycleScope.launch {
+            initialize()
         }
     }
 
@@ -44,8 +68,9 @@ class CFLifecycleManager private constructor(
      */
     fun pause() {
         if (isInitialized.get()) {
-            if (cfConfig.disableBackgroundPolling) {
-                client?.setOffline()
+            val client = CFClient.getInstance()
+            if (client != null && cfConfig.disableBackgroundPolling) {
+                client.setOffline()
             }
             Timber.d("CFClient paused")
         }
@@ -57,6 +82,7 @@ class CFLifecycleManager private constructor(
      */
     fun resume() {
         if (isInitialized.get()) {
+            val client = CFClient.getInstance()
             client?.setOnline()
             client?.incrementAppLaunchCount()
             Timber.d("CFClient resumed")
@@ -67,45 +93,70 @@ class CFLifecycleManager private constructor(
      * Cleans up resources and shuts down the client.
      * This is automatically called when the JVM shuts down.
      */
-    fun cleanup() {
+    suspend fun cleanup() {
         if (isInitialized.compareAndSet(true, false)) {
-            client?.shutdown()
-            client = null
-            Timber.i("CFClient cleaned up through lifecycle manager")
+            CFClient.shutdown()
+            Timber.i("CFClient singleton cleaned up through lifecycle manager")
         }
     }
 
     /**
-     * Gets the current CFClient instance.
+     * Gets the current CFClient singleton instance.
      * Returns null if the client hasn't been initialized.
      */
-    fun getClient(): CFClient? = client
+    fun getClient(): CFClient? = CFClient.getInstance()
 
     companion object {
         private var instance: CFLifecycleManager? = null
 
         /**
-         * Initializes the CFClient with lifecycle management.
+         * Initializes the CFClient with lifecycle management using the singleton pattern.
          * This should be called when your application starts.
          *
          * @param cfConfig The CFConfig to use
          * @param user The CFUser to use
          */
         @JvmStatic
-        fun initialize(cfConfig: CFConfig, user: CFUser) {
+        suspend fun initialize(cfConfig: CFConfig, user: CFUser) {
             if (instance == null) {
                 instance = CFLifecycleManager(cfConfig, user)
                 instance?.initialize()
                 Timber.i("CFLifecycleManager initialized")
+            } else {
+                Timber.i("CFLifecycleManager already exists")
             }
         }
 
         /**
-         * Gets the current CFClient instance.
+         * Initializes the CFClient with lifecycle management asynchronously.
+         * Use this for fire-and-forget initialization.
+         *
+         * @param cfConfig The CFConfig to use
+         * @param user The CFUser to use
+         */
+        @JvmStatic
+        fun initializeAsync(cfConfig: CFConfig, user: CFUser) {
+            if (instance == null) {
+                instance = CFLifecycleManager(cfConfig, user)
+                instance?.initializeAsync()
+                Timber.i("CFLifecycleManager initialized asynchronously")
+            } else {
+                Timber.i("CFLifecycleManager already exists")
+            }
+        }
+
+        /**
+         * Gets the current CFClient singleton instance.
          * Returns null if the client hasn't been initialized.
          */
         @JvmStatic
-        fun getInstanceClient(): CFClient? = instance?.client
+        fun getInstanceClient(): CFClient? = CFClient.getInstance()
+
+        /**
+         * Check if the CFClient singleton is initialized.
+         */
+        @JvmStatic
+        fun isInitialized(): Boolean = CFClient.isInitialized()
 
         /**
          * Puts the client in offline mode.
@@ -124,12 +175,23 @@ class CFLifecycleManager private constructor(
         }
 
         /**
-         * Cleans up resources and shuts down the client.
+         * Cleans up resources and shuts down the client singleton.
          */
         @JvmStatic
-        fun cleanupInstance() {
+        suspend fun cleanupInstance() {
             instance?.cleanup()
             instance = null
+        }
+        
+        /**
+         * Cleans up resources and shuts down the client singleton (blocking version).
+         * Use this in shutdown hooks or when you can't use coroutines.
+         */
+        @JvmStatic
+        fun cleanupInstanceBlocking() {
+            runBlocking {
+                cleanupInstance()
+            }
         }
     }
 } 

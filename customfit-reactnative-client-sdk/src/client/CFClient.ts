@@ -31,7 +31,10 @@ import { EnvironmentAttributesCollector } from '../platform/EnvironmentAttribute
  * Main CustomFit SDK client
  */
 export class CFClient {
-  private static instance: CFClient | null = null;
+  // Singleton implementation
+  private static _instance: CFClient | null = null;
+  private static _isInitializing: boolean = false;
+  private static _initializationPromise: Promise<CFClient> | null = null;
   
   private readonly config: CFConfig;
   private currentUser: CFUser;
@@ -93,30 +96,117 @@ export class CFClient {
   }
 
   /**
-   * Initialize the SDK
+   * Initialize or get the singleton instance of CFClient
+   * This method ensures only one instance exists and handles concurrent initialization attempts
    */
-  static async init(config: CFConfig, user: CFUser): Promise<CFClient> {
-    if (CFClient.instance) {
-      Logger.warning('CFClient already initialized, returning existing instance');
-      return CFClient.instance;
+  static async initialize(config: CFConfig, user: CFUser): Promise<CFClient> {
+    // Fast path: if already initialized, return existing instance
+    if (CFClient._instance) {
+      Logger.info('CFClient singleton already exists, returning existing instance');
+      return CFClient._instance;
     }
 
-    CFClient.instance = new CFClient(config, user);
-    await CFClient.instance.initialize();
-    return CFClient.instance;
+    // If initialization is in progress, wait for it to complete
+    if (CFClient._isInitializing && CFClient._initializationPromise) {
+      Logger.info('CFClient initialization already in progress, waiting for completion');
+      return CFClient._initializationPromise;
+    }
+
+    Logger.info('Creating new CFClient singleton instance');
+    CFClient._isInitializing = true;
+
+    try {
+      CFClient._initializationPromise = (async () => {
+        const newInstance = new CFClient(config, user);
+        await newInstance.initializeInternal();
+        CFClient._instance = newInstance;
+        CFClient._isInitializing = false;
+        Logger.info('CFClient singleton created successfully');
+        return newInstance;
+      })();
+
+      return await CFClient._initializationPromise;
+    } catch (error) {
+      CFClient._isInitializing = false;
+      CFClient._initializationPromise = null;
+      Logger.error(`Failed to create CFClient singleton: ${error}`);
+      throw error;
+    }
   }
 
   /**
-   * Get singleton instance
+   * Get the current singleton instance without initializing
+   * @returns Current CFClient instance or null if not initialized
    */
   static getInstance(): CFClient | null {
-    return CFClient.instance;
+    return CFClient._instance;
   }
 
   /**
-   * Initialize the client
+   * Check if the singleton is initialized
+   * @returns true if singleton exists, false otherwise
    */
-  private async initialize(): Promise<void> {
+  static isInitialized(): boolean {
+    return CFClient._instance !== null;
+  }
+
+  /**
+   * Check if initialization is currently in progress
+   * @returns true if initialization is in progress, false otherwise
+   */
+  static isInitializing(): boolean {
+    return CFClient._isInitializing;
+  }
+
+  /**
+   * Shutdown the singleton and clear the instance
+   * This allows for clean reinitialization
+   */
+  static async shutdownSingleton(): Promise<void> {
+    if (CFClient._instance) {
+      Logger.info('Shutting down CFClient singleton');
+      await CFClient._instance.shutdown();
+    }
+    
+    CFClient._instance = null;
+    CFClient._isInitializing = false;
+    CFClient._initializationPromise = null;
+    Logger.info('CFClient singleton shutdown complete');
+  }
+
+  /**
+   * Force reinitialize the singleton with new configuration
+   * This will shutdown the existing instance and create a new one
+   */
+  static async reinitialize(config: CFConfig, user: CFUser): Promise<CFClient> {
+    Logger.info('Reinitializing CFClient singleton');
+    await CFClient.shutdownSingleton();
+    return CFClient.initialize(config, user);
+  }
+
+  /**
+   * Create a detached instance that bypasses the singleton pattern
+   * Use this for special cases where you need multiple instances
+   */
+  static async createDetached(config: CFConfig, user: CFUser): Promise<CFClient> {
+    Logger.info('Creating detached CFClient instance (bypassing singleton)');
+    const detachedInstance = new CFClient(config, user);
+    await detachedInstance.initializeInternal();
+    return detachedInstance;
+  }
+
+  /**
+   * @deprecated Use CFClient.initialize() instead
+   */
+  static async init(config: CFConfig, user: CFUser): Promise<CFClient> {
+    Logger.warning('CFClient.init() is deprecated, use CFClient.initialize() instead');
+    return CFClient.initialize(config, user);
+  }
+
+  /**
+   * Initialize the client (renamed from initialize to avoid confusion)
+   */
+  private async initializeInternal(): Promise<void> {
     try {
       Logger.info('🔧 CFClient initialization starting...');
 
@@ -468,7 +558,7 @@ export class CFClient {
     this.connectionListeners.clear();
 
     this.isInitialized = false;
-    CFClient.instance = null;
+    CFClient._instance = null;
 
     Logger.info('🔧 CFClient shutdown completed');
   }
@@ -736,7 +826,7 @@ export class CFClient {
       const result = await this.configFetcher.checkSdkSettings(this.config.dimensionId);
       
       if (result.isSuccess) {
-        this.sdkSettings = result.data;
+        this.sdkSettings = result.data || null;
         Logger.debug(`🔧 SDK settings checked: ${JSON.stringify(this.sdkSettings)}`);
       } else {
         Logger.warning(`🔧 Failed to check SDK settings: ${result.error?.message}`);
@@ -790,7 +880,7 @@ export class CFClient {
         return CFResult.successVoid();
       } else {
         Logger.error(`🔧 Failed to refresh configurations: ${result.error?.message}`);
-        return result;
+        return CFResult.error(result.error!);
       }
     } catch (error) {
       Logger.error(`🔧 Exception refreshing configurations: ${error}`);

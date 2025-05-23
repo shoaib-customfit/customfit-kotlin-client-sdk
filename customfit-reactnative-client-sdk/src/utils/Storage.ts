@@ -184,7 +184,7 @@ export class Storage {
       Logger.trace(`Storage: Total keys: ${keys.length}`);
       return CFResult.success({
         keyCount: keys.length,
-        keys: keys,
+        keys: [...keys],
       });
     } catch (error) {
       Logger.error(`Storage: Failed to get storage info: ${error}`);

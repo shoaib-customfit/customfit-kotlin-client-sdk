@@ -11,42 +11,113 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// SDK version
     public static let SDK_VERSION = "1.0.0"
     
-    // MARK: - Singleton
+    // MARK: - Singleton Implementation
     
-    /// Shared instance of the SDK client
-    private static var instance: CFClient?
+    /// Singleton instance of the SDK client
+    private static var _instance: CFClient?
     
-    /// Get or create the SDK client instance
-    /// - Parameter config: SDK configuration
-    /// - Returns: Singleton instance
-    public static func getInstance(config: CFConfig) -> CFClient {
-        if let instance = instance {
-            return instance
+    /// Lock for thread-safe singleton access
+    private static let instanceLock = NSLock()
+    
+    /// Flag to track if initialization is in progress
+    private static var _isInitializing = false
+    
+    /// Initialize or get the singleton instance of CFClient
+    /// This method ensures only one instance exists and handles concurrent initialization attempts
+    /// - Parameters:
+    ///   - config: SDK configuration
+    ///   - user: User configuration
+    /// - Returns: Singleton CFClient instance
+    public static func initialize(config: CFConfig, user: CFUser) -> CFClient {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        
+        // Fast path: if already initialized, return existing instance
+        if let existingInstance = _instance {
+            Logger.info("CFClient singleton already exists, returning existing instance")
+            return existingInstance
         }
         
-        let newInstance = CFClient(config: config)
-        instance = newInstance
+        // Check if initialization is in progress
+        if _isInitializing {
+            Logger.warning("CFClient initialization already in progress, waiting...")
+            // For simplicity in Swift, we'll create a new instance rather than wait
+            // In a production environment, you might want to use a DispatchSemaphore or similar
+            Logger.warning("Creating new instance despite initialization in progress")
+        }
+        
+        Logger.info("Creating new CFClient singleton instance")
+        _isInitializing = true
+        
+        let newInstance = CFClient(config: config, user: user)
+        _instance = newInstance
+        _isInitializing = false
+        Logger.info("CFClient singleton created successfully")
         return newInstance
     }
     
-    /// Create a new instance of the SDK client with a user
+    /// Get the current singleton instance without initializing
+    /// - Returns: Current CFClient instance or nil if not initialized
+    public static func getInstance() -> CFClient? {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        return _instance
+    }
+    
+    /// Check if the singleton is initialized
+    /// - Returns: true if singleton exists, false otherwise
+    public static func isInitialized() -> Bool {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        return _instance != nil
+    }
+    
+    /// Check if initialization is currently in progress
+    /// - Returns: true if initialization is in progress, false otherwise
+    public static func isInitializing() -> Bool {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        return _isInitializing
+    }
+    
+    /// Shutdown the singleton and clear the instance
+    /// This allows for clean reinitialization
+    public static func shutdownSingleton() {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        
+        if let currentInstance = _instance {
+            Logger.info("Shutting down CFClient singleton")
+            // Perform any necessary cleanup here
+            // currentInstance.cleanup() // if you have cleanup methods
+        }
+        
+        _instance = nil
+        _isInitializing = false
+        Logger.info("CFClient singleton shutdown complete")
+    }
+    
+    /// Force reinitialize the singleton with new configuration
+    /// This will shutdown the existing instance and create a new one
+    /// - Parameters:
+    ///   - config: New SDK configuration
+    ///   - user: New user configuration
+    /// - Returns: New CFClient singleton instance
+    public static func reinitialize(config: CFConfig, user: CFUser) -> CFClient {
+        Logger.info("Reinitializing CFClient singleton")
+        shutdownSingleton()
+        return initialize(config: config, user: user)
+    }
+    
+    /// Create a detached instance that bypasses the singleton pattern
+    /// Use this for special cases where you need multiple instances
     /// - Parameters:
     ///   - config: SDK configuration
-    ///   - user: User
-    /// - Returns: New client instance
-    public static func `init`(config: CFConfig, user: CFUser) -> CFClient {
-        Logger.info("🚀 Creating CFClient with timeout protection...")
-        
-        // Create the instance with timeout protection
-        let startTime = Date()
-        let newInstance = CFClient(config: config, user: user)
-        let duration = Date().timeIntervalSince(startTime)
-        
-        Logger.info("🚀 CFClient created successfully in \(String(format: "%.3f", duration)) seconds")
-        
-        // Store in singleton
-        instance = newInstance
-        return newInstance
+    ///   - user: User configuration
+    /// - Returns: Detached CFClient instance (not stored as singleton)
+    public static func createDetached(config: CFConfig, user: CFUser) -> CFClient {
+        Logger.info("Creating detached CFClient instance (bypassing singleton)")
+        return CFClient(config: config, user: user)
     }
     
     /// Special factory method that creates a minimal CFClient without starting listeners or polling
@@ -69,7 +140,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         newInstance.isInitialized = true
         
         // Store in the singleton
-        instance = newInstance
+        instanceLock.lock()
+        _instance = newInstance
+        instanceLock.unlock()
         
         return newInstance
     }
@@ -236,7 +309,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
     }
     
     // This must be public to be accessible from Demo project
-public init(config: CFConfig, user: CFUser) {
+    private init(config: CFConfig, user: CFUser) {
         self.mutableConfig = MutableCFConfig(initConfig: config)
         
         // Setup logger
@@ -930,7 +1003,7 @@ public init(config: CFConfig, user: CFUser) {
                         timeoutWork.cancel()
                         
                         Logger.debug("CFClient: SDK settings check completed successfully")
-            completion(nil)
+                        completion(nil)
                     } catch {
                         // Cancel the timeout since we completed with error
                         timeoutWork.cancel()

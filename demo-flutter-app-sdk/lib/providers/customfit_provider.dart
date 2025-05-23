@@ -68,8 +68,8 @@ class CustomFitProvider with ChangeNotifier {
           .build();
       debugPrint('CFConfig created successfully');
 
-      _client = CFClient.create(config, user);
-      debugPrint('CFClient created successfully');
+      _client = await CFClient.init(config, user);
+      debugPrint('CFClient singleton initialized successfully');
 
       _isInitialized = true;
 

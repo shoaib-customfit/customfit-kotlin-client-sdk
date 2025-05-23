@@ -32,7 +32,7 @@ export class ConfigFetcher {
   }
 
   /**
-   * Fetch user configurations
+   * Fetch user configurations with optional caching headers
    */
   async fetchUserConfigs(userToken: string, lastModified?: string, etag?: string): Promise<CFResult<{
     configs: Record<string, any>;
@@ -43,10 +43,12 @@ export class ConfigFetcher {
     };
   }>> {
     try {
-      Logger.info('📡 API POLL: Fetching user configurations...');
-      
+      if (!userToken) {
+        return CFResult.errorWithMessage('User token is required', ErrorCategory.VALIDATION);
+      }
+
       const headers: Record<string, string> = {
-        'Authorization': `Bearer ${userToken}`,
+        [CFConstants.Http.HEADER_AUTHORIZATION]: `Bearer ${userToken}`,
       };
 
       // Add conditional headers for caching
@@ -61,7 +63,7 @@ export class ConfigFetcher {
 
       if (result.isError) {
         Logger.error(`📡 API POLL: Failed to fetch user configs: ${result.error?.message}`);
-        return result;
+        return CFResult.error(result.error!);
       }
 
       const response = result.data!;
@@ -155,7 +157,7 @@ export class ConfigFetcher {
       
       if (result.isError) {
         Logger.error(`📡 API POLL: Failed to fetch SDK settings: ${result.error?.message}`);
-        return result;
+        return CFResult.error(result.error!);
       }
 
       const response = result.data!;

@@ -81,6 +81,9 @@ export class CFConstants {
     /** Content-Type header */
     HEADER_CONTENT_TYPE: 'Content-Type',
     
+    /** Authorization header */
+    HEADER_AUTHORIZATION: 'Authorization',
+    
     /** JSON content type */
     CONTENT_TYPE_JSON: 'application/json',
     

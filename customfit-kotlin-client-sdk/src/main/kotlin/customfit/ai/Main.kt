@@ -70,7 +70,7 @@ fun main(args: Array<String>) {
                         println("[${timestamp()}] About to track event-$i for cycle $i")
                         val trackResult = cfClient.trackEvent("event-$i", mapOf("source" to "app"))
                         println(
-                                "[${timestamp()}] Result of tracking event-$i: ${trackResult is CFResult.Success}"
+                                "[${timestamp()}] Result of tracking event-$i: ${trackResult is CFResult.Success<*>}"
                         )
                         println("[${timestamp()}] Tracked event-$i for cycle $i")
 

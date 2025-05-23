@@ -45,6 +45,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Modular implementation of the CustomFit client SDK
@@ -844,10 +846,145 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     companion object {
         private const val SOURCE = "CFClient"
         
+        // Singleton implementation
+        @Volatile
+        private var instance: CFClient? = null
+        private val initializationMutex = Mutex()
+        
+        // Track initialization state
+        @Volatile
+        private var isInitializing = false
+        private var initializationDeferred: CompletableDeferred<CFClient>? = null
+        
         /**
-         * Create a new instance of the modular CFClient
+         * Initialize or get the singleton instance of CFClient
+         * This method ensures only one instance exists and handles concurrent initialization attempts
+         * 
+         * @param cfConfig The configuration for the client
+         * @param user The initial user for the client
+         * @return The singleton CFClient instance
          */
-        fun init(cfConfig: CFConfig, user: CFUser): CFClient {
+        suspend fun init(cfConfig: CFConfig, user: CFUser): CFClient {
+            // Fast path: if already initialized, return existing instance
+            instance?.let { existingInstance ->
+                Timber.i("CFClient singleton already exists, returning existing instance")
+                return existingInstance
+            }
+            
+            // Use mutex to ensure thread-safe initialization
+            return initializationMutex.withLock {
+                // Double-check after acquiring lock
+                instance?.let { existingInstance ->
+                    Timber.i("CFClient singleton found after lock, returning existing instance")
+                    return@withLock existingInstance
+                }
+                
+                // If currently initializing, wait for existing initialization
+                if (isInitializing && initializationDeferred != null) {
+                    Timber.i("CFClient initialization in progress, waiting for completion...")
+                    return@withLock initializationDeferred!!.await()
+                }
+                
+                // Start new initialization
+                Timber.i("Starting CFClient singleton initialization...")
+                isInitializing = true
+                val deferred = CompletableDeferred<CFClient>()
+                initializationDeferred = deferred
+                
+                try {
+                    // Create the instance
+                    val newInstance = CFClient(cfConfig, user)
+                    
+                    // Wait for SDK settings initialization to complete
+                    newInstance.awaitSdkSettingsCheck()
+                    
+                    // Store the singleton instance
+                    instance = newInstance
+                    isInitializing = false
+                    
+                    Timber.i("CFClient singleton initialized successfully")
+                    deferred.complete(newInstance)
+                    newInstance
+                } catch (e: Exception) {
+                    isInitializing = false
+                    initializationDeferred = null
+                    
+                    Timber.e(e, "Failed to initialize CFClient singleton")
+                    deferred.completeExceptionally(e)
+                    throw e
+                }
+            }
+        }
+        
+        /**
+         * Get the current singleton instance if it exists
+         * 
+         * @return The current CFClient instance or null if not initialized
+         */
+        fun getInstance(): CFClient? {
+            return instance
+        }
+        
+        /**
+         * Check if the singleton instance is initialized
+         * 
+         * @return true if the client is initialized, false otherwise
+         */
+        fun isInitialized(): Boolean {
+            return instance != null
+        }
+        
+        /**
+         * Check if initialization is currently in progress
+         * 
+         * @return true if initialization is in progress, false otherwise
+         */
+        fun isInitializing(): Boolean {
+            return isInitializing
+        }
+        
+        /**
+         * Shutdown and clear the singleton instance
+         * This should be called when the application is shutting down or when you need to reinitialize with different parameters
+         */
+        suspend fun shutdown() {
+            initializationMutex.withLock {
+                instance?.let { client ->
+                    Timber.i("Shutting down CFClient singleton...")
+                    client.shutdown()
+                    instance = null
+                    isInitializing = false
+                    initializationDeferred = null
+                    Timber.i("CFClient singleton shutdown complete")
+                }
+            }
+        }
+        
+        /**
+         * Force reinitialize the singleton with new configuration
+         * This will shutdown the existing instance and create a new one
+         * 
+         * @param cfConfig The new configuration for the client
+         * @param user The new user for the client
+         * @return The new CFClient singleton instance
+         */
+        suspend fun reinitialize(cfConfig: CFConfig, user: CFUser): CFClient {
+            Timber.i("Reinitializing CFClient singleton...")
+            shutdown()
+            return init(cfConfig, user)
+        }
+        
+        /**
+         * Create a detached (non-singleton) instance of CFClient
+         * Use this only if you specifically need multiple instances (not recommended)
+         * Most applications should use init() for singleton pattern
+         * 
+         * @param cfConfig The configuration for the client
+         * @param user The initial user for the client
+         * @return A new CFClient instance (not managed by singleton pattern)
+         */
+        fun createDetached(cfConfig: CFConfig, user: CFUser): CFClient {
+            Timber.w("Creating detached CFClient instance - this bypasses singleton pattern!")
             return CFClient(cfConfig, user)
         }
     }

@@ -128,7 +128,37 @@ const createMockSDK = (): { CFClient: any; CFConfig: any; CFUser: any } => {
 
   return {
     CFClient: {
+      // New singleton pattern methods
+      initialize: async (config: any, user: CFUser) => {
+        console.log('🚀 CFClient.initialize() called with user:', user.userCustomerId);
+        return mockClient;
+      },
+      getInstance: () => {
+        console.log('🔍 CFClient.getInstance() called');
+        return mockClient; // In real implementation this would return singleton or null
+      },
+      isInitialized: () => {
+        console.log('❓ CFClient.isInitialized() called');
+        return true; // In real implementation this would check singleton state
+      },
+      isInitializing: () => {
+        console.log('❓ CFClient.isInitializing() called');
+        return false; // In real implementation this would check initialization state
+      },
+      shutdownSingleton: async () => {
+        console.log('🔄 CFClient.shutdownSingleton() called');
+      },
+      reinitialize: async (config: any, user: CFUser) => {
+        console.log('🔄 CFClient.reinitialize() called with user:', user.userCustomerId);
+        return mockClient;
+      },
+      createDetached: async (config: any, user: CFUser) => {
+        console.log('🆕 CFClient.createDetached() called with user:', user.userCustomerId);
+        return mockClient;
+      },
+      // Deprecated method for backward compatibility
       create: (config: any, user: CFUser) => {
+        console.log('⚠️ CFClient.create() is deprecated, use initialize() instead');
         console.log('🚀 CFClient created with user:', user.userCustomerId);
         return mockClient;
       },
@@ -224,7 +254,7 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
         .build();
       console.log('CFConfig created successfully');
 
-      const cfClient = CFClient.create(config, user);
+      const cfClient = await CFClient.initialize(config, user);
       console.log('CFClient created successfully');
 
       setClient(cfClient);

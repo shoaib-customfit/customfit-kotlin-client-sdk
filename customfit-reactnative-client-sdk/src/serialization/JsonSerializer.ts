@@ -76,18 +76,23 @@ export class JsonSerializer {
    * Deep clone an object using JSON serialization
    */
   static deepClone<T>(obj: T): CFResult<T> {
-    const serialized = JsonSerializer.serialize(obj);
-    if (serialized.isError) {
-      return serialized;
-    }
+    try {
+      const serialized = JsonSerializer.serialize(obj);
+      if (serialized.isError) {
+        return CFResult.error(serialized.error!);
+      }
 
-    return JsonSerializer.deserialize<T>(serialized.data!);
+      return JsonSerializer.deserialize<T>(serialized.data!);
+    } catch (error) {
+      Logger.error(`JsonSerializer: Failed to deep clone object: ${error}`);
+      return CFResult.errorFromException(error as Error, ErrorCategory.SERIALIZATION);
+    }
   }
 
   /**
    * Merge multiple objects into one with JSON deep cloning
    */
-  static mergeObjects<T>(...objects: Partial<T>[]): CFResult<T> {
+  static mergeObjects<T extends Record<string, any>>(...objects: Array<Partial<T> | undefined | null>): CFResult<T> {
     try {
       const merged = {} as T;
       
@@ -95,7 +100,7 @@ export class JsonSerializer {
         if (obj) {
           const cloneResult = JsonSerializer.deepClone(obj);
           if (cloneResult.isError) {
-            return cloneResult;
+            return CFResult.error(cloneResult.error!);
           }
           Object.assign(merged, cloneResult.data);
         }

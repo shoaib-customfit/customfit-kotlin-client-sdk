@@ -50,7 +50,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     
     // CustomFit SDK dependency
-    implementation(files("/Users/shoaibmohammed/Desktop/work/CF/sdk/customfit-kotlin-client-sdk/build/libs/kotlin-client-sdk-1.1.1.jar"))
+    implementation(files("../../customfit-kotlin-client-sdk/build/libs/kotlin-client-sdk-1.1.1.jar"))
     
     // Required for CustomFit SDK
     implementation(libs.kotlinx.coroutines.android)

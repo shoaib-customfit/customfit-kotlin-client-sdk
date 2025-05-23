@@ -11,6 +11,6 @@ module.exports = {
     '!src/**/*.d.ts',
   ],
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native)/)',
+    'node_modules/(?!(react-native|@react-native|react-native-.*)/)',
   ],
 }; 

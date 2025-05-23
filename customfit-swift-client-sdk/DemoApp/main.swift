@@ -30,7 +30,7 @@ func main() {
     print("[\(timestamp())] CustomFit-Demo [Swift] [INFO] Initializing CFClient - NO forceRefresh calls...")
     
     // Create CFClient
-    let cfClient = CFClient.init(config: config, user: user)
+    let cfClient = CFClient.initialize(config: config, user: user)
     
     print("[\(timestamp())] CustomFit-Demo [Swift] [INFO] Waiting for natural SDK initialization...")
     Thread.sleep(forTimeInterval: 1.0)

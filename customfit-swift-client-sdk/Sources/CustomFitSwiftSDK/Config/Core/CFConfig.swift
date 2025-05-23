@@ -235,6 +235,13 @@ public class CFConfig {
     
     // MARK: - Builder
     
+    /// Create a builder for this CFConfig
+    /// - Parameter clientKey: Client API key
+    /// - Returns: Builder instance
+    public static func builder(_ clientKey: String) -> Builder {
+        return Builder(clientKey)
+    }
+    
     /// Builder for creating a CFConfig instance
     public class Builder {
         private let clientKey: String
