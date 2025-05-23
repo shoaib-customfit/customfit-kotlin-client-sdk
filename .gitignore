@@ -48,3 +48,6 @@ bin/
 customfit-swift-client-sdk/.build/
 customfit-reactnative-client-sdk/node_modules/
 /customfit-reactnative-client-sdk/lib
+.dart_tool/package_config_subset
+.dart_tool/version
+.dart_tool/package_config.json
