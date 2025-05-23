@@ -112,3 +112,6 @@ backup_*/
 /demo-flutter-app-sdk/windows
 /demo-flutter-app-sdk/ios
 /demo-flutter-app-sdk/android
+/demo-reactnative-app-sdk/android
+/demo-reactnative-app-sdk/ios
+/demo-reactnative-app-sdk/node_modules
