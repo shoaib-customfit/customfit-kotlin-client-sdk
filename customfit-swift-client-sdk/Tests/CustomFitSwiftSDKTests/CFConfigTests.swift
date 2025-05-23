@@ -2,25 +2,32 @@ import XCTest
 @testable import CustomFitSwiftSDK
 
 final class CFConfigTests: XCTestCase {
-    func testConfigInitialization() {
+    func testBasicConfiguration() {
         let config = CFConfig(clientKey: "test-key")
         XCTAssertEqual(config.clientKey, "test-key")
-        XCTAssertEqual(config.apiBaseUrl, "https://api.customfit.ai/v1")
+        XCTAssertTrue(config.loggingEnabled)
+        XCTAssertFalse(config.debugLoggingEnabled)
+        XCTAssertFalse(config.offlineMode)
     }
     
-    func testBuilderPattern() {
-        let config = CFConfig.Builder(clientKey: "test-key")
-            .eventsQueueSize(200)
-            .logLevel("INFO")
-            .build()
-            
+    func testConfigurationWithCustomValues() {
+        let config = CFConfig(
+            clientKey: "test-key",
+            eventsQueueSize: 200,
+            loggingEnabled: false,
+            debugLoggingEnabled: true,
+            offlineMode: true
+        )
+        
         XCTAssertEqual(config.clientKey, "test-key")
         XCTAssertEqual(config.eventsQueueSize, 200)
-        XCTAssertEqual(config.logLevel, "INFO")
+        XCTAssertFalse(config.loggingEnabled)
+        XCTAssertTrue(config.debugLoggingEnabled)
+        XCTAssertTrue(config.offlineMode)
     }
     
     static var allTests = [
-        ("testConfigInitialization", testConfigInitialization),
-        ("testBuilderPattern", testBuilderPattern),
+        ("testBasicConfiguration", testBasicConfiguration),
+        ("testConfigurationWithCustomValues", testConfigurationWithCustomValues),
     ]
 } 

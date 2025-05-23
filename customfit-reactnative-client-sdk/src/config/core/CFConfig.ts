@@ -290,7 +290,7 @@ export class CFConfigBuilderImpl implements CFConfigBuilder {
   }
 
   logLevel(level: string): CFConfigBuilder {
-    if (!(CFConstants.Logging.VALID_LOG_LEVELS as string[]).includes(level)) {
+    if (!CFConstants.Logging.VALID_LOG_LEVELS.includes(level as any)) {
       throw new Error(`Log level must be one of: ${CFConstants.Logging.VALID_LOG_LEVELS.join(', ')}`);
     }
     this._logLevel = level;
