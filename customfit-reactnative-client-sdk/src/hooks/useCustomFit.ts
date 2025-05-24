@@ -68,7 +68,7 @@ export function useAllFeatureFlags(): Record<string, any> {
     }
 
     // Get initial flags
-    const initialFlags = client.getAllFeatures();
+    const initialFlags = client.getAllFlags();
     setFlags(initialFlags);
 
     // Set up listener for changes
@@ -144,7 +144,7 @@ export function useCustomFit() {
       return;
     }
 
-    return await client.trackScreenView(screenName);
+    return await client.trackEvent('screen_view', { screen_name: screenName });
   }, []);
 
   const trackFeatureUsage = useCallback(async (featureName: string, properties?: Record<string, any>) => {
@@ -154,7 +154,7 @@ export function useCustomFit() {
       return;
     }
 
-    return await client.trackFeatureUsage(featureName, properties);
+    return await client.trackEvent('feature_usage', { feature_name: featureName, ...properties });
   }, []);
 
   const forceRefresh = useCallback(async () => {
@@ -194,7 +194,7 @@ export function useCustomFit() {
       return;
     }
 
-    client.setUserAttribute(key, value);
+    client.addUserProperty(key, value);
   }, []);
 
   const setUserAttributes = useCallback((attributes: Record<string, any>) => {
@@ -204,7 +204,7 @@ export function useCustomFit() {
       return;
     }
 
-    client.setUserAttributes(attributes);
+    client.addUserProperties(attributes);
   }, []);
 
   const setOfflineMode = useCallback((offline: boolean) => {
@@ -269,7 +269,7 @@ export function useScreenTracking(screenName: string) {
     }
 
     // Track screen view when component mounts
-    client.trackScreenView(screenName);
+    client.trackEvent('screen_view', { screen_name: screenName });
   }, [screenName]);
 }
 
@@ -284,7 +284,7 @@ export function useFeatureTracking(featureName: string, properties?: Record<stri
       return;
     }
 
-    client.trackFeatureUsage(featureName, properties);
+    client.trackEvent('feature_usage', { feature_name: featureName, ...properties });
   }, [featureName, properties]);
 
   return trackUsage;

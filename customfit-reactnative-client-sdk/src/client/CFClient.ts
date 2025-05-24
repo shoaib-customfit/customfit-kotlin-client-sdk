@@ -359,6 +359,8 @@ export class CFClient {
     return { ...this.currentConfigs };
   }
 
+
+
   /**
    * Track an event
    */
@@ -458,6 +460,8 @@ export class CFClient {
 
 
 
+
+
   /**
    * Update user
    */
@@ -488,7 +492,7 @@ export class CFClient {
   /**
    * Flush events
    */
-  private async flushEvents(): Promise<CFResult<number>> {
+  async flushEvents(): Promise<CFResult<number>> {
     if (!this.isInitialized) {
       return CFResult.errorWithMessage('SDK not initialized');
     }
@@ -499,7 +503,7 @@ export class CFClient {
   /**
    * Flush summaries
    */
-  private async flushSummaries(): Promise<CFResult<number>> {
+  async flushSummaries(): Promise<CFResult<number>> {
     if (!this.isInitialized) {
       return CFResult.errorWithMessage('SDK not initialized');
     }

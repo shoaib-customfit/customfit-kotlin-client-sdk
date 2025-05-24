@@ -30,6 +30,7 @@ import customfit.ai.kotlinclient.core.session.SessionConfig
 import customfit.ai.kotlinclient.core.session.SessionRotationListener
 import customfit.ai.kotlinclient.core.session.RotationReason
 import customfit.ai.kotlinclient.logging.Timber
+import customfit.ai.kotlinclient.core.error.ErrorHandler.ErrorSeverity
 import customfit.ai.kotlinclient.network.ConfigFetcher
 import customfit.ai.kotlinclient.network.HttpClient
 import customfit.ai.kotlinclient.network.connection.ConnectionInformation
@@ -961,17 +962,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * @param intervalMs New interval in milliseconds
      */
     fun updateSdkSettingsCheckInterval(intervalMs: Long) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(sdkSettingsCheckIntervalMs = intervalMs))
-            Logger.i("Updated SDK settings check interval to $intervalMs ms")
-        } catch (e: Exception) {
-            Logger.e("Failed to update SDK settings check interval: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update SDK settings check interval",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+        clientScope.launch {
+            try {
+                mutableConfig.setSdkSettingsCheckIntervalMs(intervalMs)
+                Timber.i("Updated SDK settings check interval to $intervalMs ms")
+            } catch (e: Exception) {
+                Timber.e("Failed to update SDK settings check interval: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update SDK settings check interval",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -980,17 +983,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * @param intervalMs New interval in milliseconds
      */
     fun updateEventsFlushInterval(intervalMs: Long) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(eventsFlushIntervalMs = intervalMs))
-            Logger.i("Updated events flush interval to $intervalMs ms")
-        } catch (e: Exception) {
-            Logger.e("Failed to update events flush interval: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update events flush interval",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+        clientScope.launch {
+            try {
+                mutableConfig.setEventsFlushIntervalMs(intervalMs)
+                Timber.i("Updated events flush interval to $intervalMs ms")
+            } catch (e: Exception) {
+                Timber.e("Failed to update events flush interval: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update events flush interval",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -999,17 +1004,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * @param intervalMs New interval in milliseconds
      */
     fun updateSummariesFlushInterval(intervalMs: Long) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(summariesFlushIntervalMs = intervalMs))
-            Logger.i("Updated summaries flush interval to $intervalMs ms")
-        } catch (e: Exception) {
-            Logger.e("Failed to update summaries flush interval: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update summaries flush interval",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+        clientScope.launch {
+            try {
+                mutableConfig.setSummariesFlushIntervalMs(intervalMs)
+                Timber.i("Updated summaries flush interval to $intervalMs ms")
+            } catch (e: Exception) {
+                Timber.e("Failed to update summaries flush interval: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update summaries flush interval",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -1017,18 +1024,20 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * Update the network connection timeout at runtime
      * @param timeoutMs New timeout in milliseconds
      */
-    fun updateNetworkConnectionTimeout(timeoutMs: Long) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(networkConnectionTimeoutMs = timeoutMs))
-            Logger.i("Updated network connection timeout to $timeoutMs ms")
-        } catch (e: Exception) {
-            Logger.e("Failed to update network connection timeout: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update network connection timeout",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+    fun updateNetworkConnectionTimeout(timeoutMs: Int) {
+        clientScope.launch {
+            try {
+                mutableConfig.setNetworkConnectionTimeoutMs(timeoutMs)
+                Timber.i("Updated network connection timeout to $timeoutMs ms")
+            } catch (e: Exception) {
+                Timber.e("Failed to update network connection timeout: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update network connection timeout",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -1036,18 +1045,20 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * Update the network read timeout at runtime
      * @param timeoutMs New timeout in milliseconds
      */
-    fun updateNetworkReadTimeout(timeoutMs: Long) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(networkReadTimeoutMs = timeoutMs))
-            Logger.i("Updated network read timeout to $timeoutMs ms")
-        } catch (e: Exception) {
-            Logger.e("Failed to update network read timeout: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update network read timeout",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+    fun updateNetworkReadTimeout(timeoutMs: Int) {
+        clientScope.launch {
+            try {
+                mutableConfig.setNetworkReadTimeoutMs(timeoutMs)
+                Timber.i("Updated network read timeout to $timeoutMs ms")
+            } catch (e: Exception) {
+                Timber.e("Failed to update network read timeout: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update network read timeout",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -1056,17 +1067,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * @param enabled Whether debug logging should be enabled
      */
     fun setDebugLoggingEnabled(enabled: Boolean) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(debugLoggingEnabled = enabled))
-            Logger.i("Debug logging ${if (enabled) "enabled" else "disabled"}")
-        } catch (e: Exception) {
-            Logger.e("Failed to update debug logging setting: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update debug logging setting",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+        clientScope.launch {
+            try {
+                mutableConfig.setDebugLoggingEnabled(enabled)
+                Timber.i("Debug logging ${if (enabled) "enabled" else "disabled"}")
+            } catch (e: Exception) {
+                Timber.e("Failed to update debug logging setting: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update debug logging setting",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     
@@ -1075,17 +1088,19 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * @param enabled Whether logging should be enabled
      */
     fun setLoggingEnabled(enabled: Boolean) {
-        try {
-            mutableConfig.updateConfig(mutableConfig.config.copy(loggingEnabled = enabled))
-            Logger.i("Logging ${if (enabled) "enabled" else "disabled"}")
-        } catch (e: Exception) {
-            Logger.e("Failed to update logging setting: ${e.message}")
-            ErrorHandler.handleException(
-                e,
-                "Failed to update logging setting",
-                source = SOURCE,
-                severity = ErrorSeverity.medium
-            )
+        clientScope.launch {
+            try {
+                mutableConfig.setLoggingEnabled(enabled)
+                Timber.i("Logging ${if (enabled) "enabled" else "disabled"}")
+            } catch (e: Exception) {
+                Timber.e("Failed to update logging setting: ${e.message}")
+                ErrorHandler.handleException(
+                    e,
+                    "Failed to update logging setting",
+                    source = SOURCE,
+                    severity = ErrorSeverity.MEDIUM
+                )
+            }
         }
     }
     

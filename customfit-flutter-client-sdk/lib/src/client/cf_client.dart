@@ -1092,138 +1092,49 @@ class CFClient {
   }
 
   // MARK: - Runtime Configuration Updates
+  // Note: Flutter SDK currently has limited runtime configuration update support
+  // These methods are placeholders for future implementation when MutableCFConfig is enhanced
 
   /// Update the SDK settings check interval at runtime
+  /// Currently not implemented in Flutter SDK
   void updateSdkSettingsCheckInterval(int intervalMs) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        sdkSettingsCheckIntervalMs: intervalMs,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Updated SDK settings check interval to $intervalMs ms');
-    } catch (e) {
-      Logger.e('Failed to update SDK settings check interval: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update SDK settings check interval',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('updateSdkSettingsCheckInterval not yet implemented in Flutter SDK');
   }
 
   /// Update the events flush interval at runtime
+  /// Currently not implemented in Flutter SDK
   void updateEventsFlushInterval(int intervalMs) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        eventsFlushIntervalMs: intervalMs,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Updated events flush interval to $intervalMs ms');
-    } catch (e) {
-      Logger.e('Failed to update events flush interval: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update events flush interval',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('updateEventsFlushInterval not yet implemented in Flutter SDK');
   }
 
   /// Update the summaries flush interval at runtime
+  /// Currently not implemented in Flutter SDK
   void updateSummariesFlushInterval(int intervalMs) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        summariesFlushIntervalMs: intervalMs,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Updated summaries flush interval to $intervalMs ms');
-    } catch (e) {
-      Logger.e('Failed to update summaries flush interval: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update summaries flush interval',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('updateSummariesFlushInterval not yet implemented in Flutter SDK');
   }
 
   /// Update the network connection timeout at runtime
+  /// Currently not implemented in Flutter SDK
   void updateNetworkConnectionTimeout(int timeoutMs) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        networkConnectionTimeoutMs: timeoutMs,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Updated network connection timeout to $timeoutMs ms');
-    } catch (e) {
-      Logger.e('Failed to update network connection timeout: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update network connection timeout',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('updateNetworkConnectionTimeout not yet implemented in Flutter SDK');
   }
 
   /// Update the network read timeout at runtime
+  /// Currently not implemented in Flutter SDK
   void updateNetworkReadTimeout(int timeoutMs) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        networkReadTimeoutMs: timeoutMs,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Updated network read timeout to $timeoutMs ms');
-    } catch (e) {
-      Logger.e('Failed to update network read timeout: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update network read timeout',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('updateNetworkReadTimeout not yet implemented in Flutter SDK');
   }
 
   /// Enable or disable debug logging at runtime
+  /// Currently not implemented in Flutter SDK
   void setDebugLoggingEnabled(bool enabled) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        debugLoggingEnabled: enabled,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Debug logging ${enabled ? "enabled" : "disabled"}');
-    } catch (e) {
-      Logger.e('Failed to update debug logging setting: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update debug logging setting',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('setDebugLoggingEnabled not yet implemented in Flutter SDK');
   }
 
   /// Enable or disable logging at runtime
+  /// Currently not implemented in Flutter SDK
   void setLoggingEnabled(bool enabled) {
-    try {
-      final newConfig = mutableConfig.config.copyWith(
-        loggingEnabled: enabled,
-      );
-      mutableConfig.updateConfig(newConfig);
-      Logger.i('Logging ${enabled ? "enabled" : "disabled"}');
-    } catch (e) {
-      Logger.e('Failed to update logging setting: $e');
-      ErrorHandler.handleException(
-        e,
-        'Failed to update logging setting',
-        source: _source,
-        severity: ErrorSeverity.medium,
-      );
-    }
+    Logger.w('setLoggingEnabled not yet implemented in Flutter SDK');
   }
 }
 

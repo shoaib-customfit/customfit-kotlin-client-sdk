@@ -25,6 +25,9 @@ abstract class ConfigManager {
   /// Get a JSON feature flag value
   Map<String, dynamic> getJson(String key, Map<String, dynamic> defaultValue);
 
+  /// Get a generic feature flag value
+  T getConfigValue<T>(String key, T defaultValue);
+
   /// Add a listener for a specific feature flag
   void addConfigListener<T>(String key, void Function(T) listener);
 
@@ -515,6 +518,41 @@ class ConfigManagerImpl implements ConfigManager {
 
     Logger.w(
         'Type mismatch for "$key": expected Map<String, dynamic>, got ${variation.runtimeType}');
+    Logger.i(
+        'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
+    return defaultValue;
+  }
+
+  @override
+  T getConfigValue<T>(String key, T defaultValue) {
+    // If SDK functionality is disabled, return the default value
+    if (!_isSdkFunctionalityEnabled) {
+      Logger.d(
+          "getConfigValue: SDK functionality is disabled, returning fallback for key '$key'");
+      Logger.i(
+          'CONFIG VALUE: $key: $defaultValue (using fallback, SDK disabled)');
+      return defaultValue;
+    }
+
+    final variation = _getVariation(key);
+
+    if (variation == null) {
+      Logger.i('CONFIG VALUE: $key: $defaultValue (using fallback)');
+      return defaultValue;
+    }
+
+    // Type checking based on the default value type
+    if (variation is T) {
+      Logger.i('CONFIG VALUE: $key: $variation');
+
+      // Push summary for the retrieved value
+      _pushSummaryForKey(key);
+
+      return variation;
+    }
+
+    Logger.w(
+        'Type mismatch for "$key": expected ${T.toString()}, got ${variation.runtimeType}');
     Logger.i(
         'CONFIG VALUE: $key: $defaultValue (using fallback due to type mismatch)');
     return defaultValue;

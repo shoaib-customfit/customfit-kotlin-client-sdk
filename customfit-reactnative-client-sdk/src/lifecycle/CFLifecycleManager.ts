@@ -71,7 +71,7 @@ export class CFLifecycleManager {
   setUserAttribute(key: string, value: any): void {
     this.user = this.user.withProperty(key, value);
     if (this.client) {
-      this.client.setUserAttribute(key, value);
+      this.client.addUserProperty(key, value);
       Logger.debug(`CFLifecycleManager: User attribute set: ${key} = ${value}`);
     }
   }
@@ -82,7 +82,7 @@ export class CFLifecycleManager {
   setUserAttributes(attributes: Record<string, any>): void {
     this.user = this.user.withProperties(attributes);
     if (this.client) {
-      this.client.setUserAttributes(attributes);
+      this.client.addUserProperties(attributes);
       Logger.debug(`CFLifecycleManager: User attributes set: ${Object.keys(attributes).join(', ')}`);
     }
   }

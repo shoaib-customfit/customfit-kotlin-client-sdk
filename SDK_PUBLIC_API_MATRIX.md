@@ -57,7 +57,6 @@ This document provides a comprehensive comparison of all public functions expose
 |----------|--------|-------|---------|--------------|---------------|-------|
 | `trackEvent(name, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackEvent("click", props)` | Track custom event |
 | `trackScreenView(screenName, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackScreenView("home", props)` | Track screen view |
-| `trackFeatureUsage(featureName, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackFeatureUsage("search", props)` | Track feature usage |
 
 ### Configuration & Refresh
 
