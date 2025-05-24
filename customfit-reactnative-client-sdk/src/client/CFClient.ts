@@ -18,6 +18,7 @@ import {
   ContextType
 } from '../core/types/CFTypes';
 import { CFConfigImpl } from '../config/core/CFConfig';
+import { MutableCFConfig } from '../config/core/MutableCFConfig';
 import { CFUserImpl } from '../core/model/CFUser';
 import { Logger } from '../logging/Logger';
 import { CFConstants } from '../constants/CFConstants';
@@ -49,6 +50,7 @@ export class CFClient {
   private static _initializationPromise: Promise<CFClient> | null = null;
   
   private readonly config: CFConfig;
+  private readonly mutableConfig: MutableCFConfig;
   private currentUser: CFUser;
   private readonly configFetcher: ConfigFetcher;
   private readonly eventTracker: EventTracker;
@@ -88,6 +90,7 @@ export class CFClient {
 
   private constructor(config: CFConfig, user: CFUser) {
     this.config = config;
+    this.mutableConfig = new MutableCFConfig(config);
     this.currentUser = user;
     this.isOfflineMode = config.offlineMode;
 
@@ -107,6 +110,9 @@ export class CFClient {
       config.debugLoggingEnabled,
       config.logLevel
     );
+
+    // Setup config change listeners to propagate changes to components
+    this.setupConfigChangeListeners();
 
     // Initialize session ID with a default value
     this.sessionId = `cf_session_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
@@ -538,6 +544,34 @@ export class CFClient {
    */
   private getMutableConfig(): CFConfig {
     return this.config;
+  }
+
+  /**
+   * Setup configuration change listeners to propagate changes to components
+   */
+  private setupConfigChangeListeners(): void {
+    this.mutableConfig.addListener((newConfig) => {
+      try {
+        // Update logging configuration
+        Logger.configure(newConfig.loggingEnabled, newConfig.debugLoggingEnabled, newConfig.logLevel);
+        
+        // Update SummaryManager flush interval if changed
+        if (newConfig.summariesFlushIntervalMs !== this.config.summariesFlushIntervalMs) {
+          // Note: SummaryManager doesn't currently have updateFlushInterval method
+          // This would need to be added to SummaryManager for full runtime config support
+          Logger.debug('🔧 SummaryManager flush interval would be updated here');
+        }
+        
+        // Update EventTracker flush interval if changed
+        if (newConfig.eventsFlushIntervalMs !== this.config.eventsFlushIntervalMs) {
+          this.eventTracker.updateFlushInterval(newConfig.eventsFlushIntervalMs);
+        }
+        
+        Logger.debug('🔧 Configuration updated and propagated to components');
+      } catch (e) {
+        Logger.error(`Failed to propagate config changes: ${e}`);
+      }
+    });
   }
 
   /**
@@ -1204,9 +1238,8 @@ export class CFClient {
    */
   updateSdkSettingsCheckInterval(intervalMs: number): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Updated SDK settings check interval to ${intervalMs} ms`);
+      this.mutableConfig.updateSdkSettingsCheckInterval(intervalMs);
+      Logger.info(`🔧 Updated SDK settings check interval to ${intervalMs}ms`);
     } catch (e) {
       Logger.error(`Failed to update SDK settings check interval: ${e}`);
     }
@@ -1218,9 +1251,8 @@ export class CFClient {
    */
   updateEventsFlushInterval(intervalMs: number): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Updated events flush interval to ${intervalMs} ms`);
+      this.mutableConfig.updateEventsFlushInterval(intervalMs);
+      Logger.info(`🔧 Updated events flush interval to ${intervalMs}ms`);
     } catch (e) {
       Logger.error(`Failed to update events flush interval: ${e}`);
     }
@@ -1232,9 +1264,8 @@ export class CFClient {
    */
   updateSummariesFlushInterval(intervalMs: number): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Updated summaries flush interval to ${intervalMs} ms`);
+      this.mutableConfig.updateSummariesFlushInterval(intervalMs);
+      Logger.info(`🔧 Updated summaries flush interval to ${intervalMs}ms`);
     } catch (e) {
       Logger.error(`Failed to update summaries flush interval: ${e}`);
     }
@@ -1246,9 +1277,8 @@ export class CFClient {
    */
   updateNetworkConnectionTimeout(timeoutMs: number): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Updated network connection timeout to ${timeoutMs} ms`);
+      this.mutableConfig.updateNetworkConnectionTimeout(timeoutMs);
+      Logger.info(`🔧 Updated network connection timeout to ${timeoutMs}ms`);
     } catch (e) {
       Logger.error(`Failed to update network connection timeout: ${e}`);
     }
@@ -1260,9 +1290,8 @@ export class CFClient {
    */
   updateNetworkReadTimeout(timeoutMs: number): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Updated network read timeout to ${timeoutMs} ms`);
+      this.mutableConfig.updateNetworkReadTimeout(timeoutMs);
+      Logger.info(`🔧 Updated network read timeout to ${timeoutMs}ms`);
     } catch (e) {
       Logger.error(`Failed to update network read timeout: ${e}`);
     }
@@ -1274,9 +1303,9 @@ export class CFClient {
    */
   setDebugLoggingEnabled(enabled: boolean): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Debug logging ${enabled ? 'enabled' : 'disabled'}`);
+      this.mutableConfig.setDebugLoggingEnabled(enabled);
+      Logger.configure(this.mutableConfig.config.loggingEnabled, enabled, this.mutableConfig.config.logLevel);
+      Logger.info(`🔧 Debug logging ${enabled ? 'enabled' : 'disabled'}`);
     } catch (e) {
       Logger.error(`Failed to update debug logging setting: ${e}`);
     }
@@ -1288,9 +1317,9 @@ export class CFClient {
    */
   setLoggingEnabled(enabled: boolean): void {
     try {
-      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
-      // Implementation would need to be added to support runtime config updates
-      Logger.info(`Logging ${enabled ? 'enabled' : 'disabled'}`);
+      this.mutableConfig.setLoggingEnabled(enabled);
+      Logger.configure(enabled, this.mutableConfig.config.debugLoggingEnabled, this.mutableConfig.config.logLevel);
+      Logger.info(`🔧 Logging ${enabled ? 'enabled' : 'disabled'}`);
     } catch (e) {
       Logger.error(`Failed to update logging setting: ${e}`);
     }

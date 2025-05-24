@@ -131,6 +131,61 @@ class CFConfig {
     }
   }
 
+  /// Create a copy of this config with updated values
+  CFConfig copyWith({
+    String? clientKey,
+    int? eventsQueueSize,
+    int? eventsFlushTimeSeconds,
+    int? eventsFlushIntervalMs,
+    int? maxRetryAttempts,
+    int? retryInitialDelayMs,
+    int? retryMaxDelayMs,
+    double? retryBackoffMultiplier,
+    int? summariesQueueSize,
+    int? summariesFlushTimeSeconds,
+    int? summariesFlushIntervalMs,
+    int? sdkSettingsCheckIntervalMs,
+    int? networkConnectionTimeoutMs,
+    int? networkReadTimeoutMs,
+    bool? loggingEnabled,
+    bool? debugLoggingEnabled,
+    String? logLevel,
+    bool? offlineMode,
+    bool? disableBackgroundPolling,
+    int? backgroundPollingIntervalMs,
+    bool? useReducedPollingWhenBatteryLow,
+    int? reducedPollingIntervalMs,
+    int? maxStoredEvents,
+    bool? autoEnvAttributesEnabled,
+  }) {
+    return CFConfig._(
+      clientKey: clientKey ?? this.clientKey,
+      eventsQueueSize: eventsQueueSize ?? this.eventsQueueSize,
+      eventsFlushTimeSeconds: eventsFlushTimeSeconds ?? this.eventsFlushTimeSeconds,
+      eventsFlushIntervalMs: eventsFlushIntervalMs ?? this.eventsFlushIntervalMs,
+      maxRetryAttempts: maxRetryAttempts ?? this.maxRetryAttempts,
+      retryInitialDelayMs: retryInitialDelayMs ?? this.retryInitialDelayMs,
+      retryMaxDelayMs: retryMaxDelayMs ?? this.retryMaxDelayMs,
+      retryBackoffMultiplier: retryBackoffMultiplier ?? this.retryBackoffMultiplier,
+      summariesQueueSize: summariesQueueSize ?? this.summariesQueueSize,
+      summariesFlushTimeSeconds: summariesFlushTimeSeconds ?? this.summariesFlushTimeSeconds,
+      summariesFlushIntervalMs: summariesFlushIntervalMs ?? this.summariesFlushIntervalMs,
+      sdkSettingsCheckIntervalMs: sdkSettingsCheckIntervalMs ?? this.sdkSettingsCheckIntervalMs,
+      networkConnectionTimeoutMs: networkConnectionTimeoutMs ?? this.networkConnectionTimeoutMs,
+      networkReadTimeoutMs: networkReadTimeoutMs ?? this.networkReadTimeoutMs,
+      loggingEnabled: loggingEnabled ?? this.loggingEnabled,
+      debugLoggingEnabled: debugLoggingEnabled ?? this.debugLoggingEnabled,
+      logLevel: logLevel ?? this.logLevel,
+      offlineMode: offlineMode ?? this.offlineMode,
+      disableBackgroundPolling: disableBackgroundPolling ?? this.disableBackgroundPolling,
+      backgroundPollingIntervalMs: backgroundPollingIntervalMs ?? this.backgroundPollingIntervalMs,
+      useReducedPollingWhenBatteryLow: useReducedPollingWhenBatteryLow ?? this.useReducedPollingWhenBatteryLow,
+      reducedPollingIntervalMs: reducedPollingIntervalMs ?? this.reducedPollingIntervalMs,
+      maxStoredEvents: maxStoredEvents ?? this.maxStoredEvents,
+      autoEnvAttributesEnabled: autoEnvAttributesEnabled ?? this.autoEnvAttributesEnabled,
+    );
+  }
+
   /// Static factory method from client key only
   static CFConfig fromClientKey(String clientKey) => Builder(clientKey).build();
 
@@ -338,5 +393,79 @@ class Builder {
       maxStoredEvents: maxStoredEvents,
       autoEnvAttributesEnabled: autoEnvAttributesEnabled,
     );
+  }
+}
+
+/// Mutable configuration wrapper for runtime updates
+class MutableCFConfig {
+  CFConfig _config;
+  final List<Function(CFConfig)> _listeners = [];
+
+  MutableCFConfig(this._config);
+
+  /// Get current immutable config
+  CFConfig get config => _config;
+
+  /// Add a listener for config changes
+  void addListener(Function(CFConfig) listener) {
+    _listeners.add(listener);
+  }
+
+  /// Remove a listener
+  void removeListener(Function(CFConfig) listener) {
+    _listeners.remove(listener);
+  }
+
+  /// Update configuration and notify listeners
+  void _updateConfig(CFConfig newConfig) {
+    _config = newConfig;
+    for (final listener in _listeners) {
+      try {
+        listener(newConfig);
+      } catch (e) {
+        // Log error but continue notifying other listeners
+        print('Error notifying config listener: $e');
+      }
+    }
+  }
+
+  /// Update SDK settings check interval
+  void updateSdkSettingsCheckInterval(int intervalMs) {
+    _updateConfig(_config.copyWith(sdkSettingsCheckIntervalMs: intervalMs));
+  }
+
+  /// Update events flush interval
+  void updateEventsFlushInterval(int intervalMs) {
+    _updateConfig(_config.copyWith(eventsFlushIntervalMs: intervalMs));
+  }
+
+  /// Update summaries flush interval
+  void updateSummariesFlushInterval(int intervalMs) {
+    _updateConfig(_config.copyWith(summariesFlushIntervalMs: intervalMs));
+  }
+
+  /// Update network connection timeout
+  void updateNetworkConnectionTimeout(int timeoutMs) {
+    _updateConfig(_config.copyWith(networkConnectionTimeoutMs: timeoutMs));
+  }
+
+  /// Update network read timeout
+  void updateNetworkReadTimeout(int timeoutMs) {
+    _updateConfig(_config.copyWith(networkReadTimeoutMs: timeoutMs));
+  }
+
+  /// Set debug logging enabled
+  void setDebugLoggingEnabled(bool enabled) {
+    _updateConfig(_config.copyWith(debugLoggingEnabled: enabled));
+  }
+
+  /// Set logging enabled
+  void setLoggingEnabled(bool enabled) {
+    _updateConfig(_config.copyWith(loggingEnabled: enabled));
+  }
+
+  /// Set offline mode
+  void setOfflineMode(bool offline) {
+    _updateConfig(_config.copyWith(offlineMode: offline));
   }
 }

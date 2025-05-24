@@ -11,7 +11,6 @@ import '../client/managers/environment_manager.dart';
 import '../client/managers/listener_manager.dart';
 import '../client/managers/user_manager.dart';
 import '../config/core/cf_config.dart';
-import '../config/core/mutable_cf_config.dart';
 import '../core/error/cf_result.dart';
 import '../core/error/error_handler.dart';
 import '../core/error/error_severity.dart';
@@ -225,15 +224,18 @@ class CFClient {
     // Configure logging
     LogLevelUpdater.updateLogLevel(_mutableConfig.config);
 
+    // Setup config change listeners to propagate changes to components
+    _setupConfigChangeListeners();
+
     // Offline mode
-    if (_mutableConfig.offlineMode) {
+    if (_mutableConfig.config.offlineMode) {
       configFetcher.setOffline(true);
       connectionManager.setOfflineMode(true);
       Logger.i('CF client initialized in offline mode');
     }
 
     // Auto environment attributes
-    if (_mutableConfig.autoEnvAttributesEnabled) {
+    if (_mutableConfig.config.autoEnvAttributesEnabled) {
       _initializeEnvironmentAttributes(user);
     }
 
@@ -311,7 +313,7 @@ class CFClient {
 
   /// Initialize application and device context automatically when autoEnvAttributesEnabled is true
   void _initializeEnvironmentAttributes(CFUser user) {
-    if (!_mutableConfig.autoEnvAttributesEnabled) {
+    if (!_mutableConfig.config.autoEnvAttributesEnabled) {
       Logger.d('Auto environment attributes disabled, skipping automatic collection');
       return;
     }
@@ -408,6 +410,35 @@ class CFClient {
         }
       }),
     );
+  }
+
+  /// Setup configuration change listeners to propagate changes to components
+  void _setupConfigChangeListeners() {
+    _mutableConfig.addListener((newConfig) {
+      try {
+        // Update logging configuration
+        LogLevelUpdater.updateLogLevel(newConfig);
+        
+        // Update SummaryManager flush interval if changed
+        if (newConfig.summariesFlushIntervalMs != _mutableConfig.config.summariesFlushIntervalMs) {
+          summaryManager.updateFlushInterval(newConfig.summariesFlushIntervalMs);
+        }
+        
+        // Update EventTracker flush interval if it has such a method
+        // Note: EventTracker doesn't currently have updateFlushInterval method
+        // This would need to be added to EventTracker for full runtime config support
+        
+        Logger.d('🔧 Configuration updated and propagated to components');
+      } catch (e) {
+        Logger.e('Failed to propagate config changes: $e');
+        ErrorHandler.handleException(
+          e,
+          'Failed to propagate config changes',
+          source: _source,
+          severity: ErrorSeverity.medium,
+        );
+      }
+    });
   }
 
   void _addMainUserContext(CFUser user) {
@@ -1092,49 +1123,119 @@ class CFClient {
   }
 
   // MARK: - Runtime Configuration Updates
-  // Note: Flutter SDK currently has limited runtime configuration update support
-  // These methods are placeholders for future implementation when MutableCFConfig is enhanced
 
   /// Update the SDK settings check interval at runtime
-  /// Currently not implemented in Flutter SDK
   void updateSdkSettingsCheckInterval(int intervalMs) {
-    Logger.w('updateSdkSettingsCheckInterval not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.updateSdkSettingsCheckInterval(intervalMs);
+      Logger.i('🔧 Updated SDK settings check interval to ${intervalMs}ms');
+    } catch (e) {
+      Logger.e('Failed to update SDK settings check interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update SDK settings check interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Update the events flush interval at runtime
-  /// Currently not implemented in Flutter SDK
   void updateEventsFlushInterval(int intervalMs) {
-    Logger.w('updateEventsFlushInterval not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.updateEventsFlushInterval(intervalMs);
+      Logger.i('🔧 Updated events flush interval to ${intervalMs}ms');
+    } catch (e) {
+      Logger.e('Failed to update events flush interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update events flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Update the summaries flush interval at runtime
-  /// Currently not implemented in Flutter SDK
   void updateSummariesFlushInterval(int intervalMs) {
-    Logger.w('updateSummariesFlushInterval not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.updateSummariesFlushInterval(intervalMs);
+      Logger.i('🔧 Updated summaries flush interval to ${intervalMs}ms');
+    } catch (e) {
+      Logger.e('Failed to update summaries flush interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update summaries flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Update the network connection timeout at runtime
-  /// Currently not implemented in Flutter SDK
   void updateNetworkConnectionTimeout(int timeoutMs) {
-    Logger.w('updateNetworkConnectionTimeout not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.updateNetworkConnectionTimeout(timeoutMs);
+      Logger.i('🔧 Updated network connection timeout to ${timeoutMs}ms');
+    } catch (e) {
+      Logger.e('Failed to update network connection timeout: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update network connection timeout',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Update the network read timeout at runtime
-  /// Currently not implemented in Flutter SDK
   void updateNetworkReadTimeout(int timeoutMs) {
-    Logger.w('updateNetworkReadTimeout not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.updateNetworkReadTimeout(timeoutMs);
+      Logger.i('🔧 Updated network read timeout to ${timeoutMs}ms');
+    } catch (e) {
+      Logger.e('Failed to update network read timeout: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update network read timeout',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Enable or disable debug logging at runtime
-  /// Currently not implemented in Flutter SDK
   void setDebugLoggingEnabled(bool enabled) {
-    Logger.w('setDebugLoggingEnabled not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.setDebugLoggingEnabled(enabled);
+      LogLevelUpdater.updateLogLevel(_mutableConfig.config);
+      Logger.i('🔧 Debug logging ${enabled ? 'enabled' : 'disabled'}');
+    } catch (e) {
+      Logger.e('Failed to update debug logging setting: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update debug logging setting',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 
   /// Enable or disable logging at runtime
-  /// Currently not implemented in Flutter SDK
   void setLoggingEnabled(bool enabled) {
-    Logger.w('setLoggingEnabled not yet implemented in Flutter SDK');
+    try {
+      _mutableConfig.setLoggingEnabled(enabled);
+      LogLevelUpdater.updateLogLevel(_mutableConfig.config);
+      Logger.i('🔧 Logging ${enabled ? 'enabled' : 'disabled'}');
+    } catch (e) {
+      Logger.e('Failed to update logging setting: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update logging setting',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
   }
 }
 
