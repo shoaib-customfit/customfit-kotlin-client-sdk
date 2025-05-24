@@ -51,8 +51,8 @@ const HomeScreen: React.FC = () => {
   }, [customFit.isInitialized, customFit.hasNewConfigMessage, customFit.lastConfigChangeMessage, previousMessage]);
 
   const handleShowToast = async () => {
-    // Use more specific event name and properties with react_native prefix
-    await customFit.trackEvent('reactnative_toast_button_interaction', {
+    // Use consistent event name pattern matching Android reference
+    await customFit.trackEvent('react_native_toast_button_interaction', {
       action: 'click',
       feature: 'toast_message',
       platform: 'react_native'
@@ -69,8 +69,8 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleNavigateToSecond = async () => {
-    // Use more specific event name and properties with react_native prefix
-    await customFit.trackEvent('reactnative_screen_navigation', {
+    // Use consistent event name pattern matching Android reference
+    await customFit.trackEvent('react_native_screen_navigation', {
       from: 'main_screen',
       to: 'second_screen',
       user_flow: 'primary_navigation',
@@ -93,8 +93,8 @@ const HomeScreen: React.FC = () => {
       { cancelable: false }
     );
 
-    // Call the refresh method with react_native prefix
-    await customFit.refreshFeatureFlags('reactnative_config_manual_refresh');
+    // Use consistent event name pattern matching Android reference
+    await customFit.refreshFeatureFlags('react_native_config_manual_refresh');
 
     setIsRefreshing(false);
 
