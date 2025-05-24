@@ -7,7 +7,7 @@ void main() {
   // Initialize Flutter bindings for testing
   TestWidgetsFlutterBinding.ensureInitialized();
   
-  group('CustomFit Flutter SDK - Simple Functionality Test Suite', () => {
+  group('CustomFit Flutter SDK - Simple Functionality Test Suite', () {
     setUp(() async {
       // Clean up any existing singleton instances
       try {
@@ -15,7 +15,7 @@ void main() {
       } catch (e) {
         // Ignore cleanup errors
       }
-    }),
+    });
 
     tearDown(() async {
       // Clean up after each test
@@ -24,7 +24,7 @@ void main() {
       } catch (e) {
         // Ignore cleanup errors
       }
-    }),
+    });
 
     group('CFConfig Creation Tests', () {
       test('should create CFConfig with valid client key', () {
@@ -33,8 +33,19 @@ void main() {
 
         // Then
         expect(config.clientKey, equals('test-client-key'));
-        expect(config.eventsQueueSize, equals(10));
-        expect(config.eventsFlushTimeSeconds, equals(30));
+        expect(config.eventsQueueSize, equals(100));
+        expect(config.eventsFlushTimeSeconds, equals(60));
+        expect(config.eventsFlushIntervalMs, equals(1000));
+        expect(config.summariesQueueSize, equals(100));
+        expect(config.summariesFlushTimeSeconds, equals(60));
+        expect(config.summariesFlushIntervalMs, equals(60000));
+        expect(config.sdkSettingsCheckIntervalMs, equals(300000));
+        expect(config.networkConnectionTimeoutMs, equals(10000));
+        expect(config.networkReadTimeoutMs, equals(10000));
+        expect(config.logLevel, equals('DEBUG'));
+        expect(config.backgroundPollingIntervalMs, equals(3600000));
+        expect(config.reducedPollingIntervalMs, equals(7200000));
+        expect(config.maxStoredEvents, equals(100));
         expect(config.loggingEnabled, isTrue);
         expect(config.debugLoggingEnabled, isFalse);
         expect(config.offlineMode, isFalse);
@@ -118,7 +129,7 @@ void main() {
         expect(minConfig.eventsFlushTimeSeconds, equals(1));
         expect(minConfig.maxRetryAttempts, equals(0));
       });
-    }),
+    });
 
     group('CFUser Creation Tests', () {
       test('should create CFUser with valid user ID', () {
@@ -179,7 +190,7 @@ void main() {
         expect(user.properties['list'], equals([1, 2, 3]));
         expect(user.properties['map'], equals({'nested': 'value'}));
       });
-    }),
+    });
 
     group('Client Initialization Tests', () {
       test('should initialize CFClient with configuration and user', () async {
@@ -226,7 +237,7 @@ void main() {
         expect(() => client.getNumber('test_number', 42), returnsNormally);
         expect(() => client.getJson('test_json', {}), returnsNormally);
       });
-    }),
+    });
 
     group('Event Tracking Tests', () {
       test('should track events without errors', () async {
@@ -306,7 +317,7 @@ void main() {
         // When & Then - Should not throw errors
         expect(() => client.trackEvent('unicode_test', properties: unicodeProperties), returnsNormally);
       });
-    }),
+    });
 
     group('Configuration Edge Cases', () {
       test('should handle special client keys', () {
@@ -385,7 +396,7 @@ void main() {
           expect(identical(configs[i], configs[i + 1]), isFalse);
         }
       });
-    }),
+    });
 
     group('User Edge Cases', () {
       test('should handle user with Unicode properties', () {
@@ -436,7 +447,7 @@ void main() {
         expect(complexUser.properties['profile'], isA<Map>());
         expect(complexUser.properties['metadata'], isA<Map>());
       });
-    }),
+    });
 
     group('Performance Tests', () {
       test('should handle multiple rapid operations', () async {
@@ -473,6 +484,6 @@ void main() {
         // When & Then - Should not throw errors
         expect(() => client.trackEvent('large_props_test', properties: largeProperties), returnsNormally);
       });
-    }),
+    });
   });
 } 

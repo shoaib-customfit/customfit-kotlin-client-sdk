@@ -34,6 +34,8 @@ import '../platform/app_state_listener.dart';
 import '../platform/background_state_monitor.dart';
 import '../platform/default_background_state_monitor.dart';
 import '../constants/cf_constants.dart';
+import '../platform/device_info_detector.dart';
+import '../platform/application_info_detector.dart';
 
 /// Main SDK client orchestrating analytics, config, and environment.
 class CFClient {
@@ -331,23 +333,119 @@ class CFClient {
 
     Logger.d('Auto environment attributes enabled, collecting device and application info');
 
-    // Collect device context automatically
-    final deviceContext = _collectDeviceContext(user.device);
-    if (deviceContext != null) {
-      userManager.updateDeviceContext(deviceContext);
-      _deviceContext = deviceContext;
-      Logger.d('Auto-collected device context: ${deviceContext.manufacturer} ${deviceContext.model}');
-    }
+    // Collect device context automatically using the proper detector
+    _collectDeviceContextAsync(user.device);
 
-    // Collect application info automatically
-    final appInfo = _collectApplicationInfo(user.application);
-    if (appInfo != null) {
-      userManager.updateApplicationInfo(appInfo);
-      Logger.d('Auto-collected application info: ${appInfo.appName} v${appInfo.versionName}');
-    }
+    // Collect application info automatically using the proper detector
+    _collectApplicationInfoAsync(user.application);
   }
 
-  /// Collect device context information automatically
+  /// Collect device context information asynchronously
+  void _collectDeviceContextAsync(DeviceContext? existingContext) {
+    DeviceInfoDetector.detectDeviceInfo().then((deviceContext) {
+      // Merge with existing context if available
+      final mergedContext = _mergeDeviceContext(existingContext, deviceContext);
+      
+      userManager.updateDeviceContext(mergedContext);
+      _deviceContext = mergedContext;
+      Logger.d('Auto-collected device context: ${mergedContext.manufacturer} ${mergedContext.model}');
+    }).catchError((error) {
+      Logger.e('Failed to collect device context: $error');
+      
+      // Fallback to basic context if detection fails
+      final fallbackContext = existingContext ?? DeviceContext.createBasic();
+      userManager.updateDeviceContext(fallbackContext);
+      _deviceContext = fallbackContext;
+    });
+  }
+
+  /// Collect application info asynchronously
+  void _collectApplicationInfoAsync(ApplicationInfo? existingInfo) {
+    ApplicationInfoDetector.detectApplicationInfo().then((appInfo) {
+      if (appInfo != null) {
+        // Merge with existing info if available
+        final mergedInfo = _mergeApplicationInfo(existingInfo, appInfo);
+        
+        userManager.updateApplicationInfo(mergedInfo);
+        Logger.d('Auto-collected application info: ${mergedInfo.appName} v${mergedInfo.versionName}');
+      } else {
+        Logger.w('Failed to detect application info, using existing or default');
+        if (existingInfo != null) {
+          userManager.updateApplicationInfo(existingInfo);
+        }
+      }
+    }).catchError((error) {
+      Logger.e('Failed to collect application info: $error');
+      
+      // Use existing info if available
+      if (existingInfo != null) {
+        userManager.updateApplicationInfo(existingInfo);
+      }
+    });
+  }
+
+  /// Merge device context, preserving existing custom attributes
+  DeviceContext _mergeDeviceContext(DeviceContext? existing, DeviceContext detected) {
+    if (existing == null) return detected;
+    
+    // Merge custom attributes
+    final mergedAttributes = Map<String, dynamic>.from(existing.customAttributes);
+    mergedAttributes.addAll(detected.customAttributes);
+    
+    return DeviceContext(
+      manufacturer: detected.manufacturer ?? existing.manufacturer,
+      model: detected.model ?? existing.model,
+      osName: detected.osName ?? existing.osName,
+      osVersion: detected.osVersion ?? existing.osVersion,
+      sdkVersion: detected.sdkVersion,
+      appId: detected.appId ?? existing.appId,
+      appVersion: detected.appVersion ?? existing.appVersion,
+      locale: detected.locale ?? existing.locale,
+      timezone: detected.timezone ?? existing.timezone,
+      screenWidth: detected.screenWidth ?? existing.screenWidth,
+      screenHeight: detected.screenHeight ?? existing.screenHeight,
+      screenDensity: detected.screenDensity ?? existing.screenDensity,
+      networkType: detected.networkType ?? existing.networkType,
+      networkCarrier: detected.networkCarrier ?? existing.networkCarrier,
+      customAttributes: mergedAttributes,
+    );
+  }
+
+  /// Merge application info, preserving existing custom attributes and incrementing launch count
+  ApplicationInfo _mergeApplicationInfo(ApplicationInfo? existing, ApplicationInfo detected) {
+    if (existing == null) {
+      return ApplicationInfo(
+        appName: detected.appName,
+        packageName: detected.packageName,
+        versionName: detected.versionName,
+        versionCode: detected.versionCode,
+        installDate: detected.installDate,
+        lastUpdateDate: detected.lastUpdateDate,
+        buildType: detected.buildType,
+        launchCount: (existing?.launchCount ?? 0) + 1, // Increment launch count
+        customAttributes: detected.customAttributes,
+      );
+    }
+    
+    // Merge custom attributes
+    final mergedAttributes = Map<String, String>.from(existing.customAttributes);
+    mergedAttributes.addAll(detected.customAttributes);
+    
+    return ApplicationInfo(
+      appName: detected.appName ?? existing.appName,
+      packageName: detected.packageName ?? existing.packageName,
+      versionName: detected.versionName ?? existing.versionName,
+      versionCode: detected.versionCode ?? existing.versionCode,
+      installDate: existing.installDate ?? detected.installDate,
+      lastUpdateDate: detected.lastUpdateDate ?? existing.lastUpdateDate,
+      buildType: detected.buildType ?? existing.buildType,
+      launchCount: existing.launchCount + 1, // Increment launch count
+      customAttributes: mergedAttributes,
+    );
+  }
+
+  /// Collect device context information automatically (deprecated - use async version)
+  @deprecated
   DeviceContext? _collectDeviceContext(DeviceContext? existingContext) {
     try {
       // Start with existing context or create new one
@@ -371,7 +469,8 @@ class CFClient {
     }
   }
 
-  /// Collect application info automatically
+  /// Collect application info automatically (deprecated - use async version)
+  @deprecated
   ApplicationInfo? _collectApplicationInfo(ApplicationInfo? existingInfo) {
     try {
       // Start with existing info or create new one

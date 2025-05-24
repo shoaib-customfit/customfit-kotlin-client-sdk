@@ -83,35 +83,65 @@ class CFConfig {
   /// Whether to automatically collect environment attributes
   final bool autoEnvAttributesEnabled;
 
+  // Local Storage Configuration
+  /// Whether to enable local storage/caching
+  final bool localStorageEnabled;
+
+  /// Cache TTL in seconds for configuration data
+  final int configCacheTtlSeconds;
+
+  /// Cache TTL in seconds for event data
+  final int eventCacheTtlSeconds;
+
+  /// Cache TTL in seconds for summary data
+  final int summaryCacheTtlSeconds;
+
+  /// Maximum size of local cache in MB
+  final int maxCacheSizeMb;
+
+  /// Whether to persist cache across app restarts
+  final bool persistCacheAcrossRestarts;
+
+  /// Whether to use stale cache while revalidating
+  final bool useStaleWhileRevalidate;
+
   /// Get dimension ID from client key
   String? get dimensionId => _extractDimensionIdFromToken(clientKey);
 
   /// Private constructor - use builder pattern instead
   CFConfig._({
     required this.clientKey,
-    this.eventsQueueSize = 10,
-    this.eventsFlushTimeSeconds = 30,
-    this.eventsFlushIntervalMs = 30000,
-    this.maxRetryAttempts = 3,
-    this.retryInitialDelayMs = 1000,
-    this.retryMaxDelayMs = 30000,
-    this.retryBackoffMultiplier = 1.5,
-    this.summariesQueueSize = 10,
-    this.summariesFlushTimeSeconds = 30,
-    this.summariesFlushIntervalMs = 30000,
-    this.sdkSettingsCheckIntervalMs = 240000,
-    this.networkConnectionTimeoutMs = 10000,
-    this.networkReadTimeoutMs = 30000,
+    this.eventsQueueSize = 100, // Consistent with Swift/Kotlin
+    this.eventsFlushTimeSeconds = 60, // Consistent with Swift/Kotlin
+    this.eventsFlushIntervalMs = 1000, // Consistent with Swift/Kotlin (1 second)
+    this.maxRetryAttempts = 3, // Consistent with Swift/Kotlin
+    this.retryInitialDelayMs = 1000, // Consistent with Swift/Kotlin
+    this.retryMaxDelayMs = 30000, // Consistent with Swift/Kotlin
+    this.retryBackoffMultiplier = 2.0, // Consistent with Swift/Kotlin
+    this.summariesQueueSize = 100, // Consistent with Swift/Kotlin
+    this.summariesFlushTimeSeconds = 60, // Consistent with Swift/Kotlin
+    this.summariesFlushIntervalMs = 60000, // Consistent with Swift/Kotlin (60 seconds)
+    this.sdkSettingsCheckIntervalMs = 300000, // Consistent with Swift/Kotlin (5 minutes)
+    this.networkConnectionTimeoutMs = 10000, // Consistent with Swift/Kotlin
+    this.networkReadTimeoutMs = 10000, // Consistent with Swift/Kotlin (changed from 30000)
     this.loggingEnabled = true,
     this.debugLoggingEnabled = false,
-    this.logLevel = 'info',
+    this.logLevel = 'DEBUG', // Consistent with Swift/Kotlin
     this.offlineMode = false,
     this.disableBackgroundPolling = false,
-    this.backgroundPollingIntervalMs = 300000,
+    this.backgroundPollingIntervalMs = 3600000, // Consistent with Swift/Kotlin (1 hour)
     this.useReducedPollingWhenBatteryLow = true,
-    this.reducedPollingIntervalMs = 900000,
-    this.maxStoredEvents = 1000,
+    this.reducedPollingIntervalMs = 7200000, // Consistent with Swift/Kotlin (2 hours)
+    this.maxStoredEvents = 100, // Consistent with Swift/Kotlin
     this.autoEnvAttributesEnabled = false,
+    // Local Storage Configuration
+    this.localStorageEnabled = true,
+    this.configCacheTtlSeconds = 86400, // 24 hours
+    this.eventCacheTtlSeconds = 3600, // 1 hour
+    this.summaryCacheTtlSeconds = 3600, // 1 hour
+    this.maxCacheSizeMb = 50, // 50 MB
+    this.persistCacheAcrossRestarts = true,
+    this.useStaleWhileRevalidate = true,
   });
 
   /// Extract dimension ID from token
@@ -157,6 +187,13 @@ class CFConfig {
     int? reducedPollingIntervalMs,
     int? maxStoredEvents,
     bool? autoEnvAttributesEnabled,
+    bool? localStorageEnabled,
+    int? configCacheTtlSeconds,
+    int? eventCacheTtlSeconds,
+    int? summaryCacheTtlSeconds,
+    int? maxCacheSizeMb,
+    bool? persistCacheAcrossRestarts,
+    bool? useStaleWhileRevalidate,
   }) {
     return CFConfig._(
       clientKey: clientKey ?? this.clientKey,
@@ -183,6 +220,13 @@ class CFConfig {
       reducedPollingIntervalMs: reducedPollingIntervalMs ?? this.reducedPollingIntervalMs,
       maxStoredEvents: maxStoredEvents ?? this.maxStoredEvents,
       autoEnvAttributesEnabled: autoEnvAttributesEnabled ?? this.autoEnvAttributesEnabled,
+      localStorageEnabled: localStorageEnabled ?? this.localStorageEnabled,
+      configCacheTtlSeconds: configCacheTtlSeconds ?? this.configCacheTtlSeconds,
+      eventCacheTtlSeconds: eventCacheTtlSeconds ?? this.eventCacheTtlSeconds,
+      summaryCacheTtlSeconds: summaryCacheTtlSeconds ?? this.summaryCacheTtlSeconds,
+      maxCacheSizeMb: maxCacheSizeMb ?? this.maxCacheSizeMb,
+      persistCacheAcrossRestarts: persistCacheAcrossRestarts ?? this.persistCacheAcrossRestarts,
+      useStaleWhileRevalidate: useStaleWhileRevalidate ?? this.useStaleWhileRevalidate,
     );
   }
 
@@ -196,29 +240,37 @@ class CFConfig {
 /// Builder class for CFConfig
 class Builder {
   final String clientKey;
-  int eventsQueueSize = 10;
-  int eventsFlushTimeSeconds = 30;
-  int eventsFlushIntervalMs = 30000;
+  int eventsQueueSize = 100;
+  int eventsFlushTimeSeconds = 60;
+  int eventsFlushIntervalMs = 1000;
   int maxRetryAttempts = 3;
   int retryInitialDelayMs = 1000;
   int retryMaxDelayMs = 30000;
-  double retryBackoffMultiplier = 1.5;
-  int summariesQueueSize = 10;
-  int summariesFlushTimeSeconds = 30;
-  int summariesFlushIntervalMs = 30000;
-  int sdkSettingsCheckIntervalMs = 240000;
+  double retryBackoffMultiplier = 2.0;
+  int summariesQueueSize = 100;
+  int summariesFlushTimeSeconds = 60;
+  int summariesFlushIntervalMs = 60000;
+  int sdkSettingsCheckIntervalMs = 300000;
   int networkConnectionTimeoutMs = 10000;
-  int networkReadTimeoutMs = 30000;
+  int networkReadTimeoutMs = 10000;
   bool loggingEnabled = true;
   bool debugLoggingEnabled = false;
-  String logLevel = 'info';
+  String logLevel = 'DEBUG';
   bool offlineMode = false;
   bool disableBackgroundPolling = false;
-  int backgroundPollingIntervalMs = 300000;
+  int backgroundPollingIntervalMs = 3600000;
   bool useReducedPollingWhenBatteryLow = true;
-  int reducedPollingIntervalMs = 900000;
-  int maxStoredEvents = 1000;
+  int reducedPollingIntervalMs = 7200000;
+  int maxStoredEvents = 100;
   bool autoEnvAttributesEnabled = false;
+  // Local Storage Configuration
+  bool localStorageEnabled = true;
+  int configCacheTtlSeconds = 86400;
+  int eventCacheTtlSeconds = 3600;
+  int summaryCacheTtlSeconds = 3600;
+  int maxCacheSizeMb = 50;
+  bool persistCacheAcrossRestarts = true;
+  bool useStaleWhileRevalidate = true;
 
   /// Constructor
   Builder(this.clientKey) {
@@ -374,6 +426,62 @@ class Builder {
     return this;
   }
 
+  // Local Storage Configuration Methods
+
+  /// Set whether local storage/caching is enabled
+  Builder setLocalStorageEnabled(bool enabled) {
+    localStorageEnabled = enabled;
+    return this;
+  }
+
+  /// Set cache TTL for configuration data in seconds
+  Builder setConfigCacheTtlSeconds(int seconds) {
+    if (seconds < 0) {
+      throw ArgumentError('Config cache TTL cannot be negative');
+    }
+    configCacheTtlSeconds = seconds;
+    return this;
+  }
+
+  /// Set cache TTL for event data in seconds
+  Builder setEventCacheTtlSeconds(int seconds) {
+    if (seconds < 0) {
+      throw ArgumentError('Event cache TTL cannot be negative');
+    }
+    eventCacheTtlSeconds = seconds;
+    return this;
+  }
+
+  /// Set cache TTL for summary data in seconds
+  Builder setSummaryCacheTtlSeconds(int seconds) {
+    if (seconds < 0) {
+      throw ArgumentError('Summary cache TTL cannot be negative');
+    }
+    summaryCacheTtlSeconds = seconds;
+    return this;
+  }
+
+  /// Set maximum cache size in MB
+  Builder setMaxCacheSizeMb(int sizeMb) {
+    if (sizeMb <= 0) {
+      throw ArgumentError('Max cache size must be greater than 0');
+    }
+    maxCacheSizeMb = sizeMb;
+    return this;
+  }
+
+  /// Set whether to persist cache across app restarts
+  Builder setPersistCacheAcrossRestarts(bool persist) {
+    persistCacheAcrossRestarts = persist;
+    return this;
+  }
+
+  /// Set whether to use stale cache while revalidating
+  Builder setUseStaleWhileRevalidate(bool useStale) {
+    useStaleWhileRevalidate = useStale;
+    return this;
+  }
+
   /// Build method creates immutable CFConfig
   CFConfig build() {
     return CFConfig._(
@@ -401,6 +509,13 @@ class Builder {
       reducedPollingIntervalMs: reducedPollingIntervalMs,
       maxStoredEvents: maxStoredEvents,
       autoEnvAttributesEnabled: autoEnvAttributesEnabled,
+      localStorageEnabled: localStorageEnabled,
+      configCacheTtlSeconds: configCacheTtlSeconds,
+      eventCacheTtlSeconds: eventCacheTtlSeconds,
+      summaryCacheTtlSeconds: summaryCacheTtlSeconds,
+      maxCacheSizeMb: maxCacheSizeMb,
+      persistCacheAcrossRestarts: persistCacheAcrossRestarts,
+      useStaleWhileRevalidate: useStaleWhileRevalidate,
     );
   }
 }
@@ -476,5 +591,15 @@ class MutableCFConfig {
   /// Set offline mode
   void setOfflineMode(bool offline) {
     _updateConfig(_config.copyWith(offlineMode: offline));
+  }
+
+  /// Update local storage settings
+  void updateLocalStorageEnabled(bool enabled) {
+    _updateConfig(_config.copyWith(localStorageEnabled: enabled));
+  }
+
+  /// Update config cache TTL
+  void updateConfigCacheTtl(int seconds) {
+    _updateConfig(_config.copyWith(configCacheTtlSeconds: seconds));
   }
 }

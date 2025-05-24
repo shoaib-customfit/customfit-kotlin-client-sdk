@@ -7,10 +7,19 @@ void main() {
       final config = CFConfig.fromClientKey('test-client-key');
 
       expect(config.clientKey, equals('test-client-key'));
-      expect(config.eventsQueueSize, equals(10));
-      expect(config.eventsFlushTimeSeconds, equals(30));
-      expect(config.eventsFlushIntervalMs, equals(30000));
-      expect(config.maxRetryAttempts, equals(3));
+      expect(config.eventsQueueSize, equals(100));
+      expect(config.eventsFlushTimeSeconds, equals(60));
+      expect(config.eventsFlushIntervalMs, equals(1000));
+      expect(config.summariesQueueSize, equals(100));
+      expect(config.summariesFlushTimeSeconds, equals(60));
+      expect(config.summariesFlushIntervalMs, equals(60000));
+      expect(config.sdkSettingsCheckIntervalMs, equals(300000));
+      expect(config.networkConnectionTimeoutMs, equals(10000));
+      expect(config.networkReadTimeoutMs, equals(10000));
+      expect(config.logLevel, equals('DEBUG'));
+      expect(config.backgroundPollingIntervalMs, equals(3600000));
+      expect(config.reducedPollingIntervalMs, equals(7200000));
+      expect(config.maxStoredEvents, equals(100));
       expect(config.loggingEnabled, isTrue);
       expect(config.debugLoggingEnabled, isFalse);
       expect(config.offlineMode, isFalse);
@@ -220,28 +229,27 @@ void main() {
     });
 
     test('should use default values for unset properties', () {
-      final config = Builder('test-key').build();
+      final config = CFConfig.builder('test-client-key')
+          .setDebugLoggingEnabled(true)
+          .build();
 
-      expect(config.eventsQueueSize, equals(10));
-      expect(config.eventsFlushTimeSeconds, equals(30));
-      expect(config.maxRetryAttempts, equals(3));
-      expect(config.retryInitialDelayMs, equals(1000));
-      expect(config.retryMaxDelayMs, equals(30000));
-      expect(config.retryBackoffMultiplier, equals(1.5));
-      expect(config.summariesQueueSize, equals(10));
-      expect(config.summariesFlushTimeSeconds, equals(30));
-      expect(config.sdkSettingsCheckIntervalMs, equals(240000));
+      expect(config.clientKey, equals('test-client-key'));
+      expect(config.eventsQueueSize, equals(100));
+      expect(config.eventsFlushTimeSeconds, equals(60));
+      expect(config.eventsFlushIntervalMs, equals(1000));
+      expect(config.summariesQueueSize, equals(100));
+      expect(config.summariesFlushTimeSeconds, equals(60));
+      expect(config.summariesFlushIntervalMs, equals(60000));
+      expect(config.sdkSettingsCheckIntervalMs, equals(300000));
       expect(config.networkConnectionTimeoutMs, equals(10000));
-      expect(config.networkReadTimeoutMs, equals(30000));
+      expect(config.networkReadTimeoutMs, equals(10000));
+      expect(config.logLevel, equals('DEBUG'));
+      expect(config.backgroundPollingIntervalMs, equals(3600000));
+      expect(config.reducedPollingIntervalMs, equals(7200000));
+      expect(config.maxStoredEvents, equals(100));
       expect(config.loggingEnabled, isTrue);
-      expect(config.debugLoggingEnabled, isFalse);
-      expect(config.logLevel, equals('info'));
+      expect(config.debugLoggingEnabled, isTrue);
       expect(config.offlineMode, isFalse);
-      expect(config.disableBackgroundPolling, isFalse);
-      expect(config.backgroundPollingIntervalMs, equals(300000));
-      expect(config.useReducedPollingWhenBatteryLow, isTrue);
-      expect(config.reducedPollingIntervalMs, equals(900000));
-      expect(config.maxStoredEvents, equals(1000));
       expect(config.autoEnvAttributesEnabled, isFalse);
     });
   });

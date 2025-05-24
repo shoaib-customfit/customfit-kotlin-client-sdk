@@ -115,10 +115,25 @@ class ConfigManagerImpl implements ConfigManager {
       return;
     }
 
+    // Skip cache loading if local storage is disabled
+    if (!_config.localStorageEnabled) {
+      Logger.i('Local storage disabled, skipping cache loading');
+      _initialCacheLoadComplete = true;
+      return;
+    }
+
     Logger.i('Loading configuration from cache...');
 
+    // Create cache policy based on config
+    final cachePolicy = CachePolicy(
+      ttlSeconds: _config.configCacheTtlSeconds,
+      useStaleWhileRevalidate: _config.useStaleWhileRevalidate,
+      evictOnAppRestart: !_config.persistCacheAcrossRestarts,
+      persist: _config.persistCacheAcrossRestarts,
+    );
+
     // Try to get cached config, allow expired entries if needed
-    final cacheResult = await _configCache.getCachedConfig(allowExpired: true);
+    final cacheResult = await _configCache.getCachedConfig(allowExpired: _config.useStaleWhileRevalidate);
 
     if (cacheResult.configMap != null) {
       Logger.i(
@@ -289,9 +304,20 @@ class ConfigManagerImpl implements ConfigManager {
           Logger.i(
               '🔎 API POLL: Successfully fetched ${configs.length} config entries');
 
-          // Use the enhanced ConfigCache with proper cache policy
-          await _configCache.cacheConfig(configs, lastModified, etag,
-              policy: CachePolicy.configCache);
+          // Use config-driven cache policy for storing configurations
+          if (_config.localStorageEnabled) {
+            final cachePolicy = CachePolicy(
+              ttlSeconds: _config.configCacheTtlSeconds,
+              useStaleWhileRevalidate: _config.useStaleWhileRevalidate,
+              evictOnAppRestart: !_config.persistCacheAcrossRestarts,
+              persist: _config.persistCacheAcrossRestarts,
+            );
+
+            await _configCache.cacheConfig(configs, lastModified, etag,
+                policy: cachePolicy);
+          } else {
+            Logger.d('Local storage disabled, skipping config caching');
+          }
 
           // Update config map with new values
           _updateConfigMap(configs);
