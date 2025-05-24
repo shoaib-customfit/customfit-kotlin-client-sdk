@@ -234,10 +234,10 @@ public class EventTracker {
             )
         }
         
-        // Validate event name
-        if eventName.isEmpty {
+        // Validate event name (consistent with other SDKs)
+        if eventName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let message = "Event name cannot be blank"
-            Logger.warning("🔔 TRACK: Invalid event - \(message)")
+            Logger.warning("🔔 🔔 TRACK: Invalid event - \(message)")
             ErrorHandler.handleError(
                 message: message,
                 source: EventTracker.SOURCE,

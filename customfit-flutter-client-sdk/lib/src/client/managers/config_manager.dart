@@ -140,6 +140,16 @@ class ConfigManagerImpl implements ConfigManager {
 
   /// Start periodic SDK settings check
   void _startSdkSettingsCheck() {
+    // Skip SDK settings check entirely if in offline mode
+    if (_configFetcher.isOffline()) {
+      Logger.i('SKIPPING SDK settings check in offline mode');
+      // Complete the completer immediately to signal initialization is done
+      if (!_sdkSettingsCompleter.isCompleted) {
+        _sdkSettingsCompleter.complete();
+      }
+      return;
+    }
+    
     // Cancel any existing timer first
     _sdkSettingsTimer?.cancel();
 
@@ -188,6 +198,15 @@ class ConfigManagerImpl implements ConfigManager {
 
   /// Perform initial SDK settings check
   Future<void> _initialSdkSettingsCheck() async {
+    // Skip if in offline mode
+    if (_configFetcher.isOffline()) {
+      Logger.d('SKIPPING initial SDK settings check in offline mode');
+      if (!_sdkSettingsCompleter.isCompleted) {
+        _sdkSettingsCompleter.complete();
+      }
+      return;
+    }
+    
     await _checkSdkSettings();
     if (!_sdkSettingsCompleter.isCompleted) {
       _sdkSettingsCompleter.complete();
@@ -196,6 +215,12 @@ class ConfigManagerImpl implements ConfigManager {
 
   /// Check SDK settings for updates
   Future<void> _checkSdkSettings() async {
+    // Skip if in offline mode
+    if (_configFetcher.isOffline()) {
+      Logger.d('Not checking SDK settings because client is in offline mode');
+      return;
+    }
+    
     try {
       Logger.d('🔎 API POLL: Starting SDK settings check');
 
@@ -791,9 +816,13 @@ class ConfigManagerImpl implements ConfigManager {
 
   @override
   void updateConfigsFromClient(Map<String, dynamic> newConfigs) {
-    Logger.d(
-        'Received config update from client with ${newConfigs.length} entries');
     _updateConfigMap(newConfigs);
+  }
+
+  /// Set offline mode for the ConfigManager
+  void setOfflineMode(bool offline) {
+    _configFetcher.setOffline(offline);
+    Logger.i('ConfigManager offline mode set to: $offline');
   }
 }
 

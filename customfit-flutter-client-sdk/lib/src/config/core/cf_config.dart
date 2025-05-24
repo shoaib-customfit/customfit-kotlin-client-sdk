@@ -229,12 +229,18 @@ class Builder {
 
   /// Set events queue size
   Builder setEventsQueueSize(int size) {
+    if (size <= 0) {
+      throw ArgumentError('Events queue size must be greater than 0');
+    }
     eventsQueueSize = size;
     return this;
   }
 
   /// Set events flush time seconds
   Builder setEventsFlushTimeSeconds(int seconds) {
+    if (seconds <= 0) {
+      throw ArgumentError('Events flush time seconds must be greater than 0');
+    }
     eventsFlushTimeSeconds = seconds;
     return this;
   }
@@ -247,6 +253,9 @@ class Builder {
 
   /// Set max retry attempts
   Builder setMaxRetryAttempts(int attempts) {
+    if (attempts < 0) {
+      throw ArgumentError('Max retry attempts cannot be negative');
+    }
     maxRetryAttempts = attempts;
     return this;
   }

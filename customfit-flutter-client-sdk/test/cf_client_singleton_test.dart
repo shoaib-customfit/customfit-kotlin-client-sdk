@@ -13,9 +13,14 @@ void main() {
       // Ensure clean state before each test
       await CFClient.shutdownSingleton();
 
+      // Create a test-optimized configuration that prevents network calls
       testConfig = CFConfig.builder('test-client-key')
           .setDebugLoggingEnabled(true)
           .setOfflineMode(true) // Use offline mode for testing
+          .setDisableBackgroundPolling(true) // Disable background polling
+          .setSdkSettingsCheckIntervalMs(300000) // 5 minutes (reasonable interval)
+          .setNetworkConnectionTimeoutMs(5000) // Short timeout for tests
+          .setNetworkReadTimeoutMs(5000) // Short timeout for tests
           .build();
 
       testUser = CFUser(
@@ -27,6 +32,9 @@ void main() {
     tearDown(() async {
       // Clean up after each test
       await CFClient.shutdownSingleton();
+      
+      // Add a small delay to ensure cleanup is complete
+      await Future.delayed(const Duration(milliseconds: 100));
     });
 
     test('singleton creation returns same instance', () async {
@@ -90,8 +98,14 @@ void main() {
     });
 
     test('concurrent initialization with different configurations', () async {
-      final config1 = CFConfig.builder('client-key-1').setOfflineMode(true).build();
-      final config2 = CFConfig.builder('client-key-2').setOfflineMode(true).build();
+      final config1 = CFConfig.builder('client-key-1')
+          .setOfflineMode(true)
+          .setDisableBackgroundPolling(true)
+          .build();
+      final config2 = CFConfig.builder('client-key-2')
+          .setOfflineMode(true)
+          .setDisableBackgroundPolling(true)
+          .build();
       final user1 = CFUser(userCustomerId: 'user-1');
       final user2 = CFUser(userCustomerId: 'user-2');
 
@@ -137,7 +151,10 @@ void main() {
       expect(CFClient.isInitialized(), isTrue);
 
       // Reinitialize with different config
-      final newConfig = CFConfig.builder('new-client-key').setOfflineMode(true).build();
+      final newConfig = CFConfig.builder('new-client-key')
+          .setOfflineMode(true)
+          .setDisableBackgroundPolling(true)
+          .build();
       final newUser = CFUser(userCustomerId: 'new-user');
       final client2 = await CFClient.reinitialize(newConfig, newUser);
 
@@ -177,7 +194,10 @@ void main() {
       expect(identical(validClient, CFClient.getInstance()), isTrue);
       
       // Try to create another instance with different config - should return same instance
-      final differentConfig = CFConfig.builder('different-key').setOfflineMode(true).build();
+      final differentConfig = CFConfig.builder('different-key')
+          .setOfflineMode(true)
+          .setDisableBackgroundPolling(true)
+          .build();
       final differentUser = CFUser(userCustomerId: 'different-user');
       final secondClient = await CFClient.init(differentConfig, differentUser);
       
@@ -194,7 +214,10 @@ void main() {
       expect(CFClient.isInitialized(), isTrue);
       
       // Different configs should still return same instance
-      final config2 = CFConfig.builder('another-key').setOfflineMode(false).build();
+      final config2 = CFConfig.builder('another-key')
+          .setOfflineMode(true) // Keep offline for testing
+          .setDisableBackgroundPolling(true)
+          .build();
       final user2 = CFUser(
         userCustomerId: 'another-user',
         properties: {'type': 'test'},

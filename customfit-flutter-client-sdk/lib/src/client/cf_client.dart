@@ -227,10 +227,15 @@ class CFClient {
     // Setup config change listeners to propagate changes to components
     _setupConfigChangeListeners();
 
-    // Offline mode
+    // IMPORTANT: Set offline mode BEFORE any other initialization
+    // This ensures ConfigManager doesn't start network calls
     if (_mutableConfig.config.offlineMode) {
       configFetcher.setOffline(true);
       connectionManager.setOfflineMode(true);
+      // Also set offline mode for the ConfigManager's ConfigFetcher
+      if (configManager is ConfigManagerImpl) {
+        (configManager as ConfigManagerImpl).setOfflineMode(true);
+      }
       Logger.i('CF client initialized in offline mode');
     }
 
@@ -256,6 +261,12 @@ class CFClient {
 
   /// Initialize SessionManager with configuration
   void _initializeSessionManager() {
+    // Skip session manager initialization in offline mode to prevent issues
+    if (_mutableConfig.config.offlineMode) {
+      Logger.i('🔄 SKIPPING SessionManager initialization in offline mode');
+      return;
+    }
+    
     // Create session configuration based on CFConfig defaults
     const sessionConfig = SessionConfig(
       maxSessionDurationMs: 60 * 60 * 1000, // 1 hour default
@@ -449,6 +460,12 @@ class CFClient {
 
   /// Periodic SDK settings
   void _startPeriodicSdkSettingsCheck() {
+    // Skip SDK settings polling entirely if in offline mode
+    if (_mutableConfig.config.offlineMode) {
+      Logger.d('SKIPPING SDK settings polling in offline mode');
+      return;
+    }
+    
     // DISABLED - We're using ConfigManager for SDK settings polling instead
     // This avoids duplicate polling which was causing continuous network requests
 
@@ -495,6 +512,16 @@ class CFClient {
   }
 
   void _initialSdkSettingsCheck() async {
+    // Skip initial SDK settings check if in offline mode
+    if (_mutableConfig.config.offlineMode) {
+      Logger.d('SKIPPING initial SDK settings check in offline mode');
+      // Complete the completer immediately to signal initialization is done
+      if (!_sdkSettingsCompleter.isCompleted) {
+        _sdkSettingsCompleter.complete();
+      }
+      return;
+    }
+    
     // Check once without relying on timer
     Logger.d('Performing initial SDK settings check (one-time)');
     await _checkSdkSettings();
@@ -510,6 +537,12 @@ class CFClient {
   }
 
   Future<void> _checkSdkSettings() async {
+    // Skip if in offline mode
+    if (_mutableConfig.config.offlineMode) {
+      Logger.d('Not fetching metadata because client is in offline mode');
+      return;
+    }
+    
     try {
       // Get the correct SDK settings URL to match Kotlin implementation
       final String dimensionId = _mutableConfig.config.dimensionId ?? "default";
@@ -677,6 +710,24 @@ class CFClient {
     final value = configManager.getBoolean(key, defaultValue);
     if (value == defaultValue) {
       Logger.d('getBoolean: Using default value for key: $key');
+    }
+    return value;
+  }
+
+  /// Get a number feature flag value
+  num getNumber(String key, num defaultValue) {
+    final value = configManager.getNumber(key, defaultValue);
+    if (value == defaultValue) {
+      Logger.d('getNumber: Using default value for key: $key');
+    }
+    return value;
+  }
+
+  /// Get a JSON feature flag value
+  Map<String, dynamic> getJson(String key, Map<String, dynamic> defaultValue) {
+    final value = configManager.getJson(key, defaultValue);
+    if (value == defaultValue) {
+      Logger.d('getJson: Using default value for key: $key');
     }
     return value;
   }

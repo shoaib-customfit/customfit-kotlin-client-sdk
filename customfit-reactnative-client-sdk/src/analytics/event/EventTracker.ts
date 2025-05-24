@@ -30,7 +30,7 @@ export class EventTracker {
     this.connectionMonitor = ConnectionMonitor.getInstance();
     this.summaryManager = summaryManager;
     
-    Logger.info(`🔔 TRACK: EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
+    Logger.info(`🔔 🔔 TRACK: EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
   }
 
   /**
@@ -92,11 +92,11 @@ export class EventTracker {
 
       // Add event to queue
       this.eventQueue.push(eventData);
-      Logger.info(`🔔 TRACK: Event added to queue: ${eventData.name}, queue size=${this.eventQueue.length}`);
+      Logger.info(`🔔 🔔 TRACK: Event added to queue: ${eventData.name}, queue size=${this.eventQueue.length}`);
 
       // Check if we need to flush based on queue size
       if (this.eventQueue.length >= this.config.eventsQueueSize) {
-        Logger.info('🔔 TRACK: Queue size limit reached, triggering flush');
+        Logger.info('🔔 🔔 TRACK: Queue size limit reached, triggering flush');
         await this.flush();
       }
 
@@ -141,7 +141,7 @@ export class EventTracker {
       
       if (!name || name.trim() === '') {
         const message = 'Event name cannot be blank';
-        Logger.warning(`🔔 TRACK: Invalid event - ${message}`);
+        Logger.warning(`🔔 🔔 TRACK: Invalid event - ${message}`);
         ErrorHandler.handleError(
           message,
           EventTracker.SOURCE,
@@ -186,13 +186,13 @@ export class EventTracker {
     }
 
     if (this.eventQueue.length === 0) {
-      Logger.debug('🔔 TRACK: No events to flush');
+      Logger.debug('🔔 🔔 TRACK: No events to flush');
       return CFResult.success(0);
     }
 
     // Check if we're connected
     if (!this.connectionMonitor.isConnected()) {
-      Logger.debug('🔔 TRACK: No connection, storing events for later');
+      Logger.debug('🔔 🔔 TRACK: No connection, storing events for later');
       await this.storeEvents();
       return CFResult.success(0);
     }
@@ -200,11 +200,11 @@ export class EventTracker {
     const eventsToFlush = [...this.eventQueue];
     const flushCount = eventsToFlush.length;
 
-    Logger.info(`🔔 TRACK HTTP: Preparing to send ${flushCount} events`);
+    Logger.info(`🔔 🔔 TRACK HTTP: Preparing to send ${flushCount} events`);
     
     // Log individual events being sent
     eventsToFlush.forEach((event, index) => {
-      Logger.debug(`🔔 TRACK HTTP: Event #${index + 1}: ${event.name}, properties=${Object.keys(event.properties || {}).join(',')}`);
+      Logger.debug(`🔔 🔔 TRACK HTTP: Event #${index + 1}: ${event.name}, properties=${Object.keys(event.properties || {}).join(',')}`);
     });
 
     try {
@@ -215,8 +215,11 @@ export class EventTracker {
         batch_timestamp: new Date().toISOString(),
       };
       
-      Logger.debug(`🔔 TRACK HTTP: Event payload size: ${JSON.stringify(payload).length} bytes`);
-      Logger.debug(`🔔 TRACK HTTP: POST request to: ${CFConstants.Api.EVENTS_PATH}`);
+      Logger.debug(`🔔 🔔 TRACK HTTP: Event payload size: ${JSON.stringify(payload).length} bytes`);
+      Logger.debug(`🔔 🔔 TRACK HTTP: POST request to: ${CFConstants.Api.EVENTS_PATH}`);
+      Logger.debug(`🔔 🔔 TRACK HTTP: Request headers: Content-Type=application/json`);
+      const payloadStr = JSON.stringify(payload);
+      Logger.debug(`🔔 🔔 TRACK HTTP: Request body preview: ${payloadStr.length > 200 ? payloadStr.substring(0, 200) + "..." : payloadStr}`);
       
       // Send to server
       const result = await this.httpClient.post(CFConstants.Api.EVENTS_PATH, payload);
@@ -226,11 +229,12 @@ export class EventTracker {
         this.eventQueue = this.eventQueue.slice(flushCount);
         this.lastFlushTime = Date.now();
         
-        Logger.info(`🔔 TRACK: Successfully flushed ${flushCount} events`);
+        Logger.info(`🔔 🔔 TRACK: Successfully flushed ${flushCount} events`);
+        Logger.debug(`🔔 🔔 TRACK HTTP: Response received successfully`);
         return CFResult.success(flushCount);
       } else {
         const errorMessage = `Failed to flush events: ${result.error?.message}`;
-        Logger.error(`🔔 TRACK HTTP: ${errorMessage}`);
+        Logger.error(`🔔 🔔 TRACK HTTP: ${errorMessage}`);
         
         ErrorHandler.handleError(
           errorMessage,
@@ -248,7 +252,7 @@ export class EventTracker {
       }
     } catch (error) {
       const errorMessage = `Exception during flush: ${error}`;
-      Logger.error(`🔔 TRACK HTTP: ${errorMessage}`);
+      Logger.error(`🔔 🔔 TRACK HTTP: ${errorMessage}`);
       
       ErrorHandler.handleException(
         error as Error,

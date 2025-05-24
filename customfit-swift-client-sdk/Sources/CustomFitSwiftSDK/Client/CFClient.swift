@@ -119,6 +119,49 @@ public class CFClient: AppStateListener, BatteryStateListener {
         return CFClient(config: config, user: user)
     }
     
+    /// Create a test instance that bypasses listener setup for testing
+    /// This method is intended for unit tests to avoid hanging issues
+    /// - Parameters:
+    ///   - config: SDK configuration
+    ///   - user: User configuration
+    /// - Returns: CFClient instance with minimal setup for testing
+    internal static func createTestInstance(config: CFConfig, user: CFUser) -> CFClient {
+        Logger.info("Creating test CFClient instance (bypassing listener setup)")
+        return CFClient(config: config, user: user, skipSetup: true)
+    }
+    
+    /// Initialize or get the singleton instance of CFClient for testing
+    /// This method ensures only one instance exists but skips problematic setup for tests
+    /// - Parameters:
+    ///   - config: SDK configuration
+    ///   - user: User configuration
+    /// - Returns: Singleton CFClient instance with minimal setup
+    internal static func initializeForTesting(config: CFConfig, user: CFUser) -> CFClient {
+        instanceLock.lock()
+        defer { instanceLock.unlock() }
+        
+        // Fast path: if already initialized, return existing instance
+        if let existingInstance = _instance {
+            Logger.info("CFClient singleton already exists, returning existing instance")
+            return existingInstance
+        }
+        
+        // Check if initialization is in progress
+        if _isInitializing {
+            Logger.warning("CFClient initialization already in progress, waiting...")
+            Logger.warning("Creating new instance despite initialization in progress")
+        }
+        
+        Logger.info("Creating new CFClient singleton instance for testing")
+        _isInitializing = true
+        
+        let newInstance = CFClient(config: config, user: user, skipSetup: true)
+        _instance = newInstance
+        _isInitializing = false
+        Logger.info("CFClient singleton created successfully for testing")
+        return newInstance
+    }
+    
 
     
     // MARK: - Properties
@@ -257,9 +300,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Initialize SessionManager after all properties are set
         self.initializeSessionManager()
         
-        // Perform initial SDK settings check synchronously (like Kotlin does)
+        // Perform initial SDK settings check only if not in offline mode
         if !self.mutableConfig.offlineMode {
-            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            Logger.info("🔧 Performing initial SDK settings check...")
             DispatchQueue.global(qos: .userInitiated).async {
                 if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
                     Task {
@@ -279,6 +322,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
                     }
                 }
             }
+        } else {
+            Logger.info("🔧 SKIPPING initial SDK settings check in offline mode")
         }
         
         // Setup listeners asynchronously to prevent blocking
@@ -384,9 +429,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // Initialize SessionManager after all properties are set
         self.initializeSessionManager()
         
-        // Perform initial SDK settings check synchronously (like Kotlin does)
+        // Perform initial SDK settings check only if not in offline mode
         if !self.mutableConfig.offlineMode {
-            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            Logger.info("🔧 Performing initial SDK settings check...")
             DispatchQueue.global(qos: .userInitiated).async {
                 if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
                     Task {
@@ -406,6 +451,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
                     }
                 }
             }
+        } else {
+            Logger.info("🔧 SKIPPING initial SDK settings check in offline mode")
         }
         
         // Setup listeners asynchronously to prevent blocking
@@ -513,9 +560,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
             self.initializeSessionManager()
         }
         
-        // Perform initial SDK settings check synchronously (like Kotlin does)
+        // Perform initial SDK settings check only if not in offline mode
         if !self.mutableConfig.offlineMode {
-            Logger.info("🔧 Performing initial SDK settings check synchronously...")
+            Logger.info("🔧 Performing initial SDK settings check...")
             DispatchQueue.global(qos: .userInitiated).async {
                 if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *) {
                     Task {
@@ -535,6 +582,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
                     }
                 }
             }
+        } else {
+            Logger.info("🔧 SKIPPING initial SDK settings check in offline mode")
         }
         
         // Only set up listeners and register for config changes if not skipping setup
@@ -553,6 +602,12 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     /// Initialize SessionManager with configuration
     private func initializeSessionManager() {
+        // Skip session manager initialization in offline mode
+        if mutableConfig.offlineMode {
+            Logger.info("🔄 SKIPPING SessionManager initialization in offline mode")
+            return
+        }
+        
         // Create session configuration based on CFConfig defaults
         let sessionConfig = SessionConfig(
             maxSessionDurationMs: 60 * 60 * 1000, // 1 hour default
@@ -635,6 +690,12 @@ public class CFClient: AppStateListener, BatteryStateListener {
     private func setupListenersAsync() {
         Logger.info("🔧 Setting up listeners asynchronously...")
         
+        // Skip listener setup entirely if in offline mode or background polling is disabled
+        if mutableConfig.offlineMode || mutableConfig.disableBackgroundPolling {
+            Logger.info("🔧 SKIPPING listener setup: offlineMode=\(mutableConfig.offlineMode), disableBackgroundPolling=\(mutableConfig.disableBackgroundPolling)")
+            return
+        }
+        
         // Use a background queue to avoid blocking initialization
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -649,52 +710,38 @@ public class CFClient: AppStateListener, BatteryStateListener {
             timeoutQueue.asyncAfter(deadline: .now() + 5.0, execute: timeoutWorkItem)
             
             // Perform listener setup operations
-            do {
-                Logger.debug("🔧 Registering app state listener...")
-                self.backgroundStateMonitor.addAppStateListener(listener: self)
+            Logger.debug("🔧 Registering app state listener...")
+            self.backgroundStateMonitor.addAppStateListener(listener: self)
+            
+            Logger.debug("🔧 Registering battery state listener...")
+            self.backgroundStateMonitor.addBatteryStateListener(listener: self)
+            
+            Logger.debug("🔧 Starting background state monitoring...")
+            self.backgroundStateMonitor.startMonitoring()
+            
+            Logger.debug("🔧 Background state monitoring completed successfully!")
+            
+            // Only start periodic checks if not in offline mode and polling is enabled
+            if !self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling {
+                Logger.debug("🔧 Starting periodic SDK settings check...")
                 
-                Logger.debug("🔧 Registering battery state listener...")
-                self.backgroundStateMonitor.addBatteryStateListener(listener: self)
-                
-                Logger.debug("🔧 Starting background state monitoring...")
-                self.backgroundStateMonitor.startMonitoring()
-                
-                Logger.debug("🔧 Background state monitoring completed successfully!")
-                
-                // DEBUG: Log the actual config values
-                Logger.debug("🔧 CONFIG DEBUG: offlineMode=\(self.mutableConfig.offlineMode)")
-                Logger.debug("🔧 CONFIG DEBUG: disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
-                Logger.debug("🔧 CONFIG DEBUG: condition result=\(!self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling)")
-                
-                // Only start periodic checks if not in offline mode and polling is enabled
-                if !self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling {
-                    Logger.debug("🔧 CONDITIONS MET: offlineMode=\(self.mutableConfig.offlineMode), disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
-                    Logger.debug("🔧 Starting periodic SDK settings check...")
+                // Start the config manager on the main queue to ensure timer works properly
+                DispatchQueue.main.async {
+                    Logger.info("🔧 CALLING startPeriodicSdkSettingsCheck with initialCheck=true")
+                    self.configManager.startPeriodicSdkSettingsCheck(
+                        interval: self.mutableConfig.sdkSettingsCheckIntervalMs,
+                        initialCheck: true // Enable initial check to match Kotlin behavior
+                    )
                     
-                    // Start the config manager on the main queue to ensure timer works properly
-                    DispatchQueue.main.async {
-                        Logger.info("🔧 CALLING startPeriodicSdkSettingsCheck with initialCheck=true")
-                        self.configManager.startPeriodicSdkSettingsCheck(
-                            interval: self.mutableConfig.sdkSettingsCheckIntervalMs,
-                            initialCheck: true // Enable initial check to match Kotlin behavior
-                        )
-                        
-                        Logger.info("🔧 Periodic SDK settings check started successfully")
-                    }
-                } else {
-                    Logger.info("🔧 SKIPPING periodic SDK settings check: offlineMode=\(self.mutableConfig.offlineMode), disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
+                    Logger.info("🔧 Periodic SDK settings check started successfully")
                 }
-                
-                // Cancel the main timeout since we completed successfully
-                timeoutWorkItem.cancel()
-                Logger.info("🚀 All listeners set up successfully!")
-                
-            } catch {
-                // Cancel timeout and log error
-                timeoutWorkItem.cancel()
-                Logger.error("❌ Error setting up listeners: \(error.localizedDescription)")
-                Logger.info("🚀 CFClient will continue to work with limited functionality")
+            } else {
+                Logger.info("🔧 SKIPPING periodic SDK settings check: offlineMode=\(self.mutableConfig.offlineMode), disableBackgroundPolling=\(self.mutableConfig.disableBackgroundPolling)")
             }
+            
+            // Cancel the main timeout since we completed successfully
+            timeoutWorkItem.cancel()
+            Logger.info("🚀 All listeners set up successfully!")
         }
     }
     

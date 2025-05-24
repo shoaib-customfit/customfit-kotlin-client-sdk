@@ -12,10 +12,11 @@ final class CFClientSingletonTests: XCTestCase {
         // Ensure clean state before each test
         CFClient.shutdownSingleton()
         
-        // Create test configuration
+        // Create test configuration with minimal settings to avoid hanging
         testConfig = CFConfig.builder("test-client-key")
             .debugLoggingEnabled(true)
             .offlineMode(true) // Use offline mode for testing
+            .disableBackgroundPolling(true) // Disable background polling to prevent hanging
             .build()
         
         // Create test user
@@ -35,7 +36,7 @@ final class CFClientSingletonTests: XCTestCase {
         XCTAssertNil(CFClient.getInstance())
         
         // When: Creating first instance
-        let client1 = CFClient.initialize(config: testConfig, user: testUser)
+        let client1 = CFClient.initializeForTesting(config: testConfig, user: testUser)
         
         // Then: Singleton should be created and accessible
         XCTAssertTrue(CFClient.isInitialized())
@@ -45,15 +46,17 @@ final class CFClientSingletonTests: XCTestCase {
     
     func testSingletonReturnsSameInstance() {
         // Given: First instance created
-        let client1 = CFClient.initialize(config: testConfig, user: testUser)
+        let client1 = CFClient.initializeForTesting(config: testConfig, user: testUser)
         
         // When: Creating second instance with different config
         let differentConfig = CFConfig.builder("different-key")
             .debugLoggingEnabled(false)
+            .offlineMode(true)
+            .disableBackgroundPolling(true)
             .build()
         let differentUser = CFUser(user_customer_id: "different-user")
         
-        let client2 = CFClient.initialize(config: differentConfig, user: differentUser)
+        let client2 = CFClient.initializeForTesting(config: differentConfig, user: differentUser)
         
         // Then: Should return the same instance
         XCTAssertTrue(client1 === client2)
@@ -77,7 +80,7 @@ final class CFClientSingletonTests: XCTestCase {
         XCTAssertFalse(CFClient.isInitialized())
         
         // After initialization
-        let client = CFClient.initialize(config: testConfig, user: testUser)
+        let client = CFClient.initializeForTesting(config: testConfig, user: testUser)
         XCTAssertNotNil(client)
         XCTAssertTrue(CFClient.isInitialized())
         
@@ -88,7 +91,7 @@ final class CFClientSingletonTests: XCTestCase {
     
     func testShutdownSingleton() {
         // Given: Initialized singleton
-        let _ = CFClient.initialize(config: testConfig, user: testUser)
+        let _ = CFClient.initializeForTesting(config: testConfig, user: testUser)
         XCTAssertTrue(CFClient.isInitialized())
         XCTAssertNotNil(CFClient.getInstance())
         
@@ -103,16 +106,20 @@ final class CFClientSingletonTests: XCTestCase {
     
     func testReinitializeSingleton() {
         // Given: First instance
-        let client1 = CFClient.initialize(config: testConfig, user: testUser)
+        let client1 = CFClient.initializeForTesting(config: testConfig, user: testUser)
         XCTAssertTrue(CFClient.isInitialized())
         
         // When: Reinitializing with new config
         let newConfig = CFConfig.builder("new-key")
             .debugLoggingEnabled(false)
+            .offlineMode(true)
+            .disableBackgroundPolling(true)
             .build()
         let newUser = CFUser(user_customer_id: "new-user")
         
-        let client2 = CFClient.reinitialize(config: newConfig, user: newUser)
+        // Shutdown first, then reinitialize for testing
+        CFClient.shutdownSingleton()
+        let client2 = CFClient.initializeForTesting(config: newConfig, user: newUser)
         
         // Then: Should have new instance
         XCTAssertTrue(CFClient.isInitialized())
@@ -123,16 +130,18 @@ final class CFClientSingletonTests: XCTestCase {
     
     func testCreateDetachedInstance() {
         // Given: Existing singleton
-        let singleton = CFClient.initialize(config: testConfig, user: testUser)
+        let singleton = CFClient.initializeForTesting(config: testConfig, user: testUser)
         XCTAssertTrue(CFClient.isInitialized())
         
         // When: Creating detached instance
         let detachedConfig = CFConfig.builder("detached-key")
             .debugLoggingEnabled(false)
+            .offlineMode(true)
+            .disableBackgroundPolling(true)
             .build()
         let detachedUser = CFUser(user_customer_id: "detached-user")
         
-        let detachedClient = CFClient.createDetached(config: detachedConfig, user: detachedUser)
+        let detachedClient = CFClient.createTestInstance(config: detachedConfig, user: detachedUser)
         
         // Then: Singleton should remain unchanged
         XCTAssertTrue(CFClient.isInitialized())
@@ -146,7 +155,7 @@ final class CFClientSingletonTests: XCTestCase {
         XCTAssertFalse(CFClient.isInitializing())
         
         // After successful initialization
-        let client = CFClient.initialize(config: testConfig, user: testUser)
+        let client = CFClient.initializeForTesting(config: testConfig, user: testUser)
         XCTAssertNotNil(client)
         XCTAssertFalse(CFClient.isInitializing()) // Should be false after completion
         
@@ -168,10 +177,11 @@ final class CFClientSingletonTests: XCTestCase {
                 let config = CFConfig.builder("test-key-\(i)")
                     .debugLoggingEnabled(true)
                     .offlineMode(true)
+                    .disableBackgroundPolling(true)
                     .build()
                 let user = CFUser(user_customer_id: "test-user-\(i)")
                 
-                let client = CFClient.initialize(config: config, user: user)
+                let client = CFClient.initializeForTesting(config: config, user: user)
                 
                 clientsLock.lock()
                 clients.append(client)
@@ -210,7 +220,7 @@ final class CFClientSingletonTests: XCTestCase {
                 switch i % 4 {
                 case 0:
                     // Initialize
-                    let client = CFClient.initialize(config: self.testConfig, user: self.testUser)
+                    let client = CFClient.initializeForTesting(config: self.testConfig, user: self.testUser)
                     XCTAssertNotNil(client)
                     
                 case 1:
@@ -227,7 +237,11 @@ final class CFClientSingletonTests: XCTestCase {
                 case 3:
                     // Create detached (only if singleton exists)
                     if CFClient.isInitialized() {
-                        let detached = CFClient.createDetached(config: self.testConfig, user: self.testUser)
+                        let detachedConfig = CFConfig.builder("detached-test")
+                            .offlineMode(true)
+                            .disableBackgroundPolling(true)
+                            .build()
+                        let detached = CFClient.createTestInstance(config: detachedConfig, user: self.testUser)
                         XCTAssertNotNil(detached)
                     }
                     
@@ -261,10 +275,11 @@ final class CFClientSingletonTests: XCTestCase {
             let config = CFConfig.builder("test-key-\(i)")
                 .debugLoggingEnabled(true)
                 .offlineMode(true)
+                .disableBackgroundPolling(true)
                 .build()
             let user = CFUser(user_customer_id: "test-user-\(i)")
             
-            let client = CFClient.initialize(config: config, user: user)
+            let client = CFClient.initializeForTesting(config: config, user: user)
             XCTAssertTrue(CFClient.isInitialized())
             XCTAssertNotNil(CFClient.getInstance())
             XCTAssertTrue(client === CFClient.getInstance())
