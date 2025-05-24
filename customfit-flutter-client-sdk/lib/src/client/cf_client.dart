@@ -582,6 +582,40 @@ class CFClient {
     configManager.clearConfigListeners(key);
   }
 
+  /// Clear all listeners for a specific configuration
+  void clearConfigListeners(String key) {
+    Logger.d('Clearing all config listeners for key: $key');
+    configManager.clearConfigListeners(key);
+  }
+
+  /// Add feature flag listener (matches Kotlin addFeatureFlagListener)
+  void addFeatureFlagListener(String flagKey, void Function(String, dynamic, dynamic) listener) {
+    Logger.d('Adding feature flag listener for key: $flagKey');
+    final wrapper = _FeatureFlagListenerWrapper(listener);
+    listenerManager.registerFeatureFlagListener(flagKey, wrapper);
+  }
+
+  /// Remove feature flag listener (matches Kotlin removeFeatureFlagListener)
+  void removeFeatureFlagListener(String flagKey, void Function(String, dynamic, dynamic) listener) {
+    Logger.d('Removing feature flag listener for key: $flagKey');
+    final wrapper = _FeatureFlagListenerWrapper(listener);
+    listenerManager.unregisterFeatureFlagListener(flagKey, wrapper);
+  }
+
+  /// Add all flags listener (matches Kotlin addAllFlagsListener)
+  void addAllFlagsListener(void Function(Map<String, dynamic>, Map<String, dynamic>) listener) {
+    Logger.d('Adding all flags listener');
+    final wrapper = _AllFlagsListenerWrapper(listener);
+    listenerManager.registerAllFlagsListener(wrapper);
+  }
+
+  /// Remove all flags listener (matches Kotlin removeAllFlagsListener)
+  void removeAllFlagsListener(void Function(Map<String, dynamic>, Map<String, dynamic>) listener) {
+    Logger.d('Removing all flags listener');
+    final wrapper = _AllFlagsListenerWrapper(listener);
+    listenerManager.unregisterAllFlagsListener(wrapper);
+  }
+
   /// Get a string value from config
   String getString(String key, String defaultValue) {
     final value = configManager.getString(key, defaultValue);
@@ -949,4 +983,46 @@ class _CFClientSessionListener implements SessionRotationListener {
   void onSessionError(String error) {
     Logger.e('🔄 Session error: $error');
   }
+}
+
+/// Wrapper for feature flag change listeners
+class _FeatureFlagListenerWrapper implements FeatureFlagChangeListener {
+  final void Function(String, dynamic, dynamic) callback;
+
+  _FeatureFlagListenerWrapper(this.callback);
+
+  @override
+  void onFeatureFlagChanged(String flagKey, dynamic oldValue, dynamic newValue) {
+    callback(flagKey, oldValue, newValue);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _FeatureFlagListenerWrapper && other.callback == callback;
+  }
+
+  @override
+  int get hashCode => callback.hashCode;
+}
+
+/// Wrapper for all flags listeners
+class _AllFlagsListenerWrapper implements AllFlagsListener {
+  final void Function(Map<String, dynamic>, Map<String, dynamic>) callback;
+
+  _AllFlagsListenerWrapper(this.callback);
+
+  @override
+  void onAllFlagsChanged(Map<String, dynamic> oldFlags, Map<String, dynamic> newFlags) {
+    callback(oldFlags, newFlags);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _AllFlagsListenerWrapper && other.callback == callback;
+  }
+
+  @override
+  int get hashCode => callback.hashCode;
 }

@@ -119,32 +119,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         return CFClient(config: config, user: user)
     }
     
-    /// Special factory method that creates a minimal CFClient without starting listeners or polling
-    /// Use this for debugging or when regular initialization is causing issues
-    /// - Parameters:
-    ///   - config: SDK configuration
-    ///   - user: User
-    /// - Returns: Minimal CFClient
-    public static func createMinimalClient(config: CFConfig, user: CFUser) -> CFClient {
-        Logger.info("⚠️ IMPORTANT: Creating minimal CFClient without full listeners or polling")
-        
-        // Create an instance with timeout protection
-        let startTime = Date()
-        let newInstance = CFClient(config: config, user: user, skipSetup: true)
-        let duration = Date().timeIntervalSince(startTime)
-        
-        Logger.info("🚀 Minimal CFClient created successfully in \(String(format: "%.3f", duration)) seconds")
-        
-        // Mark the instance as initialized for any code that checks this flag
-        newInstance.isInitialized = true
-        
-        // Store in the singleton
-        instanceLock.lock()
-        _instance = newInstance
-        instanceLock.unlock()
-        
-        return newInstance
-    }
+
     
     // MARK: - Properties
     
@@ -1027,6 +1002,28 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     // MARK: - Listeners
     
+    /// Add a listener for a specific configuration (matches Kotlin addConfigListener)
+    /// - Parameters:
+    ///   - key: Configuration key
+    ///   - listener: Listener callback
+    public func addConfigListener<T>(key: String, listener: @escaping (T) -> Void) {
+        listenerManager.addConfigListener(key: key, listener: listener)
+    }
+    
+    /// Remove a config listener (matches Kotlin removeConfigListener)
+    /// - Parameters:
+    ///   - key: Configuration key
+    ///   - listener: Listener callback to remove
+    public func removeConfigListener<T>(key: String, listener: @escaping (T) -> Void) {
+        listenerManager.removeConfigListener(key: key, listener: listener)
+    }
+    
+    /// Clear all listeners for a specific configuration
+    /// - Parameter key: Configuration key
+    public func clearConfigListeners(key: String) {
+        listenerManager.clearConfigListeners(key: key)
+    }
+    
     /// Add feature flag listener
     /// - Parameters:
     ///   - key: Feature key
@@ -1049,9 +1046,9 @@ public class CFClient: AppStateListener, BatteryStateListener {
         })
     }
     
-    /// Add listener for all feature flags
+    /// Add listener for all feature flags (matches Kotlin addAllFlagsListener)
     /// - Parameter listener: Listener
-    public func addFeatureFlagsListener(listener: @escaping ([String: Any]) -> Void) {
+    public func addAllFlagsListener(listener: @escaping ([String: Any]) -> Void) {
         listenerManager.registerAllFlagsListener(listener: ClosureAllFlagsListener { keys in
             let allFeatures = self.getAllFeatures()
             listener(allFeatures)
@@ -1084,8 +1081,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
         // For now we'll clear all listeners for this key
     }
     
-    /// Remove all flags listener
-    public func removeFeatureFlagsListener() {
+    /// Remove all flags listener (matches Kotlin removeAllFlagsListener)
+    public func removeAllFlagsListener() {
         // Note: This is a simplification - proper implementation would need to track closures
         // For now we'll clear all listeners
     }

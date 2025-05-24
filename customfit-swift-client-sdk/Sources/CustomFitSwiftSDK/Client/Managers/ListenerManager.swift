@@ -20,6 +20,15 @@ public protocol ConnectionStatusListener: AnyObject {
 
 /// ListenerManager protocol for managing feature flag and connection status listeners
 public protocol ListenerManager {
+    /// Add a config listener
+    func addConfigListener<T>(key: String, listener: @escaping (T) -> Void)
+    
+    /// Remove a config listener
+    func removeConfigListener<T>(key: String, listener: @escaping (T) -> Void)
+    
+    /// Clear all config listeners for a key
+    func clearConfigListeners(key: String)
+    
     /// Add a listener for feature flag changes
     func registerFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener)
     

@@ -392,36 +392,36 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     }
     
     /**
-     * Registers a listener to be notified when the specified feature flag's value changes
+     * Add a listener to be notified when the specified feature flag's value changes
      * @param flagKey the flag to listen for
-     * @param listener the listener to register
+     * @param listener the listener to add
      */
-    fun registerFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
+    fun addFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
         listenerManager.registerFeatureFlagListener(flagKey, listener)
     }
     
     /**
-     * Unregisters a previously registered feature flag listener
+     * Remove a previously added feature flag listener
      * @param flagKey the flag being listened to
-     * @param listener the listener to unregister
+     * @param listener the listener to remove
      */
-    fun unregisterFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
+    fun removeFeatureFlagListener(flagKey: String, listener: FeatureFlagChangeListener) {
         listenerManager.unregisterFeatureFlagListener(flagKey, listener)
     }
     
     /**
-     * Registers a listener to be notified when any feature flag changes
-     * @param listener the listener to register
+     * Add a listener to be notified when any feature flag changes
+     * @param listener the listener to add
      */
-    fun registerAllFlagsListener(listener: AllFlagsListener) {
+    fun addAllFlagsListener(listener: AllFlagsListener) {
         listenerManager.registerAllFlagsListener(listener)
     }
     
     /**
-     * Unregisters a previously registered all flags listener
-     * @param listener the listener to unregister
+     * Remove a previously added all flags listener
+     * @param listener the listener to remove
      */
-    fun unregisterAllFlagsListener(listener: AllFlagsListener) {
+    fun removeAllFlagsListener(listener: AllFlagsListener) {
         listenerManager.unregisterAllFlagsListener(listener)
     }
     

@@ -2,6 +2,9 @@ import Foundation
 
 /// Default implementation for ListenerManager
 public class DefaultListenerManager: ListenerManager {
+    /// Config listeners by key
+    private var configListeners = [String: [AnyHashable: (Any) -> Void]]()
+    
     /// Feature flag listeners by key
     private var flagListeners = [String: [ObjectIdentifier: FeatureFlagChangeListener]]()
     
@@ -16,6 +19,53 @@ public class DefaultListenerManager: ListenerManager {
     
     /// Initialize a new DefaultListenerManager
     public init() {}
+    
+    /// Add a config listener
+    /// - Parameters:
+    ///   - key: Configuration key
+    ///   - listener: Listener callback
+    public func addConfigListener<T>(key: String, listener: @escaping (T) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        var listeners = configListeners[key] ?? [:]
+        let wrapper: (Any) -> Void = { value in
+            if let typedValue = value as? T {
+                listener(typedValue)
+            }
+        }
+        
+        let pointer = unsafeBitCast(listener as AnyObject, to: AnyHashable.self)
+        listeners[pointer] = wrapper
+        configListeners[key] = listeners
+        
+        Logger.debug("Added config listener for key: \(key)")
+    }
+    
+    /// Remove a config listener
+    /// - Parameters:
+    ///   - key: Configuration key
+    ///   - listener: Listener callback to remove
+    public func removeConfigListener<T>(key: String, listener: @escaping (T) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        let pointer = unsafeBitCast(listener as AnyObject, to: AnyHashable.self)
+        configListeners[key]?[pointer] = nil
+        
+        Logger.debug("Removed config listener for key: \(key)")
+    }
+    
+    /// Clear all config listeners for a key
+    /// - Parameter key: Configuration key
+    public func clearConfigListeners(key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        configListeners[key] = nil
+        
+        Logger.debug("Cleared all config listeners for key: \(key)")
+    }
     
     /// Register a feature flag listener
     /// - Parameters:
@@ -153,6 +203,7 @@ public class DefaultListenerManager: ListenerManager {
         lock.lock()
         defer { lock.unlock() }
         
+        configListeners.removeAll()
         flagListeners.removeAll()
         allFlagsListeners.removeAll()
         connectionStatusListeners.removeAll()

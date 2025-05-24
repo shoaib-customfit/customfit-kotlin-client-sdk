@@ -51,7 +51,7 @@ const user = CFUser.builder('user-123')
 const client = CFClient.init(config, user);
 
 // 4. Get feature flags
-const heroText = client.getFeatureValue('hero_text', 'default-text');
+const heroText = client.getFeatureFlag('hero_text', 'default-text');
 const isPremiumEnabled = client.getFeatureFlag('premium_features', false);
 
 // 5. Track events
@@ -119,8 +119,8 @@ client.setUserAttributes({ region: 'eu-west', plan: 'enterprise' });
 
 ```typescript
 // Get feature flags with type safety
-const heroText: string = client.getFeatureValue('hero_text', 'Welcome!');
-const maxItems: number = client.getFeatureValue('max_items', 10);
+const heroText: string = client.getFeatureFlag('hero_text', 'Welcome!');
+const maxItems: number = client.getFeatureFlag('max_items', 10);
 const isPremium: boolean = client.getFeatureFlag('premium_enabled', false);
 
 // Get all feature flags

@@ -15,9 +15,7 @@ This document provides a comprehensive comparison of all public functions expose
 | `shutdownSingleton()` | ✅ | ✅ | ✅ | ✅ | `CFClient.shutdownSingleton()` | Shutdown singleton |
 | `reinitialize()` | ✅ | ✅ | ✅ | ✅ | `CFClient.reinitialize(config, user)` | Force reinit |
 | `createDetached()` | ✅ | ✅ | ✅ | ✅ | `CFClient.createDetached(config, user)` | Non-singleton instance |
-| `createMinimalClient()` | ❌ | ✅ | ❌ | ❌ | `CFClient.createMinimalClient(config, user)` | Swift-specific |
 | `shutdown()` | ✅ | ✅ | ✅ | ✅ | `client.shutdown()` | Instance shutdown |
-| `close()` | ❌ | ❌ | ❌ | ✅ | `client.close()` | Alias for shutdown |
 
 ### Configuration Value Access
 
@@ -28,7 +26,6 @@ This document provides a comprehensive comparison of all public functions expose
 | `getBoolean(key, default)` | ✅ | ✅ | ✅ | ✅ | `client.getBoolean("key", false)` | Get boolean config |
 | `getJson(key, default)` | ✅ | ✅ | ✅ | ✅ | `client.getJson("key", {})` | Get JSON config |
 | `getFeatureFlag(key, default)` | ❌ | ✅ | ❌ | ✅ | `client.getFeatureFlag("key", false)` | Generic feature flag |
-| `getFeatureValue(key, default)` | ❌ | ❌ | ❌ | ✅ | `client.getFeatureValue("key", "default")` | Alias for feature flag |
 | `getAllFlags()` | ✅ | ✅ | ✅ | ✅ | `client.getAllFlags()` | Get all configurations |
 | `getAllFeatures()` | ❌ | ❌ | ❌ | ✅ | `client.getAllFeatures()` | Alias for getAllFlags |
 
@@ -80,15 +77,11 @@ This document provides a comprehensive comparison of all public functions expose
 |----------|--------|-------|---------|--------------|---------------|-------|
 | `addConfigListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.addConfigListener("dark_mode", callback)` | Config change listener |
 | `removeConfigListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.removeConfigListener("dark_mode", callback)` | Remove config listener |
-| `clearConfigListeners(key)` | ✅ | ✅ | ❌ | ✅ | `client.clearConfigListeners("dark_mode")` | Clear all for key |
-| `registerFeatureFlagListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.registerFeatureFlagListener("flag", listener)` | Feature flag listener |
-| `unregisterFeatureFlagListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.unregisterFeatureFlagListener("flag", listener)` | Remove flag listener |
-| `registerAllFlagsListener(listener)` | ✅ | ✅ | ✅ | ✅ | `client.registerAllFlagsListener(listener)` | All flags listener |
-| `unregisterAllFlagsListener(listener)` | ✅ | ✅ | ✅ | ✅ | `client.unregisterAllFlagsListener(listener)` | Remove all flags listener |
-| `addFeatureFlagListener(key, listener)` | ❌ | ❌ | ❌ | ✅ | `client.addFeatureFlagListener("flag", listener)` | Alias for register |
-| `removeFeatureFlagListener(key, listener)` | ❌ | ❌ | ❌ | ✅ | `client.removeFeatureFlagListener("flag", listener)` | Alias for unregister |
-| `addAllFlagsListener(listener)` | ❌ | ❌ | ❌ | ✅ | `client.addAllFlagsListener(listener)` | Alias for register |
-| `removeAllFlagsListener(listener)` | ❌ | ❌ | ❌ | ✅ | `client.removeAllFlagsListener(listener)` | Alias for unregister |
+| `clearConfigListeners(key)` | ✅ | ✅ | ✅ | ✅ | `client.clearConfigListeners("dark_mode")` | Clear all for key |
+| `addFeatureFlagListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.addFeatureFlagListener("flag", listener)` | Feature flag listener |
+| `removeFeatureFlagListener(key, listener)` | ✅ | ✅ | ✅ | ✅ | `client.removeFeatureFlagListener("flag", listener)` | Remove flag listener |
+| `addAllFlagsListener(listener)` | ✅ | ✅ | ✅ | ✅ | `client.addAllFlagsListener(listener)` | All flags listener |
+| `removeAllFlagsListener(listener)` | ✅ | ✅ | ✅ | ✅ | `client.removeAllFlagsListener(listener)` | Remove all flags listener |
 
 ### Connection Management
 

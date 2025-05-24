@@ -329,7 +329,7 @@ class CustomFitDemo {
       }
     };
 
-    this.client.registerFeatureFlagListener('hero_text', flagListener);
+            this.client.addFeatureFlagListener('hero_text', flagListener);
     log('✓ Feature flag listener registered for "hero_text"');
 
     // All flags change listener
@@ -339,7 +339,7 @@ class CustomFitDemo {
       }
     };
 
-    this.client.registerAllFlagsListener(allFlagsListener);
+            this.client.addAllFlagsListener(allFlagsListener);
     log('✓ All flags listener registered');
 
     // Connection status listener

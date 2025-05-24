@@ -214,7 +214,7 @@ CFConfig.builder('key')
 
 ### ✅ Feature Flag Operations
 - `getFeatureFlag<T>(key, defaultValue): T`
-- `getFeatureValue<T>(key, defaultValue): T`
+
 - `getAllFeatures(): Record<string, any>`
 
 ### ✅ Event Tracking Operations

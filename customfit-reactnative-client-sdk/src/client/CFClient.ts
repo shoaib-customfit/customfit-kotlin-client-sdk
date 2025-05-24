@@ -312,12 +312,7 @@ export class CFClient {
     return result;
   }
 
-  /**
-   * Get a feature value (same as getFeatureFlag but more generic)
-   */
-  getFeatureValue<T>(key: string, defaultValue: T): T {
-    return this.getFeatureFlag(key, defaultValue);
-  }
+
 
   /**
    * Get a string configuration value
@@ -794,33 +789,7 @@ export class CFClient {
     Logger.debug(`🔧 Cleared all config listeners for key: ${key}`);
   }
 
-  /**
-   * Register a feature flag listener (matches Kotlin registerFeatureFlagListener)
-   */
-  registerFeatureFlagListener(flagKey: string, listener: FeatureFlagChangeListener): void {
-    this.addFeatureFlagListener(flagKey, listener);
-  }
 
-  /**
-   * Unregister a feature flag listener (matches Kotlin unregisterFeatureFlagListener)
-   */
-  unregisterFeatureFlagListener(flagKey: string, listener: FeatureFlagChangeListener): void {
-    this.removeFeatureFlagListener(flagKey, listener);
-  }
-
-  /**
-   * Register an all flags listener (matches Kotlin registerAllFlagsListener)
-   */
-  registerAllFlagsListener(listener: AllFlagsChangeListener): void {
-    this.addAllFlagsListener(listener);
-  }
-
-  /**
-   * Unregister an all flags listener (matches Kotlin unregisterAllFlagsListener)
-   */
-  unregisterAllFlagsListener(listener: AllFlagsChangeListener): void {
-    this.removeAllFlagsListener(listener);
-  }
 
   /**
    * Add feature flag change listener
@@ -878,12 +847,7 @@ export class CFClient {
     this.connectionMonitor.removeListener(listener);
   }
 
-  /**
-   * Close the SDK (alias for shutdown)
-   */
-  async close(): Promise<void> {
-    await this.shutdown();
-  }
+
 
   // Private methods
 
