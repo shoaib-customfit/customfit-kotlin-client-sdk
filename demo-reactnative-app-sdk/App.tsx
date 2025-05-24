@@ -1,15 +1,3 @@
-/**
- * CustomFit React Native SDK Demo App
- * 
- * This app replicates the Flutter demo app functionality:
- * - Provider pattern for state management
- * - Multiple screens with navigation
- * - Real-time feature flag updates
- * - Event tracking with specific event names
- * - Offline mode toggle
- * - Configuration refresh functionality
- */
-
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -23,17 +11,21 @@ const App: React.FC = () => {
   return (
     <CustomFitProvider>
       <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName="HomeScreen"
-          screenOptions={{
-            headerShown: false, // We'll use custom headers in each screen
-          }}>
-          <Stack.Screen name="HomeScreen" component={HomeScreen} />
-          <Stack.Screen name="SecondScreen" component={SecondScreen} />
+        <Stack.Navigator initialRouteName="Home">
+          <Stack.Screen 
+            name="Home" 
+            component={HomeScreen} 
+            options={{ title: 'CustomFit Demo' }}
+          />
+          <Stack.Screen 
+            name="Second" 
+            component={SecondScreen} 
+            options={{ title: 'Second Screen' }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </CustomFitProvider>
   );
 };
 
-export default App;
+export default App; 

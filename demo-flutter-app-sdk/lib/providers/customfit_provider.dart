@@ -6,7 +6,7 @@ class CustomFitProvider with ChangeNotifier {
   CFClient? _client;
   bool _isInitialized = false;
   Map<String, dynamic> _featureFlags = {};
-  String _heroText = 'CF Kotlin Flag Demo-18';
+  String _heroText = 'CF DEMO';
   bool _enhancedToast = false;
   bool _isOffline = false;
   String? _lastConfigChangeMessage;

@@ -1,184 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-// Mock SDK interfaces (since we can't import the actual SDK due to compilation issues)
-interface CFClient {
-  getString: (key: string, defaultValue: string) => string;
-  getBoolean: (key: string, defaultValue: boolean) => boolean;
-  addConfigListener: <T>(key: string, callback: (value: T) => void) => void;
-  removeConfigListener: (key: string) => void;
-  fetchConfigs: () => Promise<boolean>;
-  eventTracker: {
-    trackEvent: (eventName: string, properties: Record<string, any>) => Promise<void>;
-  };
-  userManager: {
-    addUserProperty: (key: string, value: any) => void;
-  };
-  connectionManager: {
-    setOfflineMode: (offline: boolean) => void;
-  };
-  shutdown: () => void;
-}
-
-interface CFConfig {
-  static: {
-    builder: (clientKey: string) => CFConfigBuilder;
-  };
-}
-
-interface CFConfigBuilder {
-  setDebugLoggingEnabled: (enabled: boolean) => CFConfigBuilder;
-  setOfflineMode: (offline: boolean) => CFConfigBuilder;
-  setSdkSettingsCheckIntervalMs: (interval: number) => CFConfigBuilder;
-  setBackgroundPollingIntervalMs: (interval: number) => CFConfigBuilder;
-  setReducedPollingIntervalMs: (interval: number) => CFConfigBuilder;
-  setSummariesFlushTimeSeconds: (seconds: number) => CFConfigBuilder;
-  setSummariesFlushIntervalMs: (interval: number) => CFConfigBuilder;
-  setEventsFlushTimeSeconds: (seconds: number) => CFConfigBuilder;
-  setEventsFlushIntervalMs: (interval: number) => CFConfigBuilder;
-  setNetworkConnectionTimeoutMs: (timeout: number) => CFConfigBuilder;
-  setNetworkReadTimeoutMs: (timeout: number) => CFConfigBuilder;
-  setLogLevel: (level: string) => CFConfigBuilder;
-  build: () => any;
-}
-
-interface CFUser {
-  userCustomerId: string;
-  properties: Record<string, any>;
-  anonymous: boolean;
-}
-
-// Mock SDK implementation
-const createMockSDK = (): { CFClient: any; CFConfig: any; CFUser: any } => {
-  const listeners: Record<string, ((value: any) => void)[]> = {};
-  
-  const mockClient: CFClient = {
-    getString: (key: string, defaultValue: string) => {
-      const values: Record<string, string> = {
-        'hero_text': 'CF React Native Flag Demo-18',
-      };
-      return values[key] || defaultValue;
-    },
-    getBoolean: (key: string, defaultValue: boolean) => {
-      const values: Record<string, boolean> = {
-        'enhanced_toast': false,
-      };
-      return values[key] || defaultValue;
-    },
-    addConfigListener: <T>(key: string, callback: (value: T) => void) => {
-      if (!listeners[key]) {
-        listeners[key] = [];
-      }
-      listeners[key].push(callback);
-      console.log(`✅ Added listener for ${key}`);
-    },
-    removeConfigListener: (key: string) => {
-      delete listeners[key];
-      console.log(`🗑️ Removed listener for ${key}`);
-    },
-    fetchConfigs: async () => {
-      console.log('🔄 Fetching configs...');
-      // Simulate config changes
-      setTimeout(() => {
-        if (listeners['hero_text']) {
-          const newValue = `CF RN Demo-${Date.now() % 100}`;
-          listeners['hero_text'].forEach(callback => callback(newValue));
-        }
-        if (listeners['enhanced_toast']) {
-          const newValue = Math.random() > 0.5;
-          listeners['enhanced_toast'].forEach(callback => callback(newValue));
-        }
-      }, 1000);
-      return true;
-    },
-    eventTracker: {
-      trackEvent: async (eventName: string, properties: Record<string, any>) => {
-        console.log(`📊 Event tracked: ${eventName}`, properties);
-      },
-    },
-    userManager: {
-      addUserProperty: (key: string, value: any) => {
-        console.log(`👤 User property added: ${key} = ${value}`);
-      },
-    },
-    connectionManager: {
-      setOfflineMode: (offline: boolean) => {
-        console.log(`🌐 Offline mode: ${offline}`);
-      },
-    },
-    shutdown: () => {
-      console.log('🔄 SDK shutdown');
-    },
-  };
-
-  const mockConfigBuilder: CFConfigBuilder = {
-    setDebugLoggingEnabled: (enabled: boolean) => mockConfigBuilder,
-    setOfflineMode: (offline: boolean) => mockConfigBuilder,
-    setSdkSettingsCheckIntervalMs: (interval: number) => mockConfigBuilder,
-    setBackgroundPollingIntervalMs: (interval: number) => mockConfigBuilder,
-    setReducedPollingIntervalMs: (interval: number) => mockConfigBuilder,
-    setSummariesFlushTimeSeconds: (seconds: number) => mockConfigBuilder,
-    setSummariesFlushIntervalMs: (interval: number) => mockConfigBuilder,
-    setEventsFlushTimeSeconds: (seconds: number) => mockConfigBuilder,
-    setEventsFlushIntervalMs: (interval: number) => mockConfigBuilder,
-    setNetworkConnectionTimeoutMs: (timeout: number) => mockConfigBuilder,
-    setNetworkReadTimeoutMs: (timeout: number) => mockConfigBuilder,
-    setLogLevel: (level: string) => mockConfigBuilder,
-    build: () => ({}),
-  };
-
-  return {
-    CFClient: {
-      // New singleton pattern methods
-      initialize: async (config: any, user: CFUser) => {
-        console.log('🚀 CFClient.initialize() called with user:', user.userCustomerId);
-        return mockClient;
-      },
-      getInstance: () => {
-        console.log('🔍 CFClient.getInstance() called');
-        return mockClient; // In real implementation this would return singleton or null
-      },
-      isInitialized: () => {
-        console.log('❓ CFClient.isInitialized() called');
-        return true; // In real implementation this would check singleton state
-      },
-      isInitializing: () => {
-        console.log('❓ CFClient.isInitializing() called');
-        return false; // In real implementation this would check initialization state
-      },
-      shutdownSingleton: async () => {
-        console.log('🔄 CFClient.shutdownSingleton() called');
-      },
-      reinitialize: async (config: any, user: CFUser) => {
-        console.log('🔄 CFClient.reinitialize() called with user:', user.userCustomerId);
-        return mockClient;
-      },
-      createDetached: async (config: any, user: CFUser) => {
-        console.log('🆕 CFClient.createDetached() called with user:', user.userCustomerId);
-        return mockClient;
-      },
-      // Deprecated method for backward compatibility
-      create: (config: any, user: CFUser) => {
-        console.log('⚠️ CFClient.create() is deprecated, use initialize() instead');
-        console.log('🚀 CFClient created with user:', user.userCustomerId);
-        return mockClient;
-      },
-    },
-    CFConfig: {
-      builder: (clientKey: string) => {
-        console.log('⚙️ CFConfig builder created with key:', clientKey.substring(0, 8) + '...');
-        return mockConfigBuilder;
-      },
-    },
-    CFUser: (userCustomerId: string, properties: Record<string, any>, anonymous: boolean) => ({
-      userCustomerId,
-      properties,
-      anonymous,
-    }),
-  };
-};
-
-const { CFClient, CFConfig, CFUser } = createMockSDK();
-
 interface CustomFitContextType {
   isInitialized: boolean;
   featureFlags: Record<string, any>;
@@ -208,10 +29,9 @@ interface CustomFitProviderProps {
 }
 
 export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }) => {
-  const [client, setClient] = useState<CFClient | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [featureFlags, setFeatureFlags] = useState<Record<string, any>>({});
-  const [heroText, setHeroText] = useState('CF React Native Flag Demo-18');
+  const [heroText, setHeroText] = useState('CF DEMO');
   const [enhancedToast, setEnhancedToast] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [lastConfigChangeMessage, setLastConfigChangeMessage] = useState<string | null>(null);
@@ -223,120 +43,50 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
   const initialize = async () => {
     try {
       console.log('Initializing CustomFit provider...');
-
-      const userProperties = {
-        'name': 'Demo User',
-        'platform': 'React Native',
-      };
-
-      const user = CFUser(
-        `reactnative_user_${Date.now()}`,
-        userProperties,
-        true
-      );
-      console.log('CFUser created with ID:', user.userCustomerId);
-
-      const config = CFConfig.builder(
-        'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhY2NvdW50X2lkIjoiYTRiZGMxMTAtMDU3Zi0xMWYwLWFmZjUtNTk4ZGU5YTY0ZGY0IiwicHJvamVjdF9pZCI6ImFmNzE1MTMwLTA1N2YtMTFmMC1iNzZlLTU3YWQ4Y2ZmNGExNSIsImVudmlyb25tZW50X2lkIjoiYWY3MWVkNzAtMDU3Zi0xMWYwLWI3NmUtNTdhZDhjZmY0YTE1IiwiZGltZW5zaW9uX2lkIjoiYWY3NmY2ODAtMDU3Zi0xMWYwLWI3NmUtNTdhZDhjZmY0YTE1IiwiYXBpX2FjY2Vzc19sZXZlbCI6IkNMSUVOVCIsImtleV9pZCI6ImFmODU0ZTYwLTA1N2YtMTFmMC1iNzZlLTU3YWQ4Y2ZmNGExNSIsImlzcyI6InJISEg2R0lBaENMbG1DYUVnSlBuWDYwdUJaRmg2R3I4IiwiaWF0IjoxNzQyNDcwNjQxfQ.Nw8FmE9SzGffeSDEWcoEaYsZdmlj3Z_WYP-kMtiYHek'
-      )
-        .setDebugLoggingEnabled(true)
-        .setOfflineMode(false)
-        .setSdkSettingsCheckIntervalMs(2000)
-        .setBackgroundPollingIntervalMs(2000)
-        .setReducedPollingIntervalMs(2000)
-        .setSummariesFlushTimeSeconds(5)
-        .setSummariesFlushIntervalMs(5000)
-        .setEventsFlushTimeSeconds(30)
-        .setEventsFlushIntervalMs(30000)
-        .setNetworkConnectionTimeoutMs(10000)
-        .setNetworkReadTimeoutMs(10000)
-        .setLogLevel('debug')
-        .build();
-      console.log('CFConfig created successfully');
-
-      const cfClient = await CFClient.initialize(config, user);
-      console.log('CFClient created successfully');
-
-      setClient(cfClient);
+      
+      // Simulate initialization delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       setIsInitialized(true);
-
-      // Set up config listeners
-      setupConfigListeners(cfClient);
-
-      // Update initial values
-      updateInitialValues(cfClient);
-
+      
+      // Set initial feature flags
+      setFeatureFlags({
+        'hero_text': { variation: 'CF DEMO' },
+        'enhanced_toast': { variation: false },
+      });
+      
+      console.log('✅ CustomFit provider initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to create CFClient or register listener:', error);
-      // Make sure UI still shows something even if client fails
-      setIsInitialized(true);
+      console.error('❌ Failed to initialize CustomFit provider:', error);
+      setIsInitialized(true); // Still show UI
     }
-  };
-
-  const setupConfigListeners = (cfClient: CFClient) => {
-    // Add listener for hero_text
-    cfClient.addConfigListener<string>('hero_text', (newValue) => {
-      console.log('🚩 hero_text config listener triggered with value:', newValue);
-      if (heroText !== newValue) {
-        setHeroText(newValue);
-        setLastConfigChangeMessage(`FLAG UPDATE: hero_text = ${newValue}`);
-        setLastMessageTime(new Date());
-      }
-    });
-
-    // Add listener for enhanced_toast
-    cfClient.addConfigListener<boolean>('enhanced_toast', (isEnabled) => {
-      console.log('🚩 enhanced_toast config listener triggered with value:', isEnabled);
-      if (enhancedToast !== isEnabled) {
-        setEnhancedToast(isEnabled);
-      }
-    });
-
-    console.log('✅ Config listeners set up successfully');
-  };
-
-  const updateInitialValues = (cfClient: CFClient) => {
-    // Get initial values from config
-    const initialHeroText = cfClient.getString('hero_text', 'CF DEMO');
-    const initialEnhancedToast = cfClient.getBoolean('enhanced_toast', false);
-
-    console.log('Initial values:', { heroText: initialHeroText, enhancedToast: initialEnhancedToast });
-
-    setHeroText(initialHeroText);
-    setEnhancedToast(initialEnhancedToast);
-
-    setFeatureFlags({
-      'hero_text': { variation: initialHeroText },
-      'enhanced_toast': { variation: initialEnhancedToast },
-    });
   };
 
   const toggleOfflineMode = async () => {
-    if (!isInitialized || !client) return;
-
-    if (isOffline) {
-      client.connectionManager.setOfflineMode(false);
-    } else {
-      client.connectionManager.setOfflineMode(true);
-    }
     setIsOffline(!isOffline);
+    console.log(`🌐 Offline mode: ${!isOffline}`);
+    
+    setLastConfigChangeMessage(`Offline mode: ${!isOffline ? 'ON' : 'OFF'}`);
+    setLastMessageTime(new Date());
   };
 
   const trackEvent = async (eventName: string, properties: Record<string, any> = {}) => {
-    if (!isInitialized || !client) {
-      console.log('⚠️ Event tracking skipped: CFClient is null');
+    if (!isInitialized) {
+      console.log('⚠️ Event tracking skipped: Provider not initialized');
       return;
     }
-    await client.eventTracker.trackEvent(eventName, properties);
+    
+    console.log(`📊 Event tracked: ${eventName}`, properties);
   };
 
   const addUserProperty = async (key: string, value: any) => {
-    if (!isInitialized || !client) return;
-    client.userManager.addUserProperty(key, value);
+    if (!isInitialized) return;
+    
+    console.log(`👤 User property added: ${key} = ${value}`);
   };
 
   const refreshFeatureFlags = async (eventName?: string): Promise<boolean> => {
-    if (!isInitialized || !client) return false;
+    if (!isInitialized) return false;
 
     console.log('Manually refreshing feature flags...');
 
@@ -350,32 +100,27 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
       });
     }
 
-    // Fetch latest flags from server
-    const success = await client.fetchConfigs();
-    if (success) {
-      console.log('✅ Flags refreshed successfully');
-    } else {
-      console.log('⚠️ Failed to refresh flags');
-    }
+    // Simulate config refresh with random values
+    const newHeroText = `CF RN Demo-${Math.floor(Math.random() * 100)}`;
+    const newEnhancedToast = Math.random() > 0.5;
+    
+    setHeroText(newHeroText);
+    setEnhancedToast(newEnhancedToast);
+    
+    setFeatureFlags({
+      'hero_text': { variation: newHeroText },
+      'enhanced_toast': { variation: newEnhancedToast },
+    });
 
-    // Update the last message
     setLastConfigChangeMessage('Configuration manually refreshed');
     setLastMessageTime(new Date());
 
-    return success;
+    console.log('✅ Flags refreshed successfully');
+    return true;
   };
 
   useEffect(() => {
     initialize();
-
-    return () => {
-      if (isInitialized && client) {
-        // Remove listeners when provider is disposed
-        client.removeConfigListener('hero_text');
-        client.removeConfigListener('enhanced_toast');
-        client.shutdown();
-      }
-    };
   }, []);
 
   const value: CustomFitContextType = {
