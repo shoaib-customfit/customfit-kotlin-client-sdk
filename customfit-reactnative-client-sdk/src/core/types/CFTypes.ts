@@ -274,6 +274,7 @@ export interface CFUser {
 export interface EventData {
   id: string;
   name: string;
+  eventType: EventType;
   properties?: Record<string, any>;
   timestamp: string;
   sessionId: string;
@@ -366,6 +367,13 @@ export enum ConnectionStatus {
   DISCONNECTED = 'disconnected',
   CONNECTING = 'connecting',
   UNKNOWN = 'unknown',
+}
+
+/**
+ * Event type for tracking
+ */
+export enum EventType {
+  TRACK = 'TRACK',
 }
 
 /**

@@ -55,8 +55,7 @@ This document provides a comprehensive comparison of all public functions expose
 
 | Function | Kotlin | Swift | Flutter | React Native | Usage Example | Notes |
 |----------|--------|-------|---------|--------------|---------------|-------|
-| `trackEvent(name, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackEvent("click", props)` | Track custom event |
-| `trackScreenView(screenName, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackScreenView("home", props)` | Track screen view |
+| `trackEvent(name, properties)` | ✅ | ✅ | ✅ | ✅ | `client.trackEvent("user_action", props)` | All events use EventType.TRACK internally |
 
 ### Configuration & Refresh
 
@@ -149,6 +148,7 @@ This document provides a comprehensive comparison of all public functions expose
 - **Swift Context Management**: Uses simplified approach with key-based removal
 - **Type Safety**: All SDKs maintain type safety for their respective languages
 - **Error Handling**: Consistent error handling patterns across all SDKs
+- **Event Standardization**: All events use EventType.TRACK internally, with custom event names for differentiation
 
 ## Platform-Specific Considerations
 

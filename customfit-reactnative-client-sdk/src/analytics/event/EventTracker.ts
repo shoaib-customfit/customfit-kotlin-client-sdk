@@ -112,40 +112,7 @@ export class EventTracker {
     }
   }
 
-  /**
-   * Track a screen view event
-   */
-  async trackScreenView(
-    screenName: string,
-    userId?: string,
-    anonymousId?: string
-  ): Promise<CFResult<void>> {
-    try {
-      const eventData = await EventDataUtil.createScreenViewEvent(screenName, userId, anonymousId);
-      return await this.track(eventData);
-    } catch (error) {
-      Logger.error(`EventTracker: Failed to track screen view '${screenName}': ${error}`);
-      return CFResult.errorFromException(error as Error);
-    }
-  }
 
-  /**
-   * Track a feature usage event
-   */
-  async trackFeatureUsage(
-    featureName: string,
-    properties?: Record<string, any>,
-    userId?: string,
-    anonymousId?: string
-  ): Promise<CFResult<void>> {
-    try {
-      const eventData = await EventDataUtil.createFeatureUsageEvent(featureName, properties, userId, anonymousId);
-      return await this.track(eventData);
-    } catch (error) {
-      Logger.error(`EventTracker: Failed to track feature usage '${featureName}': ${error}`);
-      return CFResult.errorFromException(error as Error);
-    }
-  }
 
   /**
    * Flush all events to the server

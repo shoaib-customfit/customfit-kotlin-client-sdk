@@ -137,25 +137,7 @@ export function useCustomFit() {
     return await client.trackEvent(name, properties);
   }, []);
 
-  const trackScreenView = useCallback(async (screenName: string) => {
-    const client = CFClient.getInstance();
-    if (!client) {
-      console.warn('CFClient not initialized');
-      return;
-    }
 
-    return await client.trackEvent('screen_view', { screen_name: screenName });
-  }, []);
-
-  const trackFeatureUsage = useCallback(async (featureName: string, properties?: Record<string, any>) => {
-    const client = CFClient.getInstance();
-    if (!client) {
-      console.warn('CFClient not initialized');
-      return;
-    }
-
-    return await client.trackEvent('feature_usage', { feature_name: featureName, ...properties });
-  }, []);
 
   const forceRefresh = useCallback(async () => {
     const client = CFClient.getInstance();
@@ -236,8 +218,6 @@ export function useCustomFit() {
 
     // Event tracking
     trackEvent,
-    trackScreenView,
-    trackFeatureUsage,
 
     // Configuration
     forceRefresh,
@@ -258,34 +238,4 @@ export function useCustomFit() {
   };
 }
 
-/**
- * Hook for tracking screen views automatically
- */
-export function useScreenTracking(screenName: string) {
-  useEffect(() => {
-    const client = CFClient.getInstance();
-    if (!client) {
-      return;
-    }
-
-    // Track screen view when component mounts
-    client.trackEvent('screen_view', { screen_name: screenName });
-  }, [screenName]);
-}
-
-/**
- * Hook for tracking feature usage
- */
-export function useFeatureTracking(featureName: string, properties?: Record<string, any>) {
-  const trackUsage = useCallback(() => {
-    const client = CFClient.getInstance();
-    if (!client) {
-      console.warn('CFClient not initialized');
-      return;
-    }
-
-    client.trackEvent('feature_usage', { feature_name: featureName, ...properties });
-  }, [featureName, properties]);
-
-  return trackUsage;
-} 
+ 

@@ -1,4 +1,4 @@
-import { EventData } from '../../core/types/CFTypes';
+import { EventData, EventType } from '../../core/types/CFTypes';
 import { DeviceInfoUtil } from '../../platform/DeviceInfo';
 
 /**
@@ -78,6 +78,7 @@ export class EventDataBuilder {
     const eventData: EventData = {
       id: EventDataBuilder.generateEventId(),
       name: this.name,
+      eventType: EventType.TRACK,
       properties: { ...this.properties },
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
@@ -158,38 +159,7 @@ export class EventDataUtil {
     return await builder.build();
   }
 
-  /**
-   * Create a screen view event
-   */
-  static async createScreenViewEvent(
-    screenName: string,
-    userId?: string,
-    anonymousId?: string
-  ): Promise<EventData> {
-    return await EventDataUtil.createEvent(
-      'screen_view',
-      { screen_name: screenName },
-      userId,
-      anonymousId
-    );
-  }
 
-  /**
-   * Create a feature usage event
-   */
-  static async createFeatureUsageEvent(
-    featureName: string,
-    properties?: Record<string, any>,
-    userId?: string,
-    anonymousId?: string
-  ): Promise<EventData> {
-    return await EventDataUtil.createEvent(
-      'feature_usage',
-      { feature_name: featureName, ...properties },
-      userId,
-      anonymousId
-    );
-  }
 
   /**
    * Validate event data
@@ -218,6 +188,7 @@ export class EventDataUtil {
     const serialized: Record<string, any> = {
       id: eventData.id,
       name: eventData.name,
+      event_type: eventData.eventType,
       timestamp: eventData.timestamp,
       session_id: eventData.sessionId,
       properties: eventData.properties || {},
@@ -246,6 +217,7 @@ export class EventDataUtil {
       const eventData: EventData = {
         id: data.id,
         name: data.name,
+        eventType: data.event_type || EventType.TRACK,
         timestamp: data.timestamp,
         sessionId: data.session_id || data.sessionId,
         properties: data.properties || {},
