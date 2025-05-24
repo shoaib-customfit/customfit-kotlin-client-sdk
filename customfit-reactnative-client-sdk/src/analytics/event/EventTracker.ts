@@ -6,11 +6,14 @@ import { Logger } from '../../logging/Logger';
 import { CFConstants } from '../../constants/CFConstants';
 import { EventDataUtil, EventDataBuilder } from './EventData';
 import { ConnectionMonitor } from '../../platform/ConnectionMonitor';
+import { ErrorHandler, ErrorCategory, ErrorSeverity } from '../../core/error/ErrorHandler';
 
 /**
  * Event tracker for handling user events
  */
 export class EventTracker {
+  private static readonly SOURCE = 'EventTracker';
+  
   private readonly config: CFConfig;
   private readonly httpClient: HttpClient;
   private readonly connectionMonitor: ConnectionMonitor;
@@ -24,7 +27,7 @@ export class EventTracker {
     this.httpClient = httpClient;
     this.connectionMonitor = ConnectionMonitor.getInstance();
     
-    Logger.info(`🔔 EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
+    Logger.info(`🔔 TRACK: EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
   }
 
   /**
@@ -74,22 +77,34 @@ export class EventTracker {
   async track(eventData: EventData): Promise<CFResult<void>> {
     try {
       if (!EventDataUtil.validateEventData(eventData)) {
-        return CFResult.errorWithMessage('Invalid event data');
+        const message = 'Invalid event data';
+        ErrorHandler.handleError(
+          message,
+          EventTracker.SOURCE,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.MEDIUM
+        );
+        return CFResult.errorWithMessage(message);
       }
 
       // Add event to queue
       this.eventQueue.push(eventData);
-      Logger.debug(`🔔 TRACK: Event '${eventData.name}' queued (queue size: ${this.eventQueue.length})`);
+      Logger.info(`🔔 TRACK: Event added to queue: ${eventData.name}, queue size=${this.eventQueue.length}`);
 
       // Check if we need to flush based on queue size
       if (this.eventQueue.length >= this.config.eventsQueueSize) {
-        Logger.debug('🔔 TRACK: Queue size limit reached, triggering flush');
+        Logger.info('🔔 TRACK: Queue size limit reached, triggering flush');
         await this.flush();
       }
 
       return CFResult.successVoid();
     } catch (error) {
-      Logger.error(`EventTracker: Failed to track event: ${error}`);
+      ErrorHandler.handleException(
+        error as Error,
+        'Failed to track event',
+        EventTracker.SOURCE,
+        ErrorSeverity.MEDIUM
+      );
       return CFResult.errorFromException(error as Error);
     }
   }
@@ -104,10 +119,29 @@ export class EventTracker {
     anonymousId?: string
   ): Promise<CFResult<void>> {
     try {
+      Logger.info(`🔔 🔔 TRACK: Tracking event: ${name} with properties: ${JSON.stringify(properties || {})}`);
+      
+      if (!name || name.trim() === '') {
+        const message = 'Event name cannot be blank';
+        Logger.warning(`🔔 TRACK: Invalid event - ${message}`);
+        ErrorHandler.handleError(
+          message,
+          EventTracker.SOURCE,
+          ErrorCategory.VALIDATION,
+          ErrorSeverity.MEDIUM
+        );
+        return CFResult.errorWithMessage(message);
+      }
+
       const eventData = await EventDataUtil.createEvent(name, properties, userId, anonymousId);
       return await this.track(eventData);
     } catch (error) {
-      Logger.error(`EventTracker: Failed to track event '${name}': ${error}`);
+      ErrorHandler.handleException(
+        error as Error,
+        `Failed to track event '${name}'`,
+        EventTracker.SOURCE,
+        ErrorSeverity.MEDIUM
+      );
       return CFResult.errorFromException(error as Error);
     }
   }
@@ -119,13 +153,13 @@ export class EventTracker {
    */
   async flush(): Promise<CFResult<number>> {
     if (this.eventQueue.length === 0) {
-      Logger.trace('🔔 EventTracker: No events to flush');
+      Logger.debug('🔔 TRACK: No events to flush');
       return CFResult.success(0);
     }
 
     // Check if we're connected
     if (!this.connectionMonitor.isConnected()) {
-      Logger.debug('🔔 EventTracker: No connection, storing events for later');
+      Logger.debug('🔔 TRACK: No connection, storing events for later');
       await this.storeEvents();
       return CFResult.success(0);
     }
@@ -133,17 +167,26 @@ export class EventTracker {
     const eventsToFlush = [...this.eventQueue];
     const flushCount = eventsToFlush.length;
 
-    Logger.info(`🔔 TRACK: Flushing ${flushCount} events to server`);
+    Logger.info(`🔔 TRACK HTTP: Preparing to send ${flushCount} events`);
+    
+    // Log individual events being sent
+    eventsToFlush.forEach((event, index) => {
+      Logger.debug(`🔔 TRACK HTTP: Event #${index + 1}: ${event.name}, properties=${Object.keys(event.properties || {}).join(',')}`);
+    });
 
     try {
       // Prepare events for API
       const serializedEvents = eventsToFlush.map(event => EventDataUtil.serializeForAPI(event));
-      
-      // Send to server
-      const result = await this.httpClient.post(CFConstants.Api.EVENTS_PATH, {
+      const payload = {
         events: serializedEvents,
         batch_timestamp: new Date().toISOString(),
-      });
+      };
+      
+      Logger.debug(`🔔 TRACK HTTP: Event payload size: ${JSON.stringify(payload).length} bytes`);
+      Logger.debug(`🔔 TRACK HTTP: POST request to: ${CFConstants.Api.EVENTS_PATH}`);
+      
+      // Send to server
+      const result = await this.httpClient.post(CFConstants.Api.EVENTS_PATH, payload);
 
       if (result.isSuccess) {
         // Remove flushed events from queue
@@ -153,7 +196,15 @@ export class EventTracker {
         Logger.info(`🔔 TRACK: Successfully flushed ${flushCount} events`);
         return CFResult.success(flushCount);
       } else {
-        Logger.error(`🔔 TRACK: Failed to flush events: ${result.error?.message}`);
+        const errorMessage = `Failed to flush events: ${result.error?.message}`;
+        Logger.error(`🔔 TRACK HTTP: ${errorMessage}`);
+        
+        ErrorHandler.handleError(
+          errorMessage,
+          EventTracker.SOURCE,
+          ErrorCategory.NETWORK,
+          ErrorSeverity.MEDIUM
+        );
         
         // Store events for retry if we're offline
         if (!this.connectionMonitor.isConnected()) {
@@ -163,7 +214,15 @@ export class EventTracker {
         return result.map(() => 0);
       }
     } catch (error) {
-      Logger.error(`🔔 TRACK: Exception during flush: ${error}`);
+      const errorMessage = `Exception during flush: ${error}`;
+      Logger.error(`🔔 TRACK HTTP: ${errorMessage}`);
+      
+      ErrorHandler.handleException(
+        error as Error,
+        'Failed to flush events',
+        EventTracker.SOURCE,
+        ErrorSeverity.MEDIUM
+      );
       
       // Store events for retry
       await this.storeEvents();

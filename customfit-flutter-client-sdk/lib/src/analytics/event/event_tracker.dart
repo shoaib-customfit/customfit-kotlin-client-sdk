@@ -60,16 +60,16 @@ class EventTracker implements ConnectionStatusListener {
     try {
       // Enhanced logging similar to Kotlin improvements
       Logger.i(
-          '🔔 TRACK: Tracking event: $eventName with properties: $properties');
+          '🔔 🔔 TRACK: Tracking event: $eventName with properties: $properties');
 
       // Flush summaries before tracking a new event if SummaryManager is provided
       if (_summaryManager != null) {
-        Logger.d(
-            '🔔 TRACK: Flushing summaries before tracking event: $eventName');
+        Logger.i(
+            '🔔 🔔 TRACK: Flushing summaries before tracking event: $eventName');
         await _summaryManager.flushSummaries().then((result) {
           if (!result.isSuccess) {
             Logger.w(
-                '🔔 TRACK: Failed to flush summaries: ${result.getErrorMessage()}');
+                '🔔 🔔 TRACK: Failed to flush summaries before tracking event: ${result.getErrorMessage()}');
           }
         });
       }
@@ -84,7 +84,7 @@ class EventTracker implements ConnectionStatusListener {
       // Create event data
       final eventData = EventData.create(
         eventCustomerId: _user.userCustomerId ?? 'anonymous',
-        eventType: EventType.custom,
+        eventType: EventType.TRACK,
         properties: properties,
         sessionId: _sessionId,
       );
@@ -95,14 +95,14 @@ class EventTracker implements ConnectionStatusListener {
             '🔔 TRACK: Event queue is full (size = ${_eventQueue.size}), dropping oldest event');
         ErrorHandler.handleError('Event queue is full, dropping oldest event',
             source: _source,
-            severity: ErrorSeverity.medium,
-            category: ErrorCategory.internal);
+            category: ErrorCategory.internal,
+            severity: ErrorSeverity.medium);
         // Queue will handle dropping the oldest events automatically
       }
 
       _eventQueue.addEvent(eventData);
       Logger.i(
-          '🔔 TRACK: Event added to queue: ${eventData.eventType.name}, queue size=${_eventQueue.size}');
+          '🔔 TRACK: Event added to queue: ${eventData.eventCustomerId}, queue size=${_eventQueue.size}');
 
       // Notify callback if set
       if (_eventCallback != null) {
@@ -251,12 +251,12 @@ class EventTracker implements ConnectionStatusListener {
         return CFResult.success(true);
       }
 
-      Logger.i('🔔 TRACK: Flushing ${events.length} events to server');
+      Logger.i('🔔 TRACK HTTP: Preparing to send ${events.length} events');
 
       // Log individual events being sent (with limited detail for privacy)
       events.asMap().forEach((index, event) {
         Logger.d(
-            '🔔 TRACK: Event #${index + 1}: ${event.eventCustomerId}, type=${event.eventType.name}, properties=${event.properties.keys.join(", ")}');
+            '🔔 TRACK HTTP: Event #${index + 1}: ${event.eventCustomerId}, properties=${event.properties.keys.join(",")}');
       });
 
       // Prepare events for sending

@@ -116,16 +116,16 @@ class _EventConstants {
   const _EventConstants();
 
   /// Default queue size for events
-  final int queueSize = 100;
+  final int QUEUE_SIZE = 100;
 
   /// Default flush time in seconds for events
-  final int flushTimeSeconds = 60;
+  final int FLUSH_TIME_SECONDS = 60;
 
   /// Default flush interval in milliseconds for events
-  final int flushIntervalMs = 1000;
+  final int FLUSH_INTERVAL_MS = 1000;
 
   /// Maximum number of events to store offline
-  final int maxStoredEvents = 100;
+  final int MAX_STORED_EVENTS = 100;
 }
 
 /// Summary-related constants
@@ -133,13 +133,13 @@ class _SummaryConstants {
   const _SummaryConstants();
 
   /// Default queue size for summaries
-  final int queueSize = 100;
+  final int QUEUE_SIZE = 100;
 
   /// Default flush time in seconds for summaries
-  final int flushTimeSeconds = 60;
+  final int FLUSH_TIME_SECONDS = 60;
 
   /// Default flush interval in milliseconds for summaries
-  final int flushIntervalMs = 60000;
+  final int FLUSH_INTERVAL_MS = 60000;
 }
 
 /// Retry-related constants

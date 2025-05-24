@@ -217,7 +217,7 @@ public class EventTracker {
         Logger.info("🔔 🔔 TRACK: Tracking event: \(eventName) with properties: \(properties ?? [:])")
         
         // Always flush summaries first before tracking a new event (SYNCHRONOUSLY like Kotlin)
-        Logger.info("🔔 🔔 TRACK: Beginning event flush process")
+        Logger.info("🔔 🔔 TRACK: Flushing summaries before tracking event: \(eventName)")
         let summaryResult = summaryManager.flushSummaries()
         
         switch summaryResult {
@@ -251,7 +251,7 @@ public class EventTracker {
         let event = EventData(
             eventId: UUID().uuidString,
             name: eventName,
-            eventType: .track,
+            eventType: .TRACK,
             timestamp: Date(),
             sessionId: sessionId,
             userId: user.getUser().getUserId(),
@@ -318,7 +318,7 @@ public class EventTracker {
         _totalEventsTracked += 1
         metricsLock.unlock()
         
-        Logger.info("🔔 TRACK: Event added to queue: \(event.name), queue size=\(eventQueue.count)")
+        Logger.info("🔔 TRACK: Event added to queue: \(event.eventId), queue size=\(eventQueue.count)")
         
         // If approaching capacity, persist to storage as backup
         if eventQueue.count > Int(Double(config.eventsQueueSize) * 0.7) {
@@ -342,21 +342,7 @@ public class EventTracker {
         return CFResult.createSuccess(value: event)
     }
     
-    /// Track a screen view event
-    /// - Parameters:
-    ///   - screenName: Name of the screen
-    ///   - screenClass: Optional class name of the screen
-    ///   - properties: Additional properties
-    /// - Returns: Result containing the event data or error details
-    public func trackScreenView(screenName: String, screenClass: String? = nil, properties: [String: Any] = [:]) -> CFResult<EventData> {
-        var eventProps = properties
-        eventProps["screen_name"] = screenName
-        if let screenClass = screenClass {
-            eventProps["screen_class"] = screenClass
-        }
-        
-        return trackEvent(eventName: CFConstants.EventTypes.SCREEN_VIEW, properties: eventProps)
-    }
+
     
     /// Track a custom event
     /// - Parameters:
@@ -403,7 +389,7 @@ public class EventTracker {
         Logger.info("🔔 TRACK: Flushing \(eventsToFlush.count) events")
         
         // Add Kotlin-style beginning log
-        Logger.info("🔔 🔔 TRACK: Beginning event flush process")
+        Logger.info("🔔 🔔 TRACK: Flushing summaries before flushing events")
         
         // Make sure summaries are flushed first if any
         let summaryResult = summaryManager.flushSummaries()

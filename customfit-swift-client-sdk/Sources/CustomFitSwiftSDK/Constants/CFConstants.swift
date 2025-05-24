@@ -179,26 +179,7 @@ public struct CFConstants {
         public static let ANONYMOUS_ID = "anonymous_id"
     }
     
-    /// Event type constants
-    public struct EventTypes {
-        /// App start event type
-        public static let APP_START = "app_start"
-        
-        /// App stop event type
-        public static let APP_STOP = "app_stop"
-        
-        /// App foreground event type
-        public static let APP_FOREGROUND = "app_foreground"
-        
-        /// App background event type
-        public static let APP_BACKGROUND = "app_background"
-        
-        /// Screen view event type
-        public static let SCREEN_VIEW = "screen_view"
-        
-        /// Feature usage event type
-        public static let FEATURE_USAGE = "feature_usage"
-    }
+
     
     /// API endpoint constants
     public struct Endpoints {
