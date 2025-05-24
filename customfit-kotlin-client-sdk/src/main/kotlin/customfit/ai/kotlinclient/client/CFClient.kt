@@ -542,6 +542,15 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     // CONFIG VALUE ACCESSORS
     
     /**
+     * Get a feature flag value
+     * @param key The feature flag key
+     * @param defaultValue The default value if flag not found
+     * @return The feature flag value or default
+     */
+    fun <T> getFeatureFlag(key: String, defaultValue: T): T =
+        configManager.getConfigValue(key, defaultValue) { true }
+    
+    /**
      * Get a string configuration value
      */
     fun getString(key: String, fallbackValue: String): String =
@@ -689,7 +698,7 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
      * 
      * @return CFResult containing the number of events flushed or error details
      */
-    fun flushEvents(): CFResult<Int> {
+    private fun flushEvents(): CFResult<Int> {
         return try {
             var result: CFResult<Int>? = null
             val latch = CountDownLatch(1)
@@ -945,6 +954,141 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         sessionManager?.removeListener(listener)
     }
     
+    // MARK: - Runtime Configuration Updates
+    
+    /**
+     * Update the SDK settings check interval at runtime
+     * @param intervalMs New interval in milliseconds
+     */
+    fun updateSdkSettingsCheckInterval(intervalMs: Long) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(sdkSettingsCheckIntervalMs = intervalMs))
+            Logger.i("Updated SDK settings check interval to $intervalMs ms")
+        } catch (e: Exception) {
+            Logger.e("Failed to update SDK settings check interval: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update SDK settings check interval",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Update the events flush interval at runtime
+     * @param intervalMs New interval in milliseconds
+     */
+    fun updateEventsFlushInterval(intervalMs: Long) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(eventsFlushIntervalMs = intervalMs))
+            Logger.i("Updated events flush interval to $intervalMs ms")
+        } catch (e: Exception) {
+            Logger.e("Failed to update events flush interval: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update events flush interval",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Update the summaries flush interval at runtime
+     * @param intervalMs New interval in milliseconds
+     */
+    fun updateSummariesFlushInterval(intervalMs: Long) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(summariesFlushIntervalMs = intervalMs))
+            Logger.i("Updated summaries flush interval to $intervalMs ms")
+        } catch (e: Exception) {
+            Logger.e("Failed to update summaries flush interval: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update summaries flush interval",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Update the network connection timeout at runtime
+     * @param timeoutMs New timeout in milliseconds
+     */
+    fun updateNetworkConnectionTimeout(timeoutMs: Long) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(networkConnectionTimeoutMs = timeoutMs))
+            Logger.i("Updated network connection timeout to $timeoutMs ms")
+        } catch (e: Exception) {
+            Logger.e("Failed to update network connection timeout: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update network connection timeout",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Update the network read timeout at runtime
+     * @param timeoutMs New timeout in milliseconds
+     */
+    fun updateNetworkReadTimeout(timeoutMs: Long) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(networkReadTimeoutMs = timeoutMs))
+            Logger.i("Updated network read timeout to $timeoutMs ms")
+        } catch (e: Exception) {
+            Logger.e("Failed to update network read timeout: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update network read timeout",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Enable or disable debug logging at runtime
+     * @param enabled Whether debug logging should be enabled
+     */
+    fun setDebugLoggingEnabled(enabled: Boolean) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(debugLoggingEnabled = enabled))
+            Logger.i("Debug logging ${if (enabled) "enabled" else "disabled"}")
+        } catch (e: Exception) {
+            Logger.e("Failed to update debug logging setting: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update debug logging setting",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
+    /**
+     * Enable or disable logging at runtime
+     * @param enabled Whether logging should be enabled
+     */
+    fun setLoggingEnabled(enabled: Boolean) {
+        try {
+            mutableConfig.updateConfig(mutableConfig.config.copy(loggingEnabled = enabled))
+            Logger.i("Logging ${if (enabled) "enabled" else "disabled"}")
+        } catch (e: Exception) {
+            Logger.e("Failed to update logging setting: ${e.message}")
+            ErrorHandler.handleException(
+                e,
+                "Failed to update logging setting",
+                source = SOURCE,
+                severity = ErrorSeverity.medium
+            )
+        }
+    }
+    
     companion object {
         private const val SOURCE = "CFClient"
         
@@ -966,7 +1110,7 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
          * @param user The initial user for the client
          * @return The singleton CFClient instance
          */
-        suspend fun init(cfConfig: CFConfig, user: CFUser): CFClient {
+        suspend fun initialize(cfConfig: CFConfig, user: CFUser): CFClient {
             // Fast path: if already initialized, return existing instance
             instance?.let { existingInstance ->
                 Timber.i("CFClient singleton already exists, returning existing instance")
@@ -1073,7 +1217,16 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         suspend fun reinitialize(cfConfig: CFConfig, user: CFUser): CFClient {
             Timber.i("Reinitializing CFClient singleton...")
             shutdown()
-            return init(cfConfig, user)
+            return initialize(cfConfig, user)
+        }
+        
+        /**
+         * @deprecated Use initialize() instead
+         */
+        @Deprecated("Use initialize() instead", ReplaceWith("initialize(cfConfig, user)"))
+        suspend fun init(cfConfig: CFConfig, user: CFUser): CFClient {
+            Timber.w("CFClient.init() is deprecated, use CFClient.initialize() instead")
+            return initialize(cfConfig, user)
         }
         
         /**

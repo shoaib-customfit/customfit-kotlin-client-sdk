@@ -65,6 +65,20 @@ public class UserManager: CFUserProvider {
         return EvaluationContext(attributes: contextData)
     }
     
+    /// Add an evaluation context to the user
+    /// - Parameter context: The evaluation context to add
+    public func addContext(_ context: EvaluationContext) {
+        user = user.addContext(context)
+        Logger.debug("Added evaluation context to user")
+    }
+    
+    /// Remove an evaluation context from the user by key
+    /// - Parameter key: The context key to remove
+    public func removeContext(key: String) {
+        user = user.removeContext(key: key)
+        Logger.debug("Removed evaluation context from user")
+    }
+    
     // MARK: - Private Methods
     
     private func enrichUserWithEnvironmentData() {

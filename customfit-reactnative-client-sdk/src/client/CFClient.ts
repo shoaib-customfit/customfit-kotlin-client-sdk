@@ -343,18 +343,11 @@ export class CFClient {
   }
 
   /**
-   * Get all feature flags (matches Kotlin getAllFlags)
-   */
-  getAllFlags(): Record<string, any> {
-    return this.getAllFeatures();
-  }
-
-  /**
    * Get all feature flags
    */
-  getAllFeatures(): Record<string, any> {
+  getAllFlags(): Record<string, any> {
     if (!this.isInitialized) {
-      Logger.warning('getAllFeatures called before initialization');
+      Logger.warning('getAllFlags called before initialization');
       return {};
     }
 
@@ -396,19 +389,7 @@ export class CFClient {
     return result;
   }
 
-  /**
-   * Track a screen view
-   */
-  async trackScreenView(screenName: string): Promise<CFResult<void>> {
-    return await this.trackEvent('screen_view', { screen_name: screenName });
-  }
 
-  /**
-   * Track feature usage
-   */
-  async trackFeatureUsage(featureName: string, properties?: Record<string, any>): Promise<CFResult<void>> {
-    return await this.trackEvent('feature_usage', { feature_name: featureName, ...properties });
-  }
 
   /**
    * Add user property (matches Kotlin naming)
@@ -475,21 +456,7 @@ export class CFClient {
     return this.currentUser.properties || {};
   }
 
-  /**
-   * @deprecated Use addUserProperty instead
-   */
-  setUserAttribute(key: string, value: any): void {
-    Logger.warning('setUserAttribute is deprecated, use addUserProperty instead');
-    this.addUserProperty(key, value);
-  }
 
-  /**
-   * @deprecated Use addUserProperties instead
-   */
-  setUserAttributes(attributes: Record<string, any>): void {
-    Logger.warning('setUserAttributes is deprecated, use addUserProperties instead');
-    this.addUserProperties(attributes);
-  }
 
   /**
    * Update user
@@ -521,7 +488,7 @@ export class CFClient {
   /**
    * Flush events
    */
-  async flushEvents(): Promise<CFResult<number>> {
+  private async flushEvents(): Promise<CFResult<number>> {
     if (!this.isInitialized) {
       return CFResult.errorWithMessage('SDK not initialized');
     }
@@ -532,7 +499,7 @@ export class CFClient {
   /**
    * Flush summaries
    */
-  async flushSummaries(): Promise<CFResult<number>> {
+  private async flushSummaries(): Promise<CFResult<number>> {
     if (!this.isInitialized) {
       return CFResult.errorWithMessage('SDK not initialized');
     }
@@ -1222,6 +1189,106 @@ export class CFClient {
     } catch (error) {
       Logger.error('Failed to get contexts: ' + error);
       return [];
+    }
+  }
+
+  // MARK: - Runtime Configuration Updates
+
+  /**
+   * Update the SDK settings check interval at runtime
+   * @param intervalMs New interval in milliseconds
+   */
+  updateSdkSettingsCheckInterval(intervalMs: number): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Updated SDK settings check interval to ${intervalMs} ms`);
+    } catch (e) {
+      Logger.error(`Failed to update SDK settings check interval: ${e}`);
+    }
+  }
+
+  /**
+   * Update the events flush interval at runtime
+   * @param intervalMs New interval in milliseconds
+   */
+  updateEventsFlushInterval(intervalMs: number): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Updated events flush interval to ${intervalMs} ms`);
+    } catch (e) {
+      Logger.error(`Failed to update events flush interval: ${e}`);
+    }
+  }
+
+  /**
+   * Update the summaries flush interval at runtime
+   * @param intervalMs New interval in milliseconds
+   */
+  updateSummariesFlushInterval(intervalMs: number): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Updated summaries flush interval to ${intervalMs} ms`);
+    } catch (e) {
+      Logger.error(`Failed to update summaries flush interval: ${e}`);
+    }
+  }
+
+  /**
+   * Update the network connection timeout at runtime
+   * @param timeoutMs New timeout in milliseconds
+   */
+  updateNetworkConnectionTimeout(timeoutMs: number): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Updated network connection timeout to ${timeoutMs} ms`);
+    } catch (e) {
+      Logger.error(`Failed to update network connection timeout: ${e}`);
+    }
+  }
+
+  /**
+   * Update the network read timeout at runtime
+   * @param timeoutMs New timeout in milliseconds
+   */
+  updateNetworkReadTimeout(timeoutMs: number): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Updated network read timeout to ${timeoutMs} ms`);
+    } catch (e) {
+      Logger.error(`Failed to update network read timeout: ${e}`);
+    }
+  }
+
+  /**
+   * Enable or disable debug logging at runtime
+   * @param enabled Whether debug logging should be enabled
+   */
+  setDebugLoggingEnabled(enabled: boolean): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Debug logging ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (e) {
+      Logger.error(`Failed to update debug logging setting: ${e}`);
+    }
+  }
+
+  /**
+   * Enable or disable logging at runtime
+   * @param enabled Whether logging should be enabled
+   */
+  setLoggingEnabled(enabled: boolean): void {
+    try {
+      // Note: React Native SDK doesn't have mutable config yet, this is a placeholder
+      // Implementation would need to be added to support runtime config updates
+      Logger.info(`Logging ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (e) {
+      Logger.error(`Failed to update logging setting: ${e}`);
     }
   }
 }

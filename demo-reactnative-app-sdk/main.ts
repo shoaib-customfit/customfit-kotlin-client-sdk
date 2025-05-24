@@ -265,11 +265,7 @@ class CustomFitDemo {
     }
     log('✓ Batch events tracked (5 events)');
 
-    // Force flush events
-    const flushResult = await this.client.flushEvents();
-    if (flushResult.isSuccess) {
-      log(`✓ Flushed ${flushResult.data} events to server`);
-    }
+    // Note: flushEvents is now private - events are flushed automatically
   }
 
   /**
@@ -281,18 +277,18 @@ class CustomFitDemo {
 
     if (!this.client) return;
 
-    // Update user attributes
-    this.client.setUserAttribute('last_demo_run', new Date().toISOString());
-    this.client.setUserAttribute('demo_version', '1.0.0');
-    log('✓ Individual user attributes set');
+    // Update user properties
+    this.client.addUserProperty('last_demo_run', new Date().toISOString());
+    this.client.addUserProperty('demo_version', '1.0.0');
+    log('✓ Individual user properties set');
 
-    // Update multiple attributes
-    this.client.setUserAttributes({
+    // Update multiple properties
+    this.client.addUserProperties({
       platform: 'react-native',
       demo_completed: false,
       session_count: 1,
     });
-    log('✓ Multiple user attributes set');
+    log('✓ Multiple user properties set');
 
     // Increment app launch count
     this.client.incrementAppLaunchCount();
@@ -433,7 +429,7 @@ class CustomFitDemo {
     log('  - client instance');
     log('  - isInitialized status');
     log('  - trackEvent function');
-    log('  - setUserAttribute function');
+    log('  - addUserProperty function');
     log('  - metrics');
 
     log('✓ useFeatureFlag<T> hook provides:');
@@ -480,16 +476,7 @@ class CustomFitDemo {
       log('✓ Lifecycle Manager Metrics available');
     }
 
-    // Flush all remaining data
-    const summaryFlushResult = await this.client.flushSummaries();
-    if (summaryFlushResult.isSuccess) {
-      log(`✓ Flushed ${summaryFlushResult.data} summaries`);
-    }
-
-    const eventFlushResult = await this.client.flushEvents();
-    if (eventFlushResult.isSuccess) {
-      log(`✓ Flushed ${eventFlushResult.data} events`);
-    }
+    // Note: flush methods are now private - data is flushed automatically
   }
 
   /**
@@ -551,8 +538,8 @@ const ReactExamples: ReactComponentDemo = {
     // const { setUserAttribute, client } = useCustomFit();
     
     log('📱 React Component would manage users like:');
-    log('  const { setUserAttribute, client } = useCustomFit();');
-    log('  setUserAttribute("last_action", "button_click");');
+    log('  const { addUserProperty, client } = useCustomFit();');
+    log('  addUserProperty("last_action", "button_click");');
     log('  client?.setUser(newUser);');
   },
 };

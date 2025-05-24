@@ -26,6 +26,21 @@ abstract class UserManager {
   /// Add a boolean property to the user
   void addBooleanProperty(String key, bool value);
 
+  /// Add a date property to the user
+  void addDateProperty(String key, DateTime value);
+
+  /// Add a geolocation property to the user
+  void addGeoPointProperty(String key, double lat, double lon);
+
+  /// Add a JSON property to the user
+  void addJsonProperty(String key, Map<String, dynamic> value);
+
+  /// Add multiple properties to the user
+  void addUserProperties(Map<String, dynamic> properties);
+
+  /// Get all user properties
+  Map<String, dynamic> getUserProperties();
+
   /// Add a context to the user
   void addContext(EvaluationContext context);
 
@@ -80,6 +95,33 @@ class UserManagerImpl implements UserManager {
   @override
   void addBooleanProperty(String key, bool value) {
     addUserProperty(key, value);
+  }
+
+  @override
+  void addDateProperty(String key, DateTime value) {
+    addUserProperty(key, value.toIso8601String());
+  }
+
+  @override
+  void addGeoPointProperty(String key, double lat, double lon) {
+    addUserProperty(key, {'lat': lat, 'lon': lon});
+  }
+
+  @override
+  void addJsonProperty(String key, Map<String, dynamic> value) {
+    addUserProperty(key, value);
+  }
+
+  @override
+  void addUserProperties(Map<String, dynamic> properties) {
+    for (final entry in properties.entries) {
+      addUserProperty(entry.key, entry.value);
+    }
+  }
+
+  @override
+  Map<String, dynamic> getUserProperties() {
+    return Map<String, dynamic>.from(_user.properties);
   }
 
   @override

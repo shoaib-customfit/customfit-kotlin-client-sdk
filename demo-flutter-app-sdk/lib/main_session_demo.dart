@@ -148,7 +148,7 @@ class _SessionManagerDemoScreenState extends State<SessionManagerDemoScreen> {
     
     _log('');
     _log('Initializing CFClient with test config...');
-    _cfClient = await CFClient.init(config, user);
+    _cfClient = await CFClient.initialize(config, user);
     
     // Test SessionManager integration with CFClient
     _log('');

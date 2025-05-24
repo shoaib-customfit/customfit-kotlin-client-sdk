@@ -97,7 +97,7 @@ class MyApplication : Application() {
                     .build()
                 
                 // Initialize the client using the new singleton pattern
-                val cfClient = CFClient.init(config, user)
+                val cfClient = CFClient.initialize(config, user)
                 
                 Log.d("CF_SDK", "CFClient singleton initialized successfully")
                 

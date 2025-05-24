@@ -47,7 +47,7 @@ class CFClient {
 
   /// Initialize or get the singleton instance of CFClient
   /// This method ensures only one instance exists and handles concurrent initialization attempts
-  static Future<CFClient> init(CFConfig config, CFUser user) async {
+  static Future<CFClient> initialize(CFConfig config, CFUser user) async {
     // Fast path: if already initialized, return existing instance
     if (_instance != null) {
       Logger.i('CFClient singleton already exists, returning existing instance');
@@ -120,7 +120,14 @@ class CFClient {
   static Future<CFClient> reinitialize(CFConfig config, CFUser user) async {
     Logger.i('Reinitializing CFClient singleton...');
     await shutdownSingleton();
-    return init(config, user);
+    return initialize(config, user);
+  }
+
+  /// @deprecated Use initialize() instead
+  @Deprecated('Use initialize() instead')
+  static Future<CFClient> init(CFConfig config, CFUser user) async {
+    Logger.w('CFClient.init() is deprecated, use CFClient.initialize() instead');
+    return initialize(config, user);
   }
 
   /// Create a detached (non-singleton) instance of CFClient
@@ -616,6 +623,15 @@ class CFClient {
     listenerManager.unregisterAllFlagsListener(wrapper);
   }
 
+  /// Get a feature flag value
+  T getFeatureFlag<T>(String key, T defaultValue) {
+    final value = configManager.getConfigValue<T>(key, defaultValue);
+    if (value == defaultValue) {
+      Logger.d('getFeatureFlag: Using default value for key: $key');
+    }
+    return value;
+  }
+
   /// Get a string value from config
   String getString(String key, String defaultValue) {
     final value = configManager.getString(key, defaultValue);
@@ -677,7 +693,7 @@ class CFClient {
     // Flush any pending events and summaries
     try {
       // First flush summaries
-      await flushSummaries().then((result) {
+      await _flushSummaries().then((result) {
         if (!result.isSuccess) {
           Logger.w(
               'Failed to flush summaries during shutdown: ${result.getErrorMessage()}');
@@ -687,7 +703,7 @@ class CFClient {
       });
 
       // Then flush events
-      await flushEvents().then((result) {
+      await _flushEvents().then((result) {
         if (!result.isSuccess) {
           Logger.w(
               'Failed to flush events during shutdown: ${result.getErrorMessage()}');
@@ -707,7 +723,7 @@ class CFClient {
   /// Useful for immediately sending tracked events without waiting for the automatic flush
   ///
   /// @return CFResult containing the number of events flushed or error details
-  Future<CFResult<int>> flushEvents() async {
+  Future<CFResult<int>> _flushEvents() async {
     try {
       Logger.i('Manually flushing events');
 
@@ -809,7 +825,7 @@ class CFClient {
   }
 
   /// Manually flushes the summaries queue to the server
-  Future<CFResult<int>> flushSummaries() async {
+  Future<CFResult<int>> _flushSummaries() async {
     try {
       Logger.i('Manually flushing summaries');
       final result = await summaryManager.flushSummaries();
@@ -878,6 +894,152 @@ class CFClient {
     _sessionManager?.removeListener(listener);
   }
 
+  // MARK: - User Management
+
+  /// Add a property to the user (matches Kotlin naming)
+  void addUserProperty(String key, dynamic value) {
+    try {
+      userManager.addUserProperty(key, value);
+      Logger.d('Added user property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add user property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add user property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a string property to the user
+  void addStringProperty(String key, String value) {
+    try {
+      userManager.addStringProperty(key, value);
+      Logger.d('Added string property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add string property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add string property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a number property to the user
+  void addNumberProperty(String key, num value) {
+    try {
+      userManager.addNumberProperty(key, value);
+      Logger.d('Added number property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add number property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add number property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a boolean property to the user
+  void addBooleanProperty(String key, bool value) {
+    try {
+      userManager.addBooleanProperty(key, value);
+      Logger.d('Added boolean property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add boolean property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add boolean property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a date property to the user
+  void addDateProperty(String key, DateTime value) {
+    try {
+      userManager.addDateProperty(key, value);
+      Logger.d('Added date property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add date property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add date property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a geolocation property to the user
+  void addGeoPointProperty(String key, double lat, double lon) {
+    try {
+      userManager.addGeoPointProperty(key, lat, lon);
+      Logger.d('Added geo point property: $key=($lat, $lon)');
+    } catch (e) {
+      Logger.e('Failed to add geo point property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add geo point property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add a JSON property to the user
+  void addJsonProperty(String key, Map<String, dynamic> value) {
+    try {
+      userManager.addJsonProperty(key, value);
+      Logger.d('Added JSON property: $key=$value');
+    } catch (e) {
+      Logger.e('Failed to add JSON property: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add JSON property',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Add multiple properties to the user (matches Kotlin naming)
+  void addUserProperties(Map<String, dynamic> properties) {
+    try {
+      userManager.addUserProperties(properties);
+      Logger.d('Added user properties: $properties');
+    } catch (e) {
+      Logger.e('Failed to add user properties: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to add user properties',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Get all user properties (matches Kotlin naming)
+  Map<String, dynamic> getUserProperties() {
+    try {
+      return userManager.getUserProperties();
+    } catch (e) {
+      Logger.e('Failed to get user properties: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to get user properties',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+      return {};
+    }
+  }
+
   // MARK: - Context Management
 
   /// Add an evaluation context to the user
@@ -926,6 +1088,141 @@ class CFClient {
         severity: ErrorSeverity.medium,
       );
       return [];
+    }
+  }
+
+  // MARK: - Runtime Configuration Updates
+
+  /// Update the SDK settings check interval at runtime
+  void updateSdkSettingsCheckInterval(int intervalMs) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        sdkSettingsCheckIntervalMs: intervalMs,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Updated SDK settings check interval to $intervalMs ms');
+    } catch (e) {
+      Logger.e('Failed to update SDK settings check interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update SDK settings check interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Update the events flush interval at runtime
+  void updateEventsFlushInterval(int intervalMs) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        eventsFlushIntervalMs: intervalMs,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Updated events flush interval to $intervalMs ms');
+    } catch (e) {
+      Logger.e('Failed to update events flush interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update events flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Update the summaries flush interval at runtime
+  void updateSummariesFlushInterval(int intervalMs) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        summariesFlushIntervalMs: intervalMs,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Updated summaries flush interval to $intervalMs ms');
+    } catch (e) {
+      Logger.e('Failed to update summaries flush interval: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update summaries flush interval',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Update the network connection timeout at runtime
+  void updateNetworkConnectionTimeout(int timeoutMs) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        networkConnectionTimeoutMs: timeoutMs,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Updated network connection timeout to $timeoutMs ms');
+    } catch (e) {
+      Logger.e('Failed to update network connection timeout: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update network connection timeout',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Update the network read timeout at runtime
+  void updateNetworkReadTimeout(int timeoutMs) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        networkReadTimeoutMs: timeoutMs,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Updated network read timeout to $timeoutMs ms');
+    } catch (e) {
+      Logger.e('Failed to update network read timeout: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update network read timeout',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Enable or disable debug logging at runtime
+  void setDebugLoggingEnabled(bool enabled) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        debugLoggingEnabled: enabled,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Debug logging ${enabled ? "enabled" : "disabled"}');
+    } catch (e) {
+      Logger.e('Failed to update debug logging setting: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update debug logging setting',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
+    }
+  }
+
+  /// Enable or disable logging at runtime
+  void setLoggingEnabled(bool enabled) {
+    try {
+      final newConfig = mutableConfig.config.copyWith(
+        loggingEnabled: enabled,
+      );
+      mutableConfig.updateConfig(newConfig);
+      Logger.i('Logging ${enabled ? "enabled" : "disabled"}');
+    } catch (e) {
+      Logger.e('Failed to update logging setting: $e');
+      ErrorHandler.handleException(
+        e,
+        'Failed to update logging setting',
+        source: _source,
+        severity: ErrorSeverity.medium,
+      );
     }
   }
 }

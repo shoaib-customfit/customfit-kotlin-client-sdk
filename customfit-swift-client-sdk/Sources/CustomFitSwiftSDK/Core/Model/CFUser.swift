@@ -194,6 +194,19 @@ public class CFUser: Codable {
         return copy
     }
     
+    /// Remove a context by key
+    /// - Parameter key: Context key to remove
+    /// - Returns: Updated user
+    public func removeContext(key: String) -> CFUser {
+        let copy = copyUser()
+        // For now, we'll remove contexts that have the key in their attributes
+        // This is a simplified approach since Swift EvaluationContext doesn't have a key field
+        copy.contexts = copy.contexts.filter { context in
+            return context.attributes["key"] as? String != key
+        }
+        return copy
+    }
+    
     /// Add a property
     /// - Parameters:
     ///   - key: Property key

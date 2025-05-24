@@ -892,17 +892,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         return userManager.getUser().getCurrentProperties()
     }
     
-    /// @deprecated Use addUserProperty instead
-    public func setUserAttribute(key: String, value: Any) {
-        Logger.warning("setUserAttribute is deprecated, use addUserProperty instead")
-        addUserProperty(key: key, value: value)
-    }
-    
-    /// @deprecated Use addUserProperties instead
-    public func setUserAttributes(attributes: [String: Any]) {
-        Logger.warning("setUserAttributes is deprecated, use addUserProperties instead")
-        addUserProperties(properties: attributes)
-    }
+
     
     /// Set the device ID
     /// - Parameter deviceId: Device ID
@@ -926,27 +916,27 @@ public class CFClient: AppStateListener, BatteryStateListener {
     
     // MARK: - Feature Management
     
-    /// Get a feature flag
+    /// Get a feature flag value
     /// - Parameters:
     ///   - key: Feature key
     ///   - defaultValue: Default value if flag not found
     /// - Returns: Feature value or default
-    public func getFeatureFlag(key: String, defaultValue: Bool = false) -> Bool {
-        return configManager.getFeatureFlag(key: key, defaultValue: defaultValue)
-    }
-    
-    /// Get a feature value
-    /// - Parameters:
-    ///   - key: Feature key
-    ///   - defaultValue: Default value if feature not found
-    /// - Returns: Feature value or default
-    public func getFeatureValue<T>(key: String, defaultValue: T) -> T {
+    public func getFeatureFlag<T>(key: String, defaultValue: T) -> T {
         return configManager.getFeatureValue(key: key, defaultValue: defaultValue)
     }
     
-    /// Get all features
-    /// - Returns: All features
-    public func getAllFeatures() -> [String: Any] {
+    /// Get a boolean feature flag (convenience method)
+    /// - Parameters:
+    ///   - key: Feature key
+    ///   - defaultValue: Default value if flag not found
+    /// - Returns: Feature value or default
+    public func getBooleanFeatureFlag(key: String, defaultValue: Bool = false) -> Bool {
+        return configManager.getFeatureFlag(key: key, defaultValue: defaultValue)
+    }
+    
+    /// Get all flags
+    /// - Returns: All flags
+    public func getAllFlags() -> [String: Any] {
         return configManager.getAllFeatures()
     }
     
@@ -966,21 +956,7 @@ public class CFClient: AppStateListener, BatteryStateListener {
         eventTracker.trackEvent(eventName: name, properties: properties)
     }
     
-    /// Track a screen view
-    /// - Parameter screenName: Screen name
-    public func trackScreenView(screenName: String) {
-        eventTracker.trackScreenView(screenName: screenName)
-    }
-    
-    /// Track feature usage
-    /// - Parameter featureId: Feature ID
-    public func trackFeatureUsage(featureId: String) {
-        // Create properties with feature ID
-        let properties = ["feature_id": featureId]
-        
-        // Track feature usage event
-        trackEvent(name: "feature_usage", properties: properties)
-    }
+
     
     /// Track config request
     /// - Parameters:
@@ -1050,8 +1026,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// - Parameter listener: Listener
     public func addAllFlagsListener(listener: @escaping ([String: Any]) -> Void) {
         listenerManager.registerAllFlagsListener(listener: ClosureAllFlagsListener { keys in
-            let allFeatures = self.getAllFeatures()
-            listener(allFeatures)
+            let allFlags = self.getAllFlags()
+            listener(allFlags)
         })
     }
     
@@ -1219,6 +1195,29 @@ public class CFClient: AppStateListener, BatteryStateListener {
         }
     }
     
+    // MARK: - Context Management
+    
+    /// Add an evaluation context to the user
+    /// - Parameter context: The evaluation context to add
+    public func addContext(_ context: EvaluationContext) {
+        userManager.addContext(context)
+        Logger.debug("Added evaluation context with \(context.attributes.count) attributes")
+    }
+    
+    /// Remove an evaluation context from the user by key
+    /// - Parameter key: The context key to remove
+    public func removeContext(key: String) {
+        userManager.removeContext(key: key)
+        Logger.debug("Removed evaluation context: \(key)")
+    }
+    
+    /// Get all evaluation contexts for the user
+    /// - Returns: Array of evaluation contexts
+    public func getContexts() -> [EvaluationContext] {
+        let user = userManager.getUser()
+        return user.getAllContexts()
+    }
+    
     // MARK: - Session Management
     
     /// Get the current session ID
@@ -1272,6 +1271,253 @@ public class CFClient: AppStateListener, BatteryStateListener {
     /// - Parameter listener: The listener to remove
     public func removeSessionRotationListener(_ listener: SessionRotationListener) {
         sessionManager?.removeListener(listener)
+    }
+    
+    // MARK: - Runtime Configuration Updates
+    
+    /// Update the SDK settings check interval at runtime
+    /// - Parameter intervalMs: New interval in milliseconds
+    public func updateSdkSettingsCheckInterval(intervalMs: Int64) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: intervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Updated SDK settings check interval to \(intervalMs) ms")
+        }
+    }
+    
+    /// Update the events flush interval at runtime
+    /// - Parameter intervalMs: New interval in milliseconds
+    public func updateEventsFlushInterval(intervalMs: Int64) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: intervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Updated events flush interval to \(intervalMs) ms")
+        }
+    }
+    
+    /// Update the summaries flush interval at runtime
+    /// - Parameter intervalMs: New interval in milliseconds
+    public func updateSummariesFlushInterval(intervalMs: Int64) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: intervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Updated summaries flush interval to \(intervalMs) ms")
+        }
+    }
+    
+    /// Update the network connection timeout at runtime
+    /// - Parameter timeoutMs: New timeout in milliseconds
+    public func updateNetworkConnectionTimeout(timeoutMs: Int) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: timeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Updated network connection timeout to \(timeoutMs) ms")
+        }
+    }
+    
+    /// Update the network read timeout at runtime
+    /// - Parameter timeoutMs: New timeout in milliseconds
+    public func updateNetworkReadTimeout(timeoutMs: Int) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: timeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Updated network read timeout to \(timeoutMs) ms")
+        }
+    }
+    
+    /// Enable or disable debug logging at runtime
+    /// - Parameter enabled: Whether debug logging should be enabled
+    public func setDebugLoggingEnabled(_ enabled: Bool) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: currentConfig.loggingEnabled,
+            debugLoggingEnabled: enabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Debug logging \(enabled ? "enabled" : "disabled")")
+        }
+    }
+    
+    /// Enable or disable logging at runtime
+    /// - Parameter enabled: Whether logging should be enabled
+    public func setLoggingEnabled(_ enabled: Bool) {
+        let currentConfig = mutableConfig.config
+        let newConfig = CFConfig(
+            clientKey: currentConfig.clientKey,
+            eventsQueueSize: currentConfig.eventsQueueSize,
+            eventsFlushTimeSeconds: currentConfig.eventsFlushTimeSeconds,
+            eventsFlushIntervalMs: currentConfig.eventsFlushIntervalMs,
+            maxRetryAttempts: currentConfig.maxRetryAttempts,
+            retryInitialDelayMs: currentConfig.retryInitialDelayMs,
+            retryMaxDelayMs: currentConfig.retryMaxDelayMs,
+            retryBackoffMultiplier: currentConfig.retryBackoffMultiplier,
+            summariesQueueSize: currentConfig.summariesQueueSize,
+            summariesFlushTimeSeconds: currentConfig.summariesFlushTimeSeconds,
+            summariesFlushIntervalMs: currentConfig.summariesFlushIntervalMs,
+            sdkSettingsCheckIntervalMs: currentConfig.sdkSettingsCheckIntervalMs,
+            networkConnectionTimeoutMs: currentConfig.networkConnectionTimeoutMs,
+            networkReadTimeoutMs: currentConfig.networkReadTimeoutMs,
+            loggingEnabled: enabled,
+            debugLoggingEnabled: currentConfig.debugLoggingEnabled,
+            logLevel: currentConfig.logLevel,
+            offlineMode: currentConfig.offlineMode,
+            disableBackgroundPolling: currentConfig.disableBackgroundPolling,
+            backgroundPollingIntervalMs: currentConfig.backgroundPollingIntervalMs,
+            useReducedPollingWhenBatteryLow: currentConfig.useReducedPollingWhenBatteryLow,
+            reducedPollingIntervalMs: currentConfig.reducedPollingIntervalMs,
+            maxStoredEvents: currentConfig.maxStoredEvents,
+            autoEnvAttributesEnabled: currentConfig.autoEnvAttributesEnabled
+        )
+        if mutableConfig.updateConfig(newConfig) {
+            Logger.info("Logging \(enabled ? "enabled" : "disabled")")
+        }
     }
 }
 
