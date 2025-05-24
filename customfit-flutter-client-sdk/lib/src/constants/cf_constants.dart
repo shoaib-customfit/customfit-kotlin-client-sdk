@@ -59,7 +59,7 @@ class _APIConstants {
   final String userConfigsPath = '/v1/users/configs';
 
   /// Events path
-  final String eventsPath = '/v1/events';
+  final String eventsPath = '/v1/cfe';
 
   /// Summaries path
   final String summariesPath = '/v1/summaries';
@@ -147,22 +147,22 @@ class _RetryConstants {
   const _RetryConstants();
 
   /// Default maximum number of retry attempts
-  final int maxRetryAttempts = 3;
+  final int MAX_RETRY_ATTEMPTS = 3;
 
   /// Default initial delay in milliseconds before the first retry
-  final int initialDelayMs = 1000;
+  final int INITIAL_DELAY_MS = 1000;
 
   /// Default maximum delay in milliseconds between retries
-  final int maxDelayMs = 30000;
+  final int MAX_DELAY_MS = 30000;
 
   /// Default backoff multiplier for exponential backoff
-  final double backoffMultiplier = 2.0;
+  final double BACKOFF_MULTIPLIER = 2.0;
 
   /// Circuit breaker failure threshold
-  final int circuitBreakerFailureThreshold = 3;
+  final int CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 
   /// Circuit breaker reset timeout in milliseconds
-  final int circuitBreakerResetTimeoutMs = 30000;
+  final int CIRCUIT_BREAKER_RESET_TIMEOUT_MS = 30000;
 }
 
 /// Background polling-related constants
@@ -170,13 +170,13 @@ class _BackgroundPollingConstants {
   const _BackgroundPollingConstants();
 
   /// Default SDK settings check interval in milliseconds
-  final int sdkSettingsCheckIntervalMs = 300000; // 5 minutes
+  final int SDK_SETTINGS_CHECK_INTERVAL_MS = 300000; // 5 minutes
 
   /// Default background polling interval in milliseconds
-  final int backgroundPollingIntervalMs = 3600000; // 1 hour
+  final int BACKGROUND_POLLING_INTERVAL_MS = 3600000; // 1 hour
 
   /// Default reduced polling interval in milliseconds
-  final int reducedPollingIntervalMs = 7200000; // 2 hours
+  final int REDUCED_POLLING_INTERVAL_MS = 7200000; // 2 hours
 }
 
 /// Network-related constants
@@ -184,16 +184,16 @@ class _NetworkConstants {
   const _NetworkConstants();
 
   /// Default connection timeout in milliseconds
-  final int connectionTimeoutMs = 10000;
+  final int CONNECTION_TIMEOUT_MS = 10000;
 
   /// Default read timeout in milliseconds
-  final int readTimeoutMs = 10000;
+  final int READ_TIMEOUT_MS = 10000;
 
   /// SDK settings request timeout in milliseconds
-  final int sdkSettingsTimeoutMs = 5000;
+  final int SDK_SETTINGS_TIMEOUT_MS = 5000;
 
   /// SDK settings check timeout in milliseconds
-  final int sdkSettingsCheckTimeoutMs = 10000;
+  final int SDK_SETTINGS_CHECK_TIMEOUT_MS = 10000;
 }
 
 /// Logging-related constants
@@ -201,23 +201,23 @@ class _LoggingConstants {
   const _LoggingConstants();
 
   /// Log level: ERROR
-  final String levelError = 'ERROR';
+  final String LEVEL_ERROR = 'ERROR';
 
   /// Log level: WARN
-  final String levelWarn = 'WARN';
+  final String LEVEL_WARN = 'WARN';
 
   /// Log level: INFO
-  final String levelInfo = 'INFO';
+  final String LEVEL_INFO = 'INFO';
 
   /// Log level: DEBUG
-  final String levelDebug = 'DEBUG';
+  final String LEVEL_DEBUG = 'DEBUG';
 
   /// Log level: TRACE
-  final String levelTrace = 'TRACE';
+  final String LEVEL_TRACE = 'TRACE';
 
   /// Log level: OFF - disables logging
-  final String levelOff = 'OFF';
+  final String LEVEL_OFF = 'OFF';
 
   /// Default log level
-  final String defaultLogLevel = 'DEBUG';
+  final String DEFAULT_LOG_LEVEL = 'DEBUG';
 }

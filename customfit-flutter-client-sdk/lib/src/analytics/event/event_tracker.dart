@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../../config/core/cf_config.dart';
+import '../../constants/cf_constants.dart';
 import '../../core/error/cf_result.dart';
 import '../../core/error/error_handler.dart';
 import '../../core/error/error_severity.dart';
@@ -265,7 +266,7 @@ class EventTracker implements ConnectionStatusListener {
       Logger.d('🔔 TRACK HTTP: Event payload size: ${payload.length} bytes');
 
       // Send events to server
-      const url = 'https://api.customfit.ai/v2/events';
+      final url = '${CFConstants.api.baseApiUrl}${CFConstants.api.eventsPath}?cfenc=${_config.clientKey}';
       Logger.d('🔔 TRACK HTTP: POST request to: $url');
 
       final result = await _httpClient.post(

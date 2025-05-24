@@ -95,8 +95,8 @@ export class CFClient {
     this.configFetcher = new ConfigFetcher(config);
     
     const httpClient = new HttpClient();
-    this.eventTracker = new EventTracker(config, httpClient);
     this.summaryManager = new SummaryManager(config, httpClient);
+    this.eventTracker = new EventTracker(config, httpClient, this.summaryManager);
     this.connectionMonitor = ConnectionMonitor.getInstance();
     this.appStateManager = AppStateManager.getInstance();
     this.environmentCollector = EnvironmentAttributesCollector.getInstance();

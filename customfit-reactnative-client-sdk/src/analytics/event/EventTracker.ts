@@ -7,6 +7,7 @@ import { CFConstants } from '../../constants/CFConstants';
 import { EventDataUtil, EventDataBuilder } from './EventData';
 import { ConnectionMonitor } from '../../platform/ConnectionMonitor';
 import { ErrorHandler, ErrorCategory, ErrorSeverity } from '../../core/error/ErrorHandler';
+import { SummaryManager } from '../summary/SummaryManager';
 
 /**
  * Event tracker for handling user events
@@ -17,15 +18,17 @@ export class EventTracker {
   private readonly config: CFConfig;
   private readonly httpClient: HttpClient;
   private readonly connectionMonitor: ConnectionMonitor;
+  private readonly summaryManager?: SummaryManager;
   private eventQueue: EventData[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private lastFlushTime: number = 0;
 
-  constructor(config: CFConfig, httpClient: HttpClient) {
+  constructor(config: CFConfig, httpClient: HttpClient, summaryManager?: SummaryManager) {
     this.config = config;
     this.httpClient = httpClient;
     this.connectionMonitor = ConnectionMonitor.getInstance();
+    this.summaryManager = summaryManager;
     
     Logger.info(`🔔 TRACK: EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
   }
@@ -121,6 +124,21 @@ export class EventTracker {
     try {
       Logger.info(`🔔 🔔 TRACK: Tracking event: ${name} with properties: ${JSON.stringify(properties || {})}`);
       
+      // Flush summaries before tracking a new event (like other SDKs)
+      if (this.summaryManager) {
+        Logger.info(`🔔 🔔 TRACK: Flushing summaries before tracking event: ${name}`);
+        const summaryResult = await this.summaryManager.flush();
+        if (!summaryResult.isSuccess) {
+          Logger.warning(`🔔 🔔 TRACK: Failed to flush summaries before tracking event: ${summaryResult.error?.message}`);
+          ErrorHandler.handleError(
+            `Failed to flush summaries before tracking event: ${summaryResult.error?.message}`,
+            EventTracker.SOURCE,
+            ErrorCategory.INTERNAL,
+            ErrorSeverity.MEDIUM
+          );
+        }
+      }
+      
       if (!name || name.trim() === '') {
         const message = 'Event name cannot be blank';
         Logger.warning(`🔔 TRACK: Invalid event - ${message}`);
@@ -152,6 +170,21 @@ export class EventTracker {
    * Flush all events to the server
    */
   async flush(): Promise<CFResult<number>> {
+    // Always flush summaries first before flushing events (like other SDKs)
+    if (this.summaryManager) {
+      Logger.info('🔔 🔔 TRACK: Flushing summaries before flushing events');
+      const summaryResult = await this.summaryManager.flush();
+      if (!summaryResult.isSuccess) {
+        Logger.warning(`🔔 🔔 TRACK: Failed to flush summaries before flushing events: ${summaryResult.error?.message}`);
+        ErrorHandler.handleError(
+          `Failed to flush summaries before flushing events: ${summaryResult.error?.message}`,
+          EventTracker.SOURCE,
+          ErrorCategory.INTERNAL,
+          ErrorSeverity.MEDIUM
+        );
+      }
+    }
+
     if (this.eventQueue.length === 0) {
       Logger.debug('🔔 TRACK: No events to flush');
       return CFResult.success(0);
