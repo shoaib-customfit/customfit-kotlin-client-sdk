@@ -34,7 +34,7 @@ export class ConfigFetcher {
   /**
    * Fetch user configurations with optional caching headers
    */
-  async fetchUserConfigs(userToken: string, lastModified?: string, etag?: string): Promise<CFResult<{
+  async fetchUserConfigs(clientKey: string, user: any, lastModified?: string, etag?: string): Promise<CFResult<{
     configs: Record<string, any>;
     metadata: {
       lastModified?: string;
@@ -43,12 +43,19 @@ export class ConfigFetcher {
     };
   }>> {
     try {
-      if (!userToken) {
-        return CFResult.errorWithMessage('User token is required', ErrorCategory.VALIDATION);
+      if (!clientKey) {
+        return CFResult.errorWithMessage('Client key is required', ErrorCategory.VALIDATION);
       }
 
+      if (!user) {
+        return CFResult.errorWithMessage('User data is required', ErrorCategory.VALIDATION);
+      }
+
+      // Build URL with client key as query parameter (matching Flutter)
+      const url = `${CFConstants.Api.USER_CONFIGS_PATH}?cfenc=${clientKey}`;
+
       const headers: Record<string, string> = {
-        [CFConstants.Http.HEADER_AUTHORIZATION]: `Bearer ${userToken}`,
+        [CFConstants.Http.HEADER_CONTENT_TYPE]: CFConstants.Http.CONTENT_TYPE_JSON,
       };
 
       // Add conditional headers for caching
@@ -59,7 +66,19 @@ export class ConfigFetcher {
         headers[CFConstants.Http.HEADER_IF_NONE_MATCH] = etag;
       }
 
-      const result = await this.httpClient.get(CFConstants.Api.USER_CONFIGS_PATH, headers);
+      // Build payload exactly like Flutter SDK
+      const payload = {
+        user: user,
+        include_only_features_flags: true,
+      };
+
+      Logger.info(`📡 API POLL: Fetching config from URL: ${CFConstants.Api.BASE_API_URL}${url}`);
+      if (lastModified) {
+        Logger.info(`📡 API POLL: Using If-Modified-Since: ${lastModified}`);
+      }
+
+      // Use POST method with JSON payload (matching Flutter)
+      const result = await this.httpClient.post(url, payload, headers);
 
       if (result.isError) {
         Logger.error(`📡 API POLL: Failed to fetch user configs: ${result.error?.message}`);
@@ -79,8 +98,32 @@ export class ConfigFetcher {
         return CFResult.errorWithMessage(`HTTP ${response.status}: ${response.statusText}`, ErrorCategory.NETWORK);
       }
 
-      // Parse response
-      const configs = response.data || {};
+      // Parse response - expect configs to be nested under 'configs' key like Flutter
+      const responseData = response.data || {};
+      const rawConfigs = responseData.configs || {};
+      
+      // Process configs to extract variation values (matching Flutter SDK)
+      const processedConfigs: Record<string, any> = {};
+      
+      Object.keys(rawConfigs).forEach(key => {
+        const configObject = rawConfigs[key];
+        
+        if (configObject && typeof configObject === 'object') {
+          // Extract the variation value (this is what we actually want to use)
+          if (configObject.variation !== undefined) {
+            processedConfigs[key] = configObject.variation;
+            Logger.debug(`📡 Config processed: ${key} = ${configObject.variation}`);
+          } else {
+            // Fallback to the entire object if no variation field
+            processedConfigs[key] = configObject;
+            Logger.warning(`📡 Config missing variation: ${key}, using full object`);
+          }
+        } else {
+          // Handle primitive values
+          processedConfigs[key] = configObject;
+        }
+      });
+
       const responseHeaders = response.headers;
 
       const metadata = {
@@ -89,11 +132,16 @@ export class ConfigFetcher {
         timestamp: Date.now(),
       };
 
-      Logger.info(`📡 API POLL: Retrieved ${Object.keys(configs).length} configuration entries`);
-      Logger.debug(`📡 API POLL: Config keys: ${Object.keys(configs).join(', ')}`);
+      Logger.info(`📡 API POLL: Retrieved ${Object.keys(processedConfigs).length} configuration entries`);
+      Logger.debug(`📡 API POLL: Config keys: ${Object.keys(processedConfigs).join(', ')}`);
+      
+      // Log each processed config value
+      Object.keys(processedConfigs).forEach(key => {
+        Logger.debug(`📡 ${key}: ${processedConfigs[key]}`);
+      });
 
       return CFResult.success({
-        configs,
+        configs: processedConfigs,
         metadata,
       });
     } catch (error) {
@@ -282,5 +330,14 @@ export class ConfigFetcher {
    */
   isHealthy(): boolean {
     return this.httpClient.isHealthy() && this.sdkSettingsHttpClient.isHealthy();
+  }
+
+  /**
+   * Reset circuit breakers for both HTTP clients
+   */
+  resetCircuitBreaker(): void {
+    this.httpClient.resetCircuitBreaker();
+    this.sdkSettingsHttpClient.resetCircuitBreaker();
+    Logger.info('📡 ConfigFetcher: Circuit breakers reset');
   }
 } 

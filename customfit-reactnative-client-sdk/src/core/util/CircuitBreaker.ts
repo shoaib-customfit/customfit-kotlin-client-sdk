@@ -135,6 +135,18 @@ export class CircuitBreaker {
     this.failureCount++;
     this.lastFailureTime = Date.now();
     
+    // In web environments, ignore CORS-related failures for circuit breaker logic
+    // These are environmental issues, not service failures
+    const isCorsError = this.isCorsRelatedError(error);
+    const isWebEnvironment = typeof window !== 'undefined';
+    
+    if (isWebEnvironment && isCorsError) {
+      Logger.warning(`${this.config.name} operation ${operationName} failed due to CORS (${this.failureCount}/${this.config.failureThreshold}): ${error.message} - not counting toward circuit breaker`);
+      // Reset failure count for CORS errors in web environment
+      this.failureCount = Math.max(0, this.failureCount - 1);
+      return;
+    }
+    
     Logger.warning(`${this.config.name} operation ${operationName} failed (${this.failureCount}/${this.config.failureThreshold}): ${error.message}`);
 
     if (this.state === CircuitBreakerState.HALF_OPEN) {
@@ -146,8 +158,25 @@ export class CircuitBreaker {
     }
   }
 
+  private isCorsRelatedError(error: Error): boolean {
+    const message = error.message.toLowerCase();
+    return message.includes('cors') ||
+           message.includes('cross-origin') ||
+           message.includes('network error') ||
+           message.includes('fetch') ||
+           message.includes('access-control-allow-origin') ||
+           message.includes('blocked by cors policy') ||
+           (message.includes('failed to fetch') && typeof window !== 'undefined');
+  }
+
   private shouldAttemptReset(): boolean {
     const now = Date.now();
-    return now - this.lastFailureTime >= this.config.resetTimeoutMs;
+    const baseTimeout = this.config.resetTimeoutMs;
+    
+    // In web environments, use shorter timeout for faster recovery from CORS issues
+    const isWebEnvironment = typeof window !== 'undefined';
+    const timeoutMs = isWebEnvironment ? Math.min(baseTimeout, 5000) : baseTimeout; // 5 second timeout in web
+    
+    return now - this.lastFailureTime >= timeoutMs;
   }
 } 

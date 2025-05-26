@@ -11,7 +11,7 @@ export class CFConstants {
     SDK_NAME: 'CustomFitReactNativeSDK',
     
     /** Default SDK version */
-    DEFAULT_SDK_VERSION: '1.0.0',
+    DEFAULT_SDK_VERSION: '1.1.1',
     
     /** Logger name */
     LOGGER_NAME: 'CustomFitSDK',
@@ -22,13 +22,13 @@ export class CFConstants {
    */
   static readonly Api = {
     /** Base URL for the CustomFit API */
-    BASE_API_URL: 'https://api.customfit.ai/v1',
+    BASE_API_URL: 'https://api.customfit.ai',
     
     /** Base URL for SDK settings */
     SDK_SETTINGS_BASE_URL: 'https://sdk.customfit.ai',
     
     /** Path for user configurations */
-    USER_CONFIGS_PATH: '/users/configs',
+    USER_CONFIGS_PATH: '/v1/users/configs',
     
     /** Path pattern for SDK settings JSON file */
     SDK_SETTINGS_PATH_PATTERN: '/%s/cf-sdk-settings.json',
@@ -37,7 +37,7 @@ export class CFConstants {
     EVENTS_PATH: '/v1/cfe',
     
     /** Path for summary data */
-    SUMMARIES_PATH: '/v1/summary',
+    SUMMARIES_PATH: '/v1/config/request/summary',
     
     /** Path for config polling */
     CONFIG_POLL_PATH: '/v1/config',

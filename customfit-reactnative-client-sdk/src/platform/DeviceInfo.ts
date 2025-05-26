@@ -41,7 +41,7 @@ export class DeviceInfoUtil {
       const deviceInfo: DeviceInformation = {
         deviceId: await DeviceInfoUtil.getDeviceId(),
         platform: Platform.OS,
-        osVersion: Platform.Version.toString(),
+        osVersion: Platform.Version?.toString() || 'unknown',
         appVersion: await DeviceInfoUtil.getAppVersion(),
         buildNumber: await DeviceInfoUtil.getBuildNumber(),
         model: await DeviceInfoUtil.getModel(),
@@ -66,7 +66,7 @@ export class DeviceInfoUtil {
       const fallbackInfo: DeviceInformation = {
         deviceId: 'unknown',
         platform: Platform.OS,
-        osVersion: Platform.Version.toString(),
+        osVersion: Platform.Version?.toString() || 'unknown',
         appVersion: 'unknown',
         buildNumber: 'unknown',
         model: 'unknown',

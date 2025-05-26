@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Switch,
+  Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useCustomFit } from '../providers/CustomFitProvider';
@@ -23,7 +24,7 @@ const HomeScreen: React.FC = () => {
     const timeout = setTimeout(() => {
       if (!forceShowUI) {
         setForceShowUI(true);
-        console.log('⚠️ Timeout reached, forcing UI to show');
+        console.log('⚠️ Server loading timeout reached, showing UI with default values');
       }
     }, 10000);
 
@@ -58,14 +59,23 @@ const HomeScreen: React.FC = () => {
       platform: 'react_native'
     });
 
+    // Create a toast-like alert that auto-dismisses
+    const toastMessage = customFit.enhancedToast
+      ? 'Enhanced toast feature enabled!'
+      : 'Button clicked!';
+    
+    console.log(`🍞 Toast: ${toastMessage}`);
+    
+    // Show alert that mimics SnackBar behavior
     Alert.alert(
-      'Toast Message',
-      customFit.enhancedToast
-        ? 'Enhanced toast feature enabled!'
-        : 'Button clicked!',
+      'Toast',
+      toastMessage,
       [{ text: 'OK' }],
       { cancelable: true }
     );
+    
+    // Also log to console for demo purposes
+    console.log(`🚩 enhanced_toast flag is: ${customFit.enhancedToast}`);
   };
 
   const handleNavigateToSecond = async () => {
@@ -77,54 +87,72 @@ const HomeScreen: React.FC = () => {
       platform: 'react_native'
     });
 
-    navigation.navigate('SecondScreen' as never);
+    navigation.navigate('Second' as never);
   };
 
   const handleRefreshConfig = async () => {
     if (isRefreshing) return;
 
     setIsRefreshing(true);
+    console.log('🔄 Starting manual refresh...');
 
-    // Show loading alert
-    Alert.alert(
-      'Refreshing Configuration',
-      'Please wait...',
-      [],
-      { cancelable: false }
-    );
+    try {
+      // Use consistent event name pattern matching Android reference
+      const success = await customFit.refreshFeatureFlags('react_native_config_manual_refresh');
 
-    // Use consistent event name pattern matching Android reference
-    await customFit.refreshFeatureFlags('react_native_config_manual_refresh');
-
-    setIsRefreshing(false);
-
-    // Dismiss the loading alert and show success
-    setTimeout(() => {
+      if (success) {
+        console.log('✅ Refresh completed successfully');
+        
+        // Show success alert briefly
+        Alert.alert(
+          'Configuration Updated',
+          'Feature flags have been refreshed from server!',
+          [{ text: 'OK' }],
+          { cancelable: true }
+        );
+      } else {
+        console.log('⚠️ Refresh failed');
+        Alert.alert(
+          'Refresh Failed',
+          'Could not update configuration. Please try again.',
+          [{ text: 'OK' }],
+          { cancelable: true }
+        );
+      }
+    } catch (error) {
+      console.error('❌ Refresh error:', error);
       Alert.alert(
-        'Configuration Refreshed',
-        'Configuration has been updated successfully!',
+        'Error',
+        'An error occurred while refreshing configuration.',
         [{ text: 'OK' }],
         { cancelable: true }
       );
-    }, 100);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
-  if (!customFit.isInitialized && !forceShowUI) {
+    if (!customFit.isInitialized && !forceShowUI) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: '#f5f5f5', minHeight: Dimensions.get('window').height }]}>
         <ActivityIndicator size="large" color="#6200EE" />
-        <Text style={styles.loadingText}>Loading CustomFit...</Text>
+        <Text style={[styles.loadingText, { color: '#333', fontSize: 18, marginTop: 16 }]}>
+          Loading CustomFit from server...
+        </Text>
+        <Text style={[styles.loadingSubText, { color: '#666', fontSize: 14, marginTop: 8 }]}>
+          Fetching feature flags and configuration
+        </Text>
         <TouchableOpacity
-          style={styles.forceShowButton}
+          style={[styles.forceShowButton, { backgroundColor: '#6200EE', padding: 12, borderRadius: 8, marginTop: 16 }]}
           onPress={() => setForceShowUI(true)}>
-          <Text style={styles.forceShowButtonText}>Show UI anyway</Text>
+          <Text style={[styles.forceShowButtonText, { color: 'white', fontSize: 16 }]}>Show UI anyway</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { minHeight: Dimensions.get('window').height }]}>
       {/* Header with title and offline toggle */}
       <View style={styles.header}>
         <Text style={styles.title}>{customFit.heroText}</Text>
@@ -207,6 +235,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 18,
     color: '#333333',
+  },
+  loadingSubText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
   },
   forceShowButton: {
     marginTop: 16,

@@ -127,7 +127,7 @@ export class EventTracker {
       // Flush summaries before tracking a new event (like other SDKs)
       if (this.summaryManager) {
         Logger.info(`🔔 🔔 TRACK: Flushing summaries before tracking event: ${name}`);
-        const summaryResult = await this.summaryManager.flush();
+        const summaryResult = await this.summaryManager.flushSummaries();
         if (!summaryResult.isSuccess) {
           Logger.warning(`🔔 🔔 TRACK: Failed to flush summaries before tracking event: ${summaryResult.error?.message}`);
           ErrorHandler.handleError(
@@ -164,8 +164,6 @@ export class EventTracker {
     }
   }
 
-
-
   /**
    * Flush all events to the server
    */
@@ -173,7 +171,7 @@ export class EventTracker {
     // Always flush summaries first before flushing events (like other SDKs)
     if (this.summaryManager) {
       Logger.info('🔔 🔔 TRACK: Flushing summaries before flushing events');
-      const summaryResult = await this.summaryManager.flush();
+      const summaryResult = await this.summaryManager.flushSummaries();
       if (!summaryResult.isSuccess) {
         Logger.warning(`🔔 🔔 TRACK: Failed to flush summaries before flushing events: ${summaryResult.error?.message}`);
         ErrorHandler.handleError(
@@ -312,6 +310,14 @@ export class EventTracker {
     this.startFlushTimer();
 
     Logger.info(`🔔 EventTracker: Flush interval updated to ${intervalMs}ms`);
+  }
+
+  /**
+   * Reset circuit breaker to recover from connection issues
+   */
+  resetCircuitBreaker(): void {
+    this.httpClient.resetCircuitBreaker();
+    Logger.info('🔔 EventTracker: Circuit breaker reset');
   }
 
   private startFlushTimer(): void {

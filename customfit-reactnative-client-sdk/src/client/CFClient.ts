@@ -3,7 +3,6 @@ import {
   CFConfig, 
   CFUser, 
   EventData, 
-  SummaryData, 
   SdkSettings,
   ConnectionStatus,
   PerformanceMetrics,
@@ -98,7 +97,7 @@ export class CFClient {
     this.configFetcher = new ConfigFetcher(config);
     
     const httpClient = new HttpClient();
-    this.summaryManager = new SummaryManager(config, httpClient);
+    this.summaryManager = new SummaryManager(this.sessionId, httpClient, user, config);
     this.eventTracker = new EventTracker(config, httpClient, this.summaryManager);
     this.connectionMonitor = ConnectionMonitor.getInstance();
     this.appStateManager = AppStateManager.getInstance();
@@ -263,7 +262,7 @@ export class CFClient {
 
       // Start analytics components
       await this.eventTracker.start();
-      await this.summaryManager.start();
+      // SummaryManager starts automatically in constructor
 
       // Initialize SessionManager with configuration
       await this.initializeSessionManager();
@@ -311,8 +310,25 @@ export class CFClient {
     const value = this.currentConfigs[key] as T;
     const result = value !== undefined ? value : defaultValue;
 
-    // Track summary for feature flag access
-    this.summaryManager.trackFeatureFlagAccess(key, result);
+    // Track config access summary for all config accesses
+    if (value !== undefined) {
+      Logger.debug(`📊 CONFIG ACCESS: Tracking summary for key: ${key}, value: ${result}`);
+      Logger.debug(`📊 CONFIG ACCESS: configMetadata structure: ${JSON.stringify(this.configMetadata)}`);
+      
+      // Create config data structure matching Flutter/Kotlin pattern
+      const configData = {
+        key: key,
+        id: key,
+        config_id: key,
+        experience_id: key,
+        variation_id: key,
+        version: '1.0.0',
+      };
+      
+      this.summaryManager.pushSummary(configData).catch(error => {
+        Logger.warning(`Failed to track config summary for ${key}: ${error}`);
+      });
+    }
 
     Logger.debug(`🔧 CONFIG VALUE: ${key} = ${result}`);
     return result;
@@ -380,7 +396,7 @@ export class CFClient {
     }
 
     // Flush summaries before tracking event (like Kotlin SDK)
-    await this.summaryManager.flush();
+    await this.summaryManager.flushSummaries();
 
     // Create and track event
     const result = await this.eventTracker.trackEvent(
@@ -514,7 +530,7 @@ export class CFClient {
       return CFResult.errorWithMessage('SDK not initialized');
     }
 
-    return await this.summaryManager.flush();
+    return await this.summaryManager.flushSummaries();
   }
 
   /**
@@ -557,9 +573,7 @@ export class CFClient {
         
         // Update SummaryManager flush interval if changed
         if (newConfig.summariesFlushIntervalMs !== this.config.summariesFlushIntervalMs) {
-          // Note: SummaryManager doesn't currently have updateFlushInterval method
-          // This would need to be added to SummaryManager for full runtime config support
-          Logger.debug('🔧 SummaryManager flush interval would be updated here');
+          this.summaryManager.updateFlushInterval(newConfig.summariesFlushIntervalMs);
         }
         
         // Update EventTracker flush interval if changed
@@ -640,7 +654,7 @@ export class CFClient {
 
     // Stop all components
     await this.eventTracker.stop();
-    await this.summaryManager.stop();
+    this.summaryManager.shutdown();
     this.connectionMonitor.stopMonitoring();
     this.appStateManager.stopMonitoring();
 
@@ -896,6 +910,7 @@ export class CFClient {
       
       const result = await this.configFetcher.fetchUserConfigs(
         this.config.clientKey,
+        this.currentUser.toUserMap(),
         this.configMetadata?.lastModified,
         this.configMetadata?.etag
       );
@@ -1322,6 +1337,25 @@ export class CFClient {
       Logger.info(`🔧 Logging ${enabled ? 'enabled' : 'disabled'}`);
     } catch (e) {
       Logger.error(`Failed to update logging setting: ${e}`);
+    }
+  }
+
+  /**
+   * Reset circuit breakers to recover from connection issues
+   * This is useful when switching from offline to online mode or recovering from CORS issues
+   */
+  resetCircuitBreakers(): void {
+    try {
+      // Reset main API circuit breaker
+      this.configFetcher.resetCircuitBreaker();
+      
+      // Reset HTTP clients used by other components
+      this.eventTracker.resetCircuitBreaker();
+      // SummaryManager uses the same HttpClient instance
+      
+      Logger.info('🔧 Circuit breakers reset successfully');
+    } catch (e) {
+      Logger.error(`Failed to reset circuit breakers: ${e}`);
     }
   }
 }
