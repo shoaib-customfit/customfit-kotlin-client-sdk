@@ -274,9 +274,10 @@ export class CFClient {
       // Load cached configurations
       await this.loadCachedConfigs();
 
-      // Fetch fresh configurations if we're online
+      // Check SDK settings and refresh configs if needed (instead of direct refresh)
       if (!this.isOfflineMode && this.connectionMonitor.isConnected()) {
-        await this.refreshConfigurations();
+        Logger.info('🔧 Online during initialization, checking SDK settings for changes...');
+        await this.checkSdkSettings();
       }
 
       // Start background tasks
@@ -618,8 +619,9 @@ export class CFClient {
   resume(): void {
     this.setOfflineMode(false);
     this.startBackgroundPolling();
-    // Force refresh when resuming
-    this.refreshConfigurations();
+    // Check for changes instead of force refresh when resuming
+    Logger.info('🔧 SDK resumed, checking for configuration changes...');
+    this.checkSdkSettings();
     // Increment app launch count like Kotlin SDK
     this.incrementAppLaunchCount();
     Logger.info('🔧 CFClient resumed');
@@ -1003,8 +1005,10 @@ export class CFClient {
         Logger.info(`🔧 Connection status changed to: ${status}`);
         
         if (status === ConnectionStatus.CONNECTED && !this.isOfflineMode) {
-          // Try to refresh configs when connection is restored
-          this.refreshConfigurations();
+          // Trigger SDK settings check instead of direct config refresh
+          // This will only refresh configs if changes are detected
+          Logger.info('🔧 Connection restored, checking SDK settings for changes...');
+          this.checkSdkSettings();
         }
       }
     });
@@ -1088,8 +1092,9 @@ export class CFClient {
           if (!this.config.disableBackgroundPolling) {
             this.startBackgroundPolling();
           }
-          // Refresh configurations immediately when coming to foreground
-          this.refreshConfigurations();
+          // Check SDK settings for changes instead of direct config refresh
+          Logger.info('🔧 App foregrounded, checking SDK settings for changes...');
+          this.checkSdkSettings();
           // Notify SessionManager about foreground transition
           this.sessionManager?.onAppForeground();
           // Update session activity
