@@ -245,6 +245,14 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
     private suspend fun awaitSdkSettingsCheck() = sdkSettingsDeferred.await()
     
     /**
+     * Public method to wait for SDK initialization to complete
+     * This ensures that the SDK is fully ready to serve configuration values from the server
+     * 
+     * @return Unit if successful, throws exception if SDK settings initialization failed
+     */
+    suspend fun awaitInitialization() = sdkSettingsDeferred.await()
+    
+    /**
      * Set up background state monitoring
      */
     private fun setupBackgroundStateMonitoring() {
@@ -1117,6 +1125,8 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         private var isInitializing = false
         private var initializationDeferred: CompletableDeferred<CFClient>? = null
         
+
+        
         /**
          * Initialize or get the singleton instance of CFClient
          * This method ensures only one instance exists and handles concurrent initialization attempts
@@ -1203,6 +1213,8 @@ class CFClient private constructor(cfConfig: CFConfig, initialUser: CFUser) {
         fun isInitializing(): Boolean {
             return isInitializing
         }
+        
+
         
         /**
          * Shutdown and clear the singleton instance

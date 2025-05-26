@@ -5,6 +5,9 @@ import customfit.ai.kotlinclient.client.CFClient
 
 /**
  * Helper class for CFClient usage examples using the singleton pattern
+ * 
+ * Note: With the enhanced SDK, most listener management is now handled automatically.
+ * This helper provides convenience methods for common operations.
  */
 object CFHelper {
     
@@ -21,19 +24,70 @@ object CFHelper {
     }
     
     /**
-     * Record a simple event
+     * Check if the CFClient singleton is initialized
      */
-    fun recordSimpleEvent(eventName: String) {
-        try {
+    fun isInitialized(): Boolean {
+        return CFClient.isInitialized()
+    }
+    
+    /**
+     * Get the CFClient instance for direct access to instance methods
+     */
+    fun getCFClientInstance(): CFClient? {
+        return getCFClient()
+    }
+    
+    /**
+     * Get a string configuration value with a default fallback
+     */
+    fun getString(key: String, defaultValue: String): String {
+        return try {
             val client = getCFClient()
             if (client != null) {
-                client.trackEvent(eventName)
-                Log.d("CustomFit_SDK", "Recorded event: $eventName")
+                client.getString(key, defaultValue)
             } else {
-                Log.w("CustomFit_SDK", "Cannot record event: CFClient not initialized")
+                Log.d("CF_SDK", "CFClient not available, returning default value for $key")
+                defaultValue
             }
         } catch (e: Exception) {
-            Log.e("CustomFit_SDK", "Failed to record event: ${e.message}")
+            Log.e("CF_SDK", "Error getting string value for $key: ${e.message}")
+            defaultValue
+        }
+    }
+    
+    /**
+     * Get a boolean feature flag value with a default fallback
+     */
+    fun getFeatureFlag(key: String, defaultValue: Boolean): Boolean {
+        return try {
+            val client = getCFClient()
+            if (client != null) {
+                client.getBoolean(key, defaultValue)
+            } else {
+                Log.d("CF_SDK", "CFClient not available, returning default value for $key")
+                defaultValue
+            }
+        } catch (e: Exception) {
+            Log.e("CF_SDK", "Error getting boolean value for $key: ${e.message}")
+            defaultValue
+        }
+    }
+    
+    /**
+     * Get a number configuration value with a default fallback
+     */
+    fun getNumber(key: String, defaultValue: Number): Number {
+        return try {
+            val client = getCFClient()
+            if (client != null) {
+                client.getNumber(key, defaultValue)
+            } else {
+                Log.d("CF_SDK", "CFClient not available, returning default value for $key")
+                defaultValue
+            }
+        } catch (e: Exception) {
+            Log.e("CF_SDK", "Error getting number value for $key: ${e.message}")
+            defaultValue
         }
     }
     
@@ -45,127 +99,12 @@ object CFHelper {
             val client = getCFClient()
             if (client != null) {
                 client.trackEvent(eventName, properties)
-                Log.d("CustomFit_SDK", "Recorded event: $eventName with properties: $properties")
+                Log.d("CF_SDK", "Recorded event: $eventName")
             } else {
-                Log.w("CustomFit_SDK", "Cannot record event: CFClient not initialized")
+                Log.w("CF_SDK", "Cannot record event: CFClient not initialized")
             }
         } catch (e: Exception) {
-            Log.e("CustomFit_SDK", "Failed to record event: ${e.message}")
-        }
-    }
-    
-    /**
-     * Example of using feature flags
-     */
-    fun getFeatureFlag(flagName: String, defaultValue: Boolean): Boolean {
-        return try {
-            val client = getCFClient()
-            if (client != null) {
-                val value = client.getBoolean(flagName, defaultValue)
-                Log.d("CustomFit_SDK", "Feature flag $flagName: $value")
-                value
-            } else {
-                Log.w("CustomFit_SDK", "Cannot get feature flag: CFClient not initialized, returning default")
-                defaultValue
-            }
-        } catch (e: Exception) {
-            Log.e("CustomFit_SDK", "Failed to get feature flag: ${e.message}")
-            defaultValue
-        }
-    }
-    
-    /**
-     * Get a string configuration value
-     */
-    fun getString(key: String, defaultValue: String): String {
-        return try {
-            val client = getCFClient()
-            if (client != null) {
-                val value = client.getString(key, defaultValue)
-                Log.d("CF_SDK", "Config value $key: $value")
-                value
-            } else {
-                Log.w("CF_SDK", "Cannot get string config: CFClient not initialized, returning default")
-                defaultValue
-            }
-        } catch (e: Exception) {
-            Log.e("CF_SDK", "Failed to get string config: ${e.message}")
-            defaultValue
-        }
-    }
-    
-    /**
-     * Add a config listener that will be triggered when the config value changes
-     */
-    fun <T : Any> addConfigListener(key: String, listener: (T) -> Unit) {
-        try {
-            val client = getCFClient()
-            if (client != null) {
-                client.addConfigListener<T>(key, listener)
-                Log.d("CF_SDK", "Added config listener for $key")
-                
-                // Store the listener for potential cleanup
-                listeners[key] = listener
-            } else {
-                Log.w("CF_SDK", "Cannot add config listener: CFClient not initialized")
-            }
-        } catch (e: Exception) {
-            Log.e("CF_SDK", "Failed to add config listener: ${e.message}")
-        }
-    }
-    
-    // Store listeners to be able to remove them later
-    private val listeners = mutableMapOf<String, Any>()
-    
-    /**
-     * Remove config listeners for a specific key
-     */
-    fun removeConfigListenersByKey(key: String) {
-        try {
-            val client = getCFClient()
-            if (client != null) {
-                // Get the stored listener for this key
-                val listener = listeners[key]
-                if (listener != null) {
-                    // Clear the listeners for this key using the SDK's method
-                    client.clearConfigListeners(key)
-                    listeners.remove(key)
-                    Log.d("CF_SDK", "Removed config listeners for $key")
-                } else {
-                    Log.d("CF_SDK", "No listeners found for key $key")
-                }
-            } else {
-                Log.w("CF_SDK", "Cannot remove config listeners: CFClient not initialized")
-            }
-        } catch (e: Exception) {
-            Log.e("CF_SDK", "Failed to remove config listeners: ${e.message}")
-        }
-    }
-    
-    /**
-     * Check if the CFClient singleton is initialized
-     */
-    fun isInitialized(): Boolean {
-        return CFClient.isInitialized()
-    }
-    
-    /**
-     * Get all feature flags (if available)
-     */
-    fun getAllFlags(): Map<String, Any> {
-        return try {
-            val client = getCFClient()
-            if (client != null) {
-                val flags = client.getAllFlags()
-                Log.d("CF_SDK", "Retrieved ${flags.size} feature flags")
-                flags
-            } else {
-                Log.w("CF_SDK", "Cannot get all flags: CFClient not initialized")
-                emptyMap()
-            }
-        } catch (e: Exception) {
-            Log.e("CF_SDK", "Failed to get all flags: ${e.message}")
-            emptyMap()
+            Log.e("CF_SDK", "Error recording event $eventName: ${e.message}")
         }
     }
 } 

@@ -68,21 +68,47 @@ class ConfigManagerImpl(
         
         Timber.i("Loading configuration from cache...")
         
-        val (cachedConfig, cachedLastModified, cachedETag) = configCache.getCachedConfig()
-        
-        if (cachedConfig != null) {
-            Timber.i("Found cached configuration with ${cachedConfig.size} entries")
+        try {
+            val (cachedConfig, cachedLastModified, cachedETag) = configCache.getCachedConfig()
             
-            // Update the config map with cached values
-            updateConfigMap(cachedConfig)
-            
-            // Set metadata for future conditional requests
-            previousLastModified = cachedLastModified
-            previousETag = cachedETag
-            
-            Timber.i("Successfully initialized from cached configuration")
-        } else {
-            Timber.i("No cached configuration found, will wait for server response")
+            if (cachedConfig != null) {
+                Timber.i("Found cached configuration with ${cachedConfig.size} entries")
+                
+                // Validate the cached config structure before using it
+                val validConfig = cachedConfig.filterValues { value ->
+                    when (value) {
+                        is Map<*, *> -> value.containsKey("variation")
+                        else -> {
+                            Timber.w("Invalid cached config entry: ${value::class.simpleName}")
+                            false
+                        }
+                    }
+                }
+                
+                if (validConfig.isNotEmpty()) {
+                    // Update the config map with validated cached values
+                    updateConfigMap(validConfig)
+                    
+                    // Set metadata for future conditional requests
+                    previousLastModified = cachedLastModified
+                    previousETag = cachedETag
+                    
+                    Timber.i("Successfully initialized from cached configuration (${validConfig.size} valid entries)")
+                } else {
+                    Timber.w("No valid configuration entries found in cache")
+                }
+            } else {
+                Timber.i("No cached configuration found, will wait for server response")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load configuration from cache: ${e.message}")
+            // Clear corrupted cache on any error
+            try {
+                configCache.clearCache()
+                Timber.i("Cleared corrupted cache")
+            } catch (clearError: Exception) {
+                Timber.e(clearError, "Failed to clear corrupted cache: ${clearError.message}")
+            }
         }
         
         initialCacheLoadComplete.set(true)
@@ -548,19 +574,28 @@ class ConfigManagerImpl(
     }
     
     override suspend fun updateConfigMap(configs: Map<String, Any>) {
+        Timber.i("🔄 updateConfigMap called with ${configs.size} configs")
         val updatedKeys = mutableSetOf<String>()
         
         synchronized(configMap) {
+            Timber.i("🔄 Current configMap has ${configMap.size} entries")
             for (key in configs.keys) {
+                val oldValue = configMap[key]
+                val newValue = configs[key]
                 if (!configMap.containsKey(key) || configMap[key] != configs[key]) {
                     updatedKeys.add(key)
+                    Timber.i("🔄 Key '$key' marked as updated (old: $oldValue, new: $newValue)")
+                } else {
+                    Timber.d("🔄 Key '$key' unchanged")
                 }
             }
             configMap.clear()
             configMap.putAll(configs)
+            Timber.i("🔄 ConfigMap updated, now has ${configMap.size} entries")
         }
 
         // Log all updated keys and their new values
+        Timber.i("🔄 Found ${updatedKeys.size} updated keys: $updatedKeys")
         if (updatedKeys.isNotEmpty()) {
             Timber.i("--- UPDATED CONFIG VALUES ---")
             for (key in updatedKeys) {
@@ -568,29 +603,43 @@ class ConfigManagerImpl(
                 val variation = config?.get("variation")
                 if (variation != null) {
                     Timber.i("CONFIG UPDATE: $key: $variation")
+                    Timber.i("🔔 Notifying listeners for key: $key with value: $variation")
                     notifyListeners(key, variation)
+                } else {
+                    Timber.w("🔄 No variation found for key '$key', config: $config")
                 }
             }
+        } else {
+            Timber.w("🔄 No updated keys found, listeners will not be notified")
         }
         
         Timber.i("Configs updated successfully with ${configs.size} entries")
     }
     
     override fun notifyListeners(key: String, variation: Any) {
+        Timber.i("🔔 notifyListeners called for key: $key, value: $variation")
+        
         // Don't notify listeners if SDK functionality is disabled
         if (!isSdkFunctionalityEnabled.get()) {
             Timber.d("notifyListeners: SDK functionality is disabled, skipping listener notifications for '$key'")
             return
         }
         
+        Timber.i("🔔 SDK functionality enabled, proceeding with listener notifications")
+        
         // Delegate to listener manager
+        Timber.i("🔔 Calling listenerManager.notifyConfigListeners for key: $key")
         listenerManager.notifyConfigListeners(key, variation)
         
         // Notify feature flag listeners
+        Timber.i("🔔 Calling listenerManager.notifyFeatureFlagListeners for key: $key")
         listenerManager.notifyFeatureFlagListeners(key, variation)
         
         // Notify all flags listeners with all flags
+        Timber.i("🔔 Calling listenerManager.notifyAllFlagsListeners")
         listenerManager.notifyAllFlagsListeners(getAllFlags())
+        
+        Timber.i("🔔 Completed all listener notifications for key: $key")
     }
     
     override fun shutdown() {

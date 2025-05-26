@@ -75,13 +75,62 @@ class ConfigCache {
      * @return Triple containing configuration map, Last-Modified value, and ETag value
      */
     fun getCachedConfig(): Triple<Map<String, Any>?, String?, String?> {
-        // Retrieve config data
-        @Suppress("UNCHECKED_CAST")
-        val configMap = cacheManager.get<Map<String, Any>>(CONFIG_CACHE_KEY)
+        // Retrieve config data with safe casting
+        val configMap = try {
+            val cachedData = cacheManager.get<Any>(CONFIG_CACHE_KEY)
+            when (cachedData) {
+                is Map<*, *> -> {
+                    // Verify all keys are strings and values are of expected types
+                    if (cachedData.keys.all { it is String }) {
+                        @Suppress("UNCHECKED_CAST")
+                        cachedData as Map<String, Any>
+                    } else {
+                        Timber.w("Cached config data has non-string keys, ignoring cache")
+                        null
+                    }
+                }
+                null -> null
+                else -> {
+                    Timber.w("Cached config data is not a Map (found ${cachedData::class.simpleName}), clearing cache")
+                    cacheManager.remove(CONFIG_CACHE_KEY)
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to retrieve cached config data: ${e.message}")
+            // Clear corrupted cache
+            cacheManager.remove(CONFIG_CACHE_KEY)
+            null
+        }
         
-        // Get metadata if available
-        @Suppress("UNCHECKED_CAST")
-        val metadata = cacheManager.get<Map<String, String>>(METADATA_CACHE_KEY)
+        // Get metadata if available with safe casting
+        val metadata = try {
+            val cachedMetadata = cacheManager.get<Any>(METADATA_CACHE_KEY)
+            when (cachedMetadata) {
+                is Map<*, *> -> {
+                    // Verify all keys and values are strings
+                    if (cachedMetadata.keys.all { it is String } && 
+                        cachedMetadata.values.all { it is String }) {
+                        @Suppress("UNCHECKED_CAST")
+                        cachedMetadata as Map<String, String>
+                    } else {
+                        Timber.w("Cached metadata has invalid key/value types, ignoring")
+                        null
+                    }
+                }
+                null -> null
+                else -> {
+                    Timber.w("Cached metadata is not a Map (found ${cachedMetadata::class.simpleName}), clearing cache")
+                    cacheManager.remove(METADATA_CACHE_KEY)
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to retrieve cached metadata: ${e.message}")
+            // Clear corrupted cache
+            cacheManager.remove(METADATA_CACHE_KEY)
+            null
+        }
         
         val lastModified = metadata?.get("lastModified") ?: lastModifiedRef.get()
         val etag = metadata?.get("etag") ?: eTagRef.get()

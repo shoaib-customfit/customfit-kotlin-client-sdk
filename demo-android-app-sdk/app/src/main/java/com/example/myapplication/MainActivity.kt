@@ -6,6 +6,9 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private lateinit var myHeroText: TextView
@@ -23,103 +26,84 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private val enhancedToastListener: (Boolean) -> Unit = { isEnabled ->
+    private val enhancedToastListener: (Boolean) -> Unit = { newValue ->
+        // Update the enhanced toast setting on the main thread
         runOnUiThread {
-            enhancedToastEnabled = isEnabled
+            enhancedToastEnabled = newValue
             Toast.makeText(
                 this,
-                "Toast mode updated: ${if(isEnabled) "Enhanced" else "Standard"}",
+                "Configuration updated: enhanced_toast = $newValue",
                 Toast.LENGTH_SHORT
             ).show()
         }
     }
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
+        // Initialize views
         val showToastButton = findViewById<Button>(R.id.showToastButton)
         myHeroText = findViewById<TextView>(R.id.textView)
         
-        // Get a string config from CF and set it as text
-        updateHeroText()
+        // Set initial default values (will be updated by listeners when server values arrive)
+        myHeroText.text = "CF DEMO"
+        enhancedToastEnabled = false
         
-        // Update initial toast mode
-        updateToastMode()
-        
-        // Add config listeners to automatically update when values change
+        // Set up config listeners after a short delay to ensure CFClient is initialized
         setupConfigListeners()
         
-        val secondScreenButton = findViewById<Button>(R.id.secondScreenButton)
-        
-        // Add a refresh button to manually check for config updates
-        val refreshButton = findViewById<Button>(R.id.refreshButton)
-        refreshButton?.setOnClickListener {
-            // Force a refresh of the config
-            CFHelper.recordEventWithProperties("kotlin_config_manual_refresh", 
-                mapOf(
-                    "config_key" to "hero_text", 
-                    "refresh_source" to "user_action", 
-                    "screen" to "main",
-                    "platform" to "kotlin"
-                )
-            )
-            Toast.makeText(this, "Refreshing configuration...", Toast.LENGTH_SHORT).show()
-            updateHeroText()
-            updateToastMode()
-        }
-        
+        // Set up button listeners
         showToastButton.setOnClickListener {
-            // Record button click event with more specific tracking
-            CFHelper.recordEventWithProperties("kotlin_toast_button_interaction", 
-                mapOf(
-                    "action" to "click", 
-                    "feature" to "toast_message",
-                    "platform" to "kotlin"
-                )
-            )
-            
-            if (enhancedToastEnabled) {
-                Toast.makeText(this, "Enhanced toast feature enabled!", Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(this, "Button clicked!", Toast.LENGTH_SHORT).show()
-            }
+            showToast()
         }
         
+        val secondScreenButton = findViewById<Button>(R.id.secondScreenButton)
         secondScreenButton.setOnClickListener {
-            // Record navigation event with more specific tracking
-            CFHelper.recordEventWithProperties("kotlin_screen_navigation", 
-                mapOf(
-                    "from" to "main_screen", 
-                    "to" to "second_screen", 
-                    "user_flow" to "primary_navigation",
-                    "platform" to "kotlin"
-                )
-            )
             val intent = Intent(this, SecondActivity::class.java)
             startActivity(intent)
         }
     }
     
-    private fun updateHeroText() {
-        val heroText = CFHelper.getString("hero_text", "CF DEMO")
-        myHeroText.text = heroText
-    }
-    
-    private fun updateToastMode() {
-        enhancedToastEnabled = CFHelper.getFeatureFlag("enhanced_toast", false)
-    }
-    
     private fun setupConfigListeners() {
-        // Using the CFHelper to add the listeners
-        CFHelper.addConfigListener<String>("hero_text", heroTextListener)
-        CFHelper.addConfigListener<Boolean>("enhanced_toast", enhancedToastListener)
+        // Use lifecycleScope to wait for CFClient initialization
+        lifecycleScope.launch {
+            // Wait for CFClient to be initialized
+            var attempts = 0
+            while (!CFHelper.isInitialized() && attempts < 50) { // Max 5 seconds
+                delay(100)
+                attempts++
+            }
+            
+            if (CFHelper.isInitialized()) {
+                // CFClient is ready, register listeners using the existing instance methods
+                val client = CFHelper.getCFClientInstance()
+                client?.let {
+                    it.addConfigListener<String>("hero_text", heroTextListener)
+                    it.addConfigListener<Boolean>("enhanced_toast", enhancedToastListener)
+                    
+                    // Update UI with current values
+                    runOnUiThread {
+                        myHeroText.text = CFHelper.getString("hero_text", "CF DEMO")
+                        enhancedToastEnabled = CFHelper.getFeatureFlag("enhanced_toast", false)
+                    }
+                }
+            } else {
+                // Fallback: CFClient not ready, show message
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Configuration service not available", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
     
-    override fun onDestroy() {
-        super.onDestroy()
-        // Remove listeners when the activity is destroyed
-        CFHelper.removeConfigListenersByKey("hero_text")
-        CFHelper.removeConfigListenersByKey("enhanced_toast")
+    private fun showToast() {
+        val message = if (enhancedToastEnabled) {
+            "🎉 Enhanced Toast is ON! 🎉"
+        } else {
+            "Regular toast message"
+        }
+        
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 }

@@ -142,12 +142,22 @@ class ListenerManagerImpl : ListenerManager {
     }
     
     override fun notifyConfigListeners(key: String, value: Any) {
-        configListeners[key]?.forEach { listener ->
+        Timber.i("🔔 ListenerManager.notifyConfigListeners called for key: $key, value: $value")
+        val listeners = configListeners[key]
+        Timber.i("🔔 Found ${listeners?.size ?: 0} listeners for key: $key")
+        
+        listeners?.forEach { listener ->
             try {
+                Timber.i("🔔 Invoking listener for key: $key with value: $value")
                 listener(value)
+                Timber.i("🔔 Successfully invoked listener for key: $key")
             } catch (e: Exception) {
                 Timber.e(e, "Error notifying config listener for key $key: ${e.message}")
             }
+        }
+        
+        if (listeners == null || listeners.isEmpty()) {
+            Timber.w("🔔 No listeners found for key: $key")
         }
     }
     
