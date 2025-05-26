@@ -37,7 +37,7 @@ export class SummaryManager {
     this.currentUser = user;
     this.config = config;
     this.connectionMonitor = ConnectionMonitor.getInstance();
-
+    
     this.queueSize = config.summariesQueueSize || CFConstants.SummaryDefaults.QUEUE_SIZE;
     this.flushIntervalMs = config.summariesFlushIntervalMs || CFConstants.SummaryDefaults.FLUSH_INTERVAL_MS;
     this.flushTimeSeconds = config.summariesFlushTimeSeconds || CFConstants.SummaryDefaults.FLUSH_TIME_SECONDS;
@@ -77,7 +77,7 @@ export class SummaryManager {
       const message = `Config is not an object: ${config}`;
       Logger.warning(`📊 SUMMARY: ${message}`);
       return CFResult.errorWithMessage(message);
-    }
+  }
 
     // Validate required fields
     const experienceId = config.experience_id as string;
@@ -196,7 +196,7 @@ export class SummaryManager {
             sdk_type: "react-native",
             sdk_version: CFConstants.General.DEFAULT_SDK_VERSION
         };
-    }
+  }
     // Ensure platform is in properties, as per cURL and common practice
     if (!properties.platform) {
         properties.platform = "React Native";
@@ -214,7 +214,7 @@ export class SummaryManager {
     Object.keys(userPayload).forEach(key => {
       if (userPayload[key] === null || userPayload[key] === undefined) {
         delete userPayload[key];
-      }
+  }
     });
     // Also clean properties specifically, as it's a map that DTO initializes to empty if not given
     if (userPayload.properties) {
@@ -302,7 +302,7 @@ export class SummaryManager {
 
     if (requeueFailCount > 0) {
       Logger.error(`📊 SUMMARY: Failed to re-queue ${requeueFailCount} summaries after send failure`);
-    }
+  }
   }
 
   /**
@@ -311,10 +311,10 @@ export class SummaryManager {
   private startPeriodicFlush(): void {
     try {
       // Cancel existing timer
-      this.stopFlushTimer();
-
+    this.stopFlushTimer();
+    
       // Create new timer
-      this.flushTimer = setInterval(async () => {
+    this.flushTimer = setInterval(async () => {
         try {
           Logger.debug('📊 SUMMARY: Periodic flush triggered for summaries');
           await this.flushSummaries();
@@ -357,7 +357,7 @@ export class SummaryManager {
    */
   getSummaries(): Map<string, boolean> {
     return new Map(this.trackMap);
-  }
+        }
 
   /**
    * Get the current queue size

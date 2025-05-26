@@ -1,5 +1,5 @@
 import { CFResult } from '../../core/error/CFResult';
-import { EventData, CFConfig } from '../../core/types/CFTypes';
+import { EventData, CFConfig, CFUser } from '../../core/types/CFTypes';
 import { HttpClient } from '../../network/HttpClient';
 import { Storage } from '../../utils/Storage';
 import { Logger } from '../../logging/Logger';
@@ -19,18 +19,37 @@ export class EventTracker {
   private readonly httpClient: HttpClient;
   private readonly connectionMonitor: ConnectionMonitor;
   private readonly summaryManager?: SummaryManager;
+  private user: CFUser;
   private eventQueue: EventData[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private lastFlushTime: number = 0;
 
-  constructor(config: CFConfig, httpClient: HttpClient, summaryManager?: SummaryManager) {
+  constructor(config: CFConfig, httpClient: HttpClient, user: CFUser, summaryManager?: SummaryManager) {
     this.config = config;
     this.httpClient = httpClient;
+    this.user = user;
     this.connectionMonitor = ConnectionMonitor.getInstance();
     this.summaryManager = summaryManager;
     
     Logger.info(`🔔 🔔 TRACK: EventTracker initialized with queue size: ${config.eventsQueueSize}, flush interval: ${config.eventsFlushIntervalMs}ms`);
+  }
+
+  /**
+   * Format timestamp to match server expectations (yyyy-MM-dd HH:mm:ss.SSSX)
+   * Matches Kotlin SDK format: DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSX")
+   */
+  private formatTimestamp(timestamp: string): string {
+    // Convert ISO 8601 format "2025-05-26T17:00:15.291Z" to "2025-05-26 17:00:15.291Z"
+    return timestamp.replace('T', ' ');
+  }
+
+  /**
+   * Update user data for events
+   */
+  setUser(user: CFUser): void {
+    this.user = user;
+    Logger.debug('🔔 EventTracker: User updated');
   }
 
   /**
@@ -206,21 +225,64 @@ export class EventTracker {
     });
 
     try {
-      // Prepare events for API
-      const serializedEvents = eventsToFlush.map(event => EventDataUtil.serializeForAPI(event));
+      // Prepare events for API - match Kotlin SDK structure exactly
+      const serializedEvents = eventsToFlush.map(event => ({
+        event_customer_id: event.name,
+        event_type: event.eventType,
+        properties: event.properties || {},
+        event_timestamp: this.formatTimestamp(event.timestamp),
+        session_id: event.sessionId,
+        insert_id: event.id
+      }));
+      
+      // Build payload to match Kotlin SDK exactly
       const payload = {
         events: serializedEvents,
-        batch_timestamp: new Date().toISOString(),
+        user: this.user.toUserMap(),
+        cf_client_sdk_version: "1.1.1"
       };
       
+      // Debug logging for client key and token
+      Logger.info(`🔔 🔔 TRACK AUTH DEBUG: Client Key: ${this.config.clientKey ? 'Present' : 'MISSING'}`);
+      if (this.config.clientKey) {
+        Logger.info(`🔔 🔔 TRACK AUTH DEBUG: Client Key Preview: ${this.config.clientKey.substring(0, 10)}...`);
+        Logger.info(`🔔 🔔 TRACK AUTH DEBUG: Client Key Length: ${this.config.clientKey.length}`);
+        Logger.info(`🔔 🔔 TRACK AUTH DEBUG: Client Key Type: ${typeof this.config.clientKey}`);
+        Logger.info(`🔔 🔔 TRACK AUTH DEBUG: Client Key Valid Format: ${this.config.clientKey.includes('.') ? 'Yes (contains dots - looks like JWT)' : 'No (missing dots)'}`);
+      } else {
+        Logger.error(`🔔 🔔 TRACK AUTH DEBUG: CLIENT KEY IS MISSING!`);
+      }
+      
       Logger.debug(`🔔 🔔 TRACK HTTP: Event payload size: ${JSON.stringify(payload).length} bytes`);
-      Logger.debug(`🔔 🔔 TRACK HTTP: POST request to: ${CFConstants.Api.EVENTS_PATH}`);
+      
+      // Build URL with client key like other SDKs
+      const eventsPath = CFConstants.Api.EVENTS_PATH;
+      const pathWithClientKey = `${eventsPath}?cfenc=${this.config.clientKey}`;
+      
+      Logger.info(`🔔 🔔 TRACK HTTP: Events Path: ${eventsPath}`);
+      Logger.info(`🔔 🔔 TRACK HTTP: Path with client key: ${pathWithClientKey}`);
+      
+      // Validate the path will create a valid URL
+      try {
+        const testUrl = new URL(pathWithClientKey, CFConstants.Api.BASE_API_URL);
+        Logger.info(`🔔 🔔 TRACK HTTP: Final URL will be: ${testUrl.toString()}`);
+        Logger.info(`🔔 🔔 TRACK HTTP: URL Validation: VALID`);
+        Logger.info(`🔔 🔔 TRACK HTTP: URL Protocol: ${testUrl.protocol}`);
+        Logger.info(`🔔 🔔 TRACK HTTP: URL Host: ${testUrl.host}`);
+        Logger.info(`🔔 🔔 TRACK HTTP: URL Pathname: ${testUrl.pathname}`);
+        Logger.info(`🔔 🔔 TRACK HTTP: URL Search: ${testUrl.search}`);
+      } catch (error) {
+        Logger.error(`🔔 🔔 TRACK HTTP: URL Validation: INVALID - ${error}`);
+      }
+      
+      // Log payload details
       Logger.debug(`🔔 🔔 TRACK HTTP: Request headers: Content-Type=application/json`);
       const payloadStr = JSON.stringify(payload);
       Logger.debug(`🔔 🔔 TRACK HTTP: Request body preview: ${payloadStr.length > 200 ? payloadStr.substring(0, 200) + "..." : payloadStr}`);
+      Logger.info(`🔔 🔔 TRACK HTTP: Full payload structure: ${JSON.stringify(payload, null, 2)}`);
       
-      // Send to server
-      const result = await this.httpClient.post(CFConstants.Api.EVENTS_PATH, payload);
+      // Send to server with client key in URL
+      const result = await this.httpClient.post(pathWithClientKey, payload);
 
       if (result.isSuccess) {
         // Remove flushed events from queue

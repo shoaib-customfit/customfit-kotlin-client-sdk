@@ -328,3 +328,176 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 📧 Email: support@customfit.ai
 - 📖 Documentation: https://docs.customfit.ai
 - 🐛 Issues: https://github.com/customfit/react-native-sdk/issues 
+
+## API Endpoints & Configuration
+
+### Core API Endpoints
+
+The SDK uses the following API endpoints:
+
+- **Base URL**: `https://api.customfit.ai`
+- **User Configs**: `POST /v1/users/configs?cfenc={clientKey}`
+- **Events**: `POST /v1/cfe?cfenc={clientKey}`
+- **Summaries**: `POST /v1/summaries?cfenc={clientKey}`
+
+### Important Notes
+
+⚠️ **API Method**: The user configs endpoint uses `POST` method with user data as payload, not `GET` with Bearer token authorization.
+
+✅ **Correct Implementation**: 
+```typescript
+// POST /v1/users/configs?cfenc={clientKey}
+// Body: { user: userData }
+```
+
+❌ **Incorrect Implementation**:
+```typescript
+// GET /users/configs
+// Headers: { Authorization: "Bearer {token}" }
+```
+
+### Cross-Platform Consistency
+
+All SDKs (Kotlin, Flutter, Swift, React Native) use the same API endpoints and methods for consistency. If you experience issues:
+
+1. Verify the API endpoint configuration
+2. Check that POST method is used for user configs
+3. Ensure client key is passed as query parameter (`cfenc`)
+4. Confirm user data is sent in request body
+
+## Web Platform Support
+
+### React Native Web Integration
+
+The SDK supports React Native Web with additional configuration:
+
+#### Webpack Configuration
+
+```javascript
+// webpack.config.js
+const path = require('path');
+
+module.exports = {
+  // ... existing config
+  resolve: {
+    alias: {
+      'react-native$': 'react-native-web',
+      '@react-native-async-storage/async-storage': 
+        path.resolve(__dirname, 'src/polyfills/AsyncStoragePolyfill.js'),
+      '@react-native-community/netinfo': 
+        path.resolve(__dirname, 'src/polyfills/NetInfoPolyfill.js'),
+    },
+    extensions: ['.web.js', '.js', '.json', '.web.jsx', '.jsx'],
+  },
+  // CORS proxy for development
+  devServer: {
+    proxy: {
+      '/v1': {
+        target: 'https://api.customfit.ai',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
+  },
+};
+```
+
+#### Required Polyfills
+
+Create polyfills for React Native modules:
+
+**AsyncStorage Polyfill**:
+```typescript
+// src/polyfills/AsyncStoragePolyfill.js
+export default {
+  getItem: (key) => Promise.resolve(localStorage.getItem(key)),
+  setItem: (key, value) => Promise.resolve(localStorage.setItem(key, value)),
+  removeItem: (key) => Promise.resolve(localStorage.removeItem(key)),
+  clear: () => Promise.resolve(localStorage.clear()),
+};
+```
+
+**NetInfo Polyfill**:
+```typescript
+// src/polyfills/NetInfoPolyfill.js
+export default {
+  fetch: () => Promise.resolve({
+    isConnected: navigator.onLine,
+    type: navigator.onLine ? 'wifi' : 'none',
+  }),
+  addEventListener: (listener) => {
+    window.addEventListener('online', () => listener({ isConnected: true }));
+    window.addEventListener('offline', () => listener({ isConnected: false }));
+  },
+};
+```
+
+### CORS Considerations
+
+When running in web browsers, you may encounter CORS issues. Solutions:
+
+1. **Development**: Use webpack proxy (shown above)
+2. **Production**: Ensure your server has proper CORS headers
+3. **Troubleshooting**: Check browser console for CORS errors
+
+## Troubleshooting
+
+### Common Issues
+
+#### API Connection Problems
+
+**Symptoms**: 
+- Feature flags not updating
+- Connection timeouts
+- Circuit breaker in OPEN state
+
+**Solutions**:
+1. Verify API endpoint configuration
+2. Check internet connectivity
+3. Ensure correct client key format
+4. Review API method usage (POST vs GET)
+
+#### Web Platform Issues
+
+**Symptoms**:
+- Module resolution errors
+- AsyncStorage/NetInfo undefined
+- Webpack build failures
+
+**Solutions**:
+1. Add required polyfills
+2. Configure webpack aliases
+3. Check React Native Web compatibility
+
+#### Circuit Breaker Issues
+
+**Symptoms**:
+- Persistent offline state
+- Failed API calls not recovering
+
+**Solutions**:
+```typescript
+// Force refresh after fixing configuration
+await client.forceRefresh();
+
+// Check connection status
+const connectionInfo = client.getConnectionInformation();
+console.log('Connection status:', connectionInfo);
+```
+
+### Debug Mode
+
+Enable debug logging for detailed troubleshooting:
+
+```typescript
+const config = CFConfig.builder('your-client-key')
+  .debugLoggingEnabled(true)
+  .logLevel('DEBUG')
+  .build();
+```
+
+Debug logs include:
+- API request/response details
+- Circuit breaker state changes
+- Configuration updates
+- Network connectivity status

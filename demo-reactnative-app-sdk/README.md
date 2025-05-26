@@ -75,6 +75,65 @@ npm run android
 npm run ios
 ```
 
+#### Web Platform (NEW)
+```bash
+# Run in web browser using webpack
+npm run web
+```
+
+The web version includes:
+- **React Native Web integration** for cross-platform compatibility
+- **Real CustomFit SDK integration** (not mock)
+- **Webpack configuration** with CORS proxy for development
+- **Polyfills** for React Native modules (AsyncStorage, NetInfo)
+
+## Web Platform Setup
+
+### Prerequisites for Web
+
+- **Node.js** 18.0 or higher
+- **Modern web browser** (Chrome, Firefox, Safari, Edge)
+- **Internet connection** for CustomFit API access
+
+### Configuration Files
+
+The web setup includes these key files:
+
+#### `webpack.config.js`
+- React Native Web alias configuration
+- Module resolution for polyfills
+- CORS proxy for CustomFit API
+- Development server configuration
+
+#### `src/polyfills/`
+- `AsyncStoragePolyfill.js` - localStorage wrapper
+- `NetInfoPolyfill.js` - navigator.onLine wrapper
+
+### Running Web Version
+
+1. **Start the development server**:
+   ```bash
+   npm run web
+   ```
+
+2. **Open browser to**: `http://localhost:8080`
+
+3. **Features available**:
+   - Real-time feature flag updates
+   - Event tracking with `reactnative_*` prefixes
+   - Offline/online status detection
+   - Configuration refresh functionality
+
+### Web vs Mobile Differences
+
+| Feature | Mobile (iOS/Android) | Web Browser |
+|---------|---------------------|-------------|
+| **SDK Integration** | Real SDK (when compiled) | ✅ Real SDK |
+| **Storage** | AsyncStorage | localStorage (polyfill) |
+| **Network Detection** | NetInfo | navigator.onLine (polyfill) |
+| **CORS** | N/A | Webpack proxy |
+| **Platform Events** | `reactnative_*` | `reactnative_*` |
+
 ## App Architecture
 
 ### 📁 **Project Structure**
@@ -223,31 +282,98 @@ npm run ios
 
 ### Common Issues
 
-1. **Metro bundler issues**
+#### 1. Metro Bundler Issues
    ```bash
    npx react-native start --reset-cache
    ```
 
-2. **Navigation errors**
+#### 2. Navigation Errors
    ```bash
    # Make sure React Navigation dependencies are installed
    npm install @react-navigation/native @react-navigation/stack
    ```
 
-3. **Provider context errors**
+#### 3. Provider Context Errors
    - Ensure components are wrapped in `CustomFitProvider`
    - Check that `useCustomFit()` is called within provider scope
+
+#### 4. Web Platform Issues
+
+**CORS Errors**:
+```
+Access to fetch at 'https://api.customfit.ai/v1/users/configs' from origin 'http://localhost:8080' has been blocked by CORS policy
+```
+**Solution**: Webpack proxy is configured to handle this automatically.
+
+**Module Resolution Errors**:
+```
+Module not found: Can't resolve '@react-native-async-storage/async-storage'
+```
+**Solution**: Polyfills are configured in webpack to handle React Native modules.
+
+**API Connection Issues**:
+- Check browser network tab for failed requests
+- Verify webpack dev server is proxying `/v1` requests
+- Ensure CustomFit client key is valid
+
+#### 5. SDK Integration Issues
+
+**Feature flags not updating**:
+1. Check console for API errors
+2. Verify client key format
+3. Ensure user data is properly formatted
+4. Check circuit breaker status
+
+**Events not tracking**:
+1. Verify internet connection
+2. Check event payload format
+3. Review console for tracking confirmations
 
 ### Debug Mode
 
 The demo app includes comprehensive console logging:
+
+#### Mobile (iOS/Android)
+- Metro bundler console output
+- Device logs via React Native debugger
 - SDK initialization status
 - Feature flag updates
 - Event tracking confirmations  
+
+#### Web Browser
+- Browser console logs
+- Network tab for API requests/responses
 - Configuration changes
 - Error messages and stack traces
 
-Check the Metro bundler console or device logs for detailed information.
+**Enable Enhanced Debugging**:
+```typescript
+// In CustomFitProvider.tsx
+const config = CFConfig.builder(CLIENT_KEY)
+  .debugLoggingEnabled(true)
+  .loggingEnabled(true)
+  .build();
+```
+
+**Check Network Requests**:
+1. Open browser Developer Tools (F12)
+2. Go to Network tab
+3. Look for `/v1/users/configs` POST requests
+4. Verify request payload and response
+
+### Platform-Specific Debug Steps
+
+#### Web Platform
+1. Check browser console for errors
+2. Verify webpack proxy is working: `http://localhost:8080/v1/health`
+3. Test without proxy: Direct API calls may fail due to CORS
+4. Check localStorage for cached data
+
+#### Mobile Platform  
+1. Use React Native Debugger
+2. Check Metro bundler terminal output
+3. Verify device network connectivity
+4. Test on physical device vs simulator
 
 ## SDK Documentation
 

@@ -176,6 +176,18 @@ export class HttpClient {
       };
 
       Logger.trace(`Making ${options.method} request to ${url}`);
+      
+      // Add detailed logging for debugging
+      Logger.info(`🌐 HTTP REQUEST DEBUG:`);
+      Logger.info(`🌐 URL: ${url}`);
+      Logger.info(`🌐 METHOD: ${options.method}`);
+      Logger.info(`🌐 HEADERS: ${JSON.stringify(headers, null, 2)}`);
+      if (options.body) {
+        const bodyStr = options.body.toString();
+        Logger.info(`🌐 BODY SIZE: ${bodyStr.length} bytes`);
+        Logger.info(`🌐 BODY PREVIEW: ${bodyStr.length > 500 ? bodyStr.substring(0, 500) + '...' : bodyStr}`);
+      }
+      
       const response = await fetch(url, fetchOptions);
       
       clearTimeout(timeoutId);
@@ -197,12 +209,24 @@ export class HttpClient {
         try {
           const text = await response.text();
           data = text ? JSON.parse(text) : null;
+          
+          // Log response details
+          Logger.info(`🌐 HTTP RESPONSE DEBUG:`);
+          Logger.info(`🌐 STATUS: ${response.status} ${response.statusText}`);
+          Logger.info(`🌐 RESPONSE HEADERS: ${JSON.stringify(responseHeaders, null, 2)}`);
+          if (text) {
+            Logger.info(`🌐 RESPONSE BODY: ${text.length > 500 ? text.substring(0, 500) + '...' : text}`);
+          }
         } catch (error) {
           Logger.warning(`Failed to parse JSON response: ${error}`);
           data = null;
         }
       } else {
         data = await response.text();
+        Logger.info(`🌐 HTTP RESPONSE DEBUG:`);
+        Logger.info(`🌐 STATUS: ${response.status} ${response.statusText}`);
+        Logger.info(`🌐 RESPONSE HEADERS: ${JSON.stringify(responseHeaders, null, 2)}`);
+        Logger.info(`🌐 RESPONSE BODY (TEXT): ${data ? data.toString().substring(0, 500) : 'null'}`);
       }
 
       const httpResponse: HttpResponse = {
@@ -214,12 +238,15 @@ export class HttpClient {
 
       // Check if response indicates an error
       if (!response.ok) {
+        Logger.error(`🌐 HTTP ERROR: ${response.status}: ${response.statusText}`);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       return httpResponse;
     } catch (error: any) {
       clearTimeout(timeoutId);
+      
+      Logger.error(`🌐 HTTP REQUEST FAILED: ${error.message}`);
       
       if (error.name === 'AbortError') {
         throw new Error(`Request timeout after ${timeout}ms`);

@@ -28,6 +28,7 @@ jest.mock('../src/analytics/event/EventTracker', () => {
       trackEvent: jest.fn(() => Promise.resolve({ isSuccess: true })),
       flush: jest.fn(() => Promise.resolve({ isSuccess: true, data: 0 })),
       updateFlushInterval: jest.fn(),
+      setUser: jest.fn(),
     })),
   };
 });

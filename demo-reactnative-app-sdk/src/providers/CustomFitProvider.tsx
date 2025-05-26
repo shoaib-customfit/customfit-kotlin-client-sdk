@@ -4,7 +4,8 @@ import {
   CFConfig, 
   CFUser, 
   ConnectionStatus,
-  Logger
+  Logger,
+  CFConstants
 } from '@customfit/react-native-sdk';
 
 interface CustomFitContextType {
@@ -41,6 +42,7 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
   const [lastConfigChangeMessage, setLastConfigChangeMessage] = useState<string | null>(null);
   const [lastMessageTime, setLastMessageTime] = useState<Date | null>(null);
   const [client, setClient] = useState<CFClient | null>(null);
+  const initializationAttempted = React.useRef(false);
   
   // State for feature flags
   const [heroText, setHeroText] = useState<string>('CF DEMO');
@@ -58,6 +60,14 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
     (Date.now() - lastMessageTime.getTime()) < 5 * 60 * 1000; // 5 minutes
 
   const initialize = async () => {
+    // Prevent multiple initialization attempts
+    if (initializationAttempted.current) {
+      console.log('🔄 SDK initialization already attempted, skipping...');
+      return;
+    }
+    
+    initializationAttempted.current = true;
+    
     try {
       console.log('Initializing CustomFit SDK...');
       
@@ -67,9 +77,9 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
         .debugLoggingEnabled(true)
         .offlineMode(false)
         .disableBackgroundPolling(false)
-        .backgroundPollingIntervalMs(30000) // 30 seconds
+        .backgroundPollingIntervalMs(CFConstants.BackgroundPolling.BACKGROUND_POLLING_INTERVAL_MS) // Use default 1 hour
         .autoEnvAttributesEnabled(true)
-        .sdkSettingsCheckIntervalMs(2000)
+        .sdkSettingsCheckIntervalMs(CFConstants.BackgroundPolling.SDK_SETTINGS_CHECK_INTERVAL_MS) // Use default 5 minutes
         .summariesFlushTimeSeconds(5)
         .summariesFlushIntervalMs(5000)
         .eventsFlushTimeSeconds(30)
@@ -78,7 +88,7 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
         .networkReadTimeoutMs(10000)
         .logLevel('DEBUG')
         .build();
-
+      
       // Create user using builder pattern - similar to Flutter app
       const user = CFUser.builder(`react_native_user_${Date.now()}`)
         .anonymousId(`anon-${Date.now()}`)
@@ -141,10 +151,10 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
 
     console.log(`Initial values: heroText=${initialHeroText}, enhancedToast=${initialEnhancedToast}`);
 
-    setFeatureFlags({
-      'hero_text': { variation: initialHeroText },
-      'enhanced_toast': { variation: initialEnhancedToast },
-    });
+      setFeatureFlags({
+        'hero_text': { variation: initialHeroText },
+        'enhanced_toast': { variation: initialEnhancedToast },
+      });
   };
 
   const setupConfigListeners = (cfClient: CFClient) => {
@@ -244,8 +254,8 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
       // Values will be updated through listeners
       console.log('✅ Feature flags refreshed successfully from server');
       setLastConfigChangeMessage('Configuration manually refreshed');
-      setLastMessageTime(new Date());
-      return true;
+    setLastMessageTime(new Date());
+    return true;
     } else {
       console.log('⚠️ Failed to refresh flags');
       return false;
@@ -253,7 +263,10 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
   };
 
   useEffect(() => {
-    initialize();
+    // Only initialize once
+    if (!initializationAttempted.current) {
+      initialize();
+    }
     
     // Cleanup on unmount
     return () => {
@@ -267,7 +280,7 @@ export const CustomFitProvider: React.FC<CustomFitProviderProps> = ({ children }
         client.shutdown();
       }
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs only once
 
   const value: CustomFitContextType = {
     isInitialized,

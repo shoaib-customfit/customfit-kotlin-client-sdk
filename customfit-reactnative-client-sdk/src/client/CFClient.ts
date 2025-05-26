@@ -74,8 +74,7 @@ export class CFClient {
   private allFlagsListeners: Set<AllFlagsChangeListener> = new Set();
   private connectionListeners: Set<ConnectionStatusListener> = new Set();
 
-  // Timers
-  private configPollTimer: NodeJS.Timeout | null = null;
+  // Background polling timers
   private sdkSettingsCheckTimer: NodeJS.Timeout | null = null;
 
   // Metrics
@@ -98,7 +97,7 @@ export class CFClient {
     
     const httpClient = new HttpClient();
     this.summaryManager = new SummaryManager(this.sessionId, httpClient, user, config);
-    this.eventTracker = new EventTracker(config, httpClient, this.summaryManager);
+    this.eventTracker = new EventTracker(config, httpClient, this.currentUser, this.summaryManager);
     this.connectionMonitor = ConnectionMonitor.getInstance();
     this.appStateManager = AppStateManager.getInstance();
     this.environmentCollector = EnvironmentAttributesCollector.getInstance();
@@ -489,6 +488,7 @@ export class CFClient {
    */
   setUser(user: CFUser): void {
     this.currentUser = user;
+    this.eventTracker.setUser(user);
     Logger.info('🔧 User updated');
   }
 
@@ -876,17 +876,72 @@ export class CFClient {
     }
 
     try {
+      const previousSettings = this.sdkSettings;
       const result = await this.configFetcher.checkSdkSettings(this.config.dimensionId);
       
       if (result.isSuccess) {
         this.sdkSettings = result.data || null;
         Logger.debug(`🔧 SDK settings checked: ${JSON.stringify(this.sdkSettings)}`);
+        
+        // Only refresh configurations if SDK settings indicate a change
+        if (this.hasConfigurationChanged(previousSettings, this.sdkSettings)) {
+          Logger.info('🔧 SDK settings indicate config changes detected, refreshing configurations...');
+          await this.refreshConfigurations();
+        } else {
+          Logger.debug('🔧 No configuration changes detected from SDK settings');
+        }
       } else {
         Logger.warning(`🔧 Failed to check SDK settings: ${result.error?.message}`);
       }
     } catch (error) {
       Logger.error(`🔧 Exception checking SDK settings: ${error}`);
     }
+  }
+
+  /**
+   * Check if configuration has changed based on SDK settings
+   */
+  private hasConfigurationChanged(previousSettings: any, currentSettings: any): boolean {
+    // If this is the first check, always refresh
+    if (!previousSettings && currentSettings) {
+      Logger.debug('🔧 First SDK settings check, triggering config refresh');
+      return true;
+    }
+
+    // If settings are missing, don't refresh
+    if (!currentSettings) {
+      Logger.debug('🔧 No current SDK settings, skipping config refresh');
+      return false;
+    }
+
+    // Compare relevant fields that would indicate config changes
+    if (previousSettings) {
+      // Check if any relevant fields have changed
+      const fieldsToCheck = ['lastModified', 'version', 'configVersion', 'hash', 'timestamp'];
+      
+      for (const field of fieldsToCheck) {
+        if (previousSettings[field] !== currentSettings[field]) {
+          Logger.info(`🔧 Configuration change detected in field '${field}': ${previousSettings[field]} -> ${currentSettings[field]}`);
+          return true;
+        }
+      }
+      
+      // Check if the entire object structure has changed
+      const prevJson = JSON.stringify(previousSettings);
+      const currJson = JSON.stringify(currentSettings);
+      
+      if (prevJson !== currJson) {
+        Logger.info('🔧 Configuration change detected in SDK settings structure');
+        return true;
+      }
+      
+      Logger.debug('🔧 No changes detected in SDK settings');
+      return false;
+    }
+
+    // If we can't compare, be conservative and refresh
+    Logger.debug('🔧 Cannot compare SDK settings, defaulting to refresh');
+    return true;
   }
 
   private async loadCachedConfigs(): Promise<void> {
@@ -956,45 +1011,27 @@ export class CFClient {
   }
 
   private startBackgroundPolling(): void {
-    // Get battery-aware polling intervals
+    // Get battery-aware polling interval for SDK settings only
     const sdkSettingsInterval = this.appStateManager.getPollingInterval(
       this.config.sdkSettingsCheckIntervalMs,
       this.config.reducedPollingIntervalMs,
       this.config.useReducedPollingWhenBatteryLow
     );
 
-    const configPollingInterval = this.appStateManager.getPollingInterval(
-      this.config.backgroundPollingIntervalMs,
-      this.config.reducedPollingIntervalMs,
-      this.config.useReducedPollingWhenBatteryLow
-    );
-
-    // SDK settings check timer
+    // Only use SDK settings check timer - config refresh is now triggered by change detection
     this.sdkSettingsCheckTimer = setInterval(async () => {
       if (!this.isOfflineMode && this.connectionMonitor.isConnected()) {
         await this.checkSdkSettings();
       }
     }, sdkSettingsInterval);
 
-    // Config polling timer
-    this.configPollTimer = setInterval(async () => {
-      if (!this.isOfflineMode && this.connectionMonitor.isConnected()) {
-        await this.refreshConfigurations();
-      }
-    }, configPollingInterval);
-
-    Logger.debug(`🔧 Background polling started (SDK settings: ${sdkSettingsInterval}ms, Config: ${configPollingInterval}ms)`);
+    Logger.debug(`🔧 Background polling started (SDK settings check: ${sdkSettingsInterval}ms, config refresh: triggered by changes)`);
   }
 
   private stopBackgroundPolling(): void {
     if (this.sdkSettingsCheckTimer) {
       clearInterval(this.sdkSettingsCheckTimer);
       this.sdkSettingsCheckTimer = null;
-    }
-
-    if (this.configPollTimer) {
-      clearInterval(this.configPollTimer);
-      this.configPollTimer = null;
     }
 
     Logger.debug('🔧 Background polling stopped');

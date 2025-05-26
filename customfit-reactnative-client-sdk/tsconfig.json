@@ -14,7 +14,6 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./lib",
-    "rootDir": "./src",
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": false,
@@ -31,14 +30,11 @@
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "__tests__/**/*"
   ],
   "exclude": [
     "node_modules",
-    "lib",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "**/*.spec.ts",
-    "**/*.spec.tsx"
+    "lib"
   ]
 } 
