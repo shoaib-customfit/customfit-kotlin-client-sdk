@@ -398,7 +398,7 @@ struct ContentView: View {
                     }
                 }
                 .padding()
-                .background(Color(NSColor.controlBackgroundColor))
+                .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
                 .padding(.horizontal)
                 
@@ -418,7 +418,7 @@ struct ContentView: View {
                         }
                     }
                     .padding()
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(Color.gray.opacity(0.1))
                     .cornerRadius(8)
                     .padding(.horizontal)
                 }
