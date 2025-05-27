@@ -24,8 +24,9 @@ class CFHelper: ObservableObject {
             return
         }
         
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         client.trackEvent(name: eventName)
-        print("📊 Recorded event: \(eventName)")
+        print("📊 EVENT TRACKED: \(eventName) at \(timestamp)")
     }
     
     static func recordEventWithProperties(_ eventName: String, properties: [String: Any]) {
@@ -34,8 +35,16 @@ class CFHelper: ObservableObject {
             return
         }
         
-        client.trackEvent(name: eventName, properties: properties)
-        print("📊 Recorded event: \(eventName) with properties: \(properties)")
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        var enrichedProperties = properties
+        enrichedProperties["sdk_version"] = "1.0.0"
+        enrichedProperties["sdk_type"] = "swift"
+        enrichedProperties["event_timestamp"] = timestamp
+        
+        client.trackEvent(name: eventName, properties: enrichedProperties)
+        print("📊 EVENT TRACKED: \(eventName)")
+        print("   📋 Properties: \(enrichedProperties)")
+        print("   ⏰ Timestamp: \(timestamp)")
     }
     
     static func getFeatureFlag(_ flagName: String, defaultValue: Bool) -> Bool {
@@ -103,6 +112,7 @@ class CustomFitProvider: ObservableObject {
     @Published var initializationError: String?
     @Published var lastConfigChangeMessage: String?
     @Published var hasNewConfigMessage = false
+    @Published var recentEvents: [String] = []
     
     private var lastMessageTime: Date?
     
@@ -202,6 +212,18 @@ class CustomFitProvider: ObservableObject {
     
     func trackEvent(_ eventName: String, properties: [String: Any] = [:]) {
         CFHelper.recordEventWithProperties(eventName, properties: properties)
+        
+        // Add to recent events for display
+        DispatchQueue.main.async {
+            let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+            let eventString = "\(timestamp): \(eventName)"
+            self.recentEvents.insert(eventString, at: 0)
+            
+            // Keep only last 5 events
+            if self.recentEvents.count > 5 {
+                self.recentEvents = Array(self.recentEvents.prefix(5))
+            }
+        }
     }
     
     func refreshFeatureFlags(_ eventName: String? = nil) {
@@ -248,7 +270,7 @@ struct CustomFitDemoApp: App {
     var body: some Scene {
         WindowGroup("CustomFit Demo") {
             ContentView()
-                .frame(width: 400, height: 500)
+                .frame(width: 400, height: 700)
         }
     }
 }
@@ -261,6 +283,7 @@ struct ContentView: View {
     @State private var showingSecondScreen = false
     @State private var isRefreshing = false
     @State private var forceShowUI = false
+    @State private var showConfigChangeNotifications = false // New setting to control auto-alerts
     
     var body: some View {
         VStack(spacing: 20) {
@@ -291,13 +314,18 @@ struct ContentView: View {
                         customFitProvider.trackEvent("swift_toast_button_interaction", properties: [
                             "action": "click",
                             "feature": "toast_message",
-                            "platform": "swift"
+                            "platform": "swift",
+                            "enhanced_toast_enabled": customFitProvider.enhancedToast,
+                            "hero_text": customFitProvider.heroText,
+                            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
                         ])
                         
                         alertMessage = customFitProvider.enhancedToast 
-                            ? "Enhanced toast feature enabled!" 
-                            : "Button clicked!"
+                            ? "✨ Enhanced toast feature enabled! Current hero text: '\(customFitProvider.heroText)'" 
+                            : "📱 Standard toast clicked! Current hero text: '\(customFitProvider.heroText)'"
                         showingAlert = true
+                        
+                        print("🎯 USER ACTION: Toast button clicked - Enhanced: \(customFitProvider.enhancedToast)")
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(width: 200)
@@ -309,8 +337,12 @@ struct ContentView: View {
                             "from": "main_screen",
                             "to": "second_screen",
                             "user_flow": "primary_navigation",
-                            "platform": "swift"
+                            "platform": "swift",
+                            "hero_text": customFitProvider.heroText,
+                            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
                         ])
+                        
+                        print("🎯 USER ACTION: Navigation to second screen")
                         showingSecondScreen = true
                     }
                     .buttonStyle(.bordered)
@@ -324,19 +356,72 @@ struct ContentView: View {
                             // Use EXACT same event name as Android
                             customFitProvider.refreshFeatureFlags("swift_config_manual_refresh")
                             
-                            alertMessage = "Refreshing configuration..."
-                            showingAlert = true
+                            print("🎯 USER ACTION: Manual config refresh triggered")
                             
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                                 isRefreshing = false
+                                alertMessage = "✅ Configuration refreshed successfully!"
+                                showingAlert = true
                             }
                         }
                     }
                     .buttonStyle(.bordered)
                     .frame(width: 200)
                     .disabled(isRefreshing)
+                    
+                    // Toggle for config change notifications (for debugging)
+                    Toggle("Show Config Change Alerts", isOn: $showConfigChangeNotifications)
+                        .padding(.top)
+                        .font(.caption)
                 }
                 .padding()
+                
+                // Current config status display
+                VStack(spacing: 8) {
+                    Text("Current Configuration:")
+                        .font(.headline)
+                        .padding(.top)
+                    
+                    Text("Hero Text: \(customFitProvider.heroText)")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    
+                    Text("Enhanced Toast: \(customFitProvider.enhancedToast ? "✅ Enabled" : "❌ Disabled")")
+                        .font(.body)
+                        .foregroundColor(customFitProvider.enhancedToast ? .green : .red)
+                    
+                    if let lastMessage = customFitProvider.lastConfigChangeMessage {
+                        Text("Last Update: \(lastMessage)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(8)
+                .padding(.horizontal)
+                
+                // Recent events display
+                if !customFitProvider.recentEvents.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("Recent Events Tracked:")
+                            .font(.headline)
+                            .padding(.top)
+                        
+                        ForEach(customFitProvider.recentEvents, id: \.self) { event in
+                            Text(event)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
+                }
             }
             
             Spacer()
@@ -351,7 +436,7 @@ struct ContentView: View {
             SecondScreen(customFitProvider: customFitProvider)
         }
         .onAppear {
-            // Add safety timeout like other apps
+            // Add safety timeout like other apps but don't show alert automatically
             DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                 if !forceShowUI {
                     forceShowUI = true
@@ -360,9 +445,14 @@ struct ContentView: View {
             }
         }
         .onChange(of: customFitProvider.hasNewConfigMessage) { hasNew in
-            if hasNew && customFitProvider.lastConfigChangeMessage != nil {
-                alertMessage = customFitProvider.lastConfigChangeMessage!
+            // Only show automatic config change alerts if the toggle is enabled
+            if hasNew && customFitProvider.lastConfigChangeMessage != nil && showConfigChangeNotifications {
+                alertMessage = "🔄 " + customFitProvider.lastConfigChangeMessage!
                 showingAlert = true
+                customFitProvider.hasNewConfigMessage = false
+            } else if hasNew {
+                // Just log the change but don't show alert
+                print("🔄 CONFIG CHANGE: \(customFitProvider.lastConfigChangeMessage ?? "unknown")")
                 customFitProvider.hasNewConfigMessage = false
             }
         }
