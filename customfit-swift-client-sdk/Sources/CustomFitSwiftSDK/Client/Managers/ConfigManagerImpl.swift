@@ -36,6 +36,9 @@ public class ConfigManagerImpl: ConfigManager {
     // Track whether SDK functionality is currently enabled (like Kotlin)
     private var isSdkFunctionalityEnabled: Bool = true
     
+    /// Current session ID for summary tracking
+    private var currentSessionId: String?
+    
     // MARK: - Initialization
     
     public init(
@@ -44,20 +47,24 @@ public class ConfigManagerImpl: ConfigManager {
         listenerManager: ListenerManager,
         config: CFConfig,
         summaryManager: SummaryManager,
-        backgroundStateMonitor: BackgroundStateMonitor? = nil
+        backgroundStateMonitor: BackgroundStateMonitor? = nil,
+        sessionId: String? = nil
     ) {
         self.config = config
-        self.configCache = ConfigCache()
         self.configFetcher = configFetcher
         self.clientQueue = clientQueue
         self.listenerManager = listenerManager
         self.summaryManager = summaryManager
         self.backgroundStateMonitor = backgroundStateMonitor
+        self.currentSessionId = sessionId ?? UUID().uuidString
         
-        // Load cached flags asynchronously like Kotlin does
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.loadFromCache()
-        }
+        // Initialize cache
+        self.configCache = ConfigCache()
+        
+        // Load cached configurations immediately
+        loadFromCache()
+        
+        Logger.info("ConfigManager initialized with session ID: \(self.currentSessionId ?? "unknown")")
     }
     
     /// Initialize with basic dependencies
@@ -118,6 +125,12 @@ public class ConfigManagerImpl: ConfigManager {
     ///   - typeCheck: Function to verify the type is correct
     /// - Returns: Config value or fallback value
     public func getConfigValue<T>(key: String, fallbackValue: T, typeCheck: (Any) -> Bool) -> T {
+        // If SDK functionality is disabled, return the fallback value
+        if !isSdkFunctionalityEnabled {
+            Logger.debug("getConfigValue: SDK functionality is disabled, returning fallback for key '\(key)'")
+            return fallbackValue
+        }
+        
         // If specific value exists and is of correct type
         if let configData = configMap[key] as? [String: Any], 
            let variation = configData["variation"] {
@@ -126,40 +139,41 @@ public class ConfigManagerImpl: ConfigManager {
                 // The variation is valid, so we can safely cast it
                 Logger.info("🔧 CONFIG VALUE: \(key): \(variation)")
                 
-                // Track summary for this config access (like Kotlin does)
+                // Track summary for this config access using pushSummary (like Kotlin does)
                 if let summaryManager = summaryManager {
-                    // Extract experience and config IDs for summary tracking
-                    if let experienceId = configData["experience_id"] as? String,
-                       let configId = configData["config_id"] as? String {
-                        
-                        // Create summary data for this config access
-                        let summaryData = SummaryData(
-                            name: "config_access",
-                            count: 1,
-                            properties: [
-                                "config_key": key,
-                                "experience_id": experienceId,
-                                "config_id": configId,
-                                "variation": variation
-                            ]
-                        )
-                        
-                        let result = summaryManager.trackSummary(summary: summaryData)
-                        if case .success = result {
-                            Logger.debug("📊 SUMMARY: Summary tracked for key: \(key)")
-                        }
-                    } else {
-                        // If experience/config IDs are missing, track a basic config access summary
-                        let summaryData = SummaryData(
-                            name: "config_access",
-                            count: 1,
-                            properties: [
-                                "config_key": key,
-                                "variation": variation
-                            ]
-                        )
-                        _ = summaryManager.trackSummary(summary: summaryData)
-                        Logger.debug("📊 SUMMARY: Summary tracked for key: \(key)")
+                    // Create a config map with required fields for summary tracking
+                    var configMapWithKey = configData
+                    configMapWithKey["key"] = key
+                    
+                    // Generate a consistent experience_id based on the config key and session
+                    // This ensures that the same config key in the same session always has the same experience_id
+                    let baseId = configData["id"] as? String ?? key
+                    let sessionIdHash = String(currentSessionId?.hash ?? 0)
+                    let consistentExperienceId = "\(baseId)_\(sessionIdHash.suffix(8))"
+                    
+                    // Ensure required fields are present with consistent values
+                    if configMapWithKey["experience_id"] == nil {
+                        configMapWithKey["experience_id"] = consistentExperienceId
+                    }
+                    
+                    // Add default values for other required fields if missing
+                    if configMapWithKey["config_id"] == nil {
+                        configMapWithKey["config_id"] = baseId
+                    }
+                    
+                    if configMapWithKey["variation_id"] == nil {
+                        configMapWithKey["variation_id"] = baseId
+                    }
+                    
+                    if configMapWithKey["version"] == nil {
+                        configMapWithKey["version"] = "1.0.0"
+                    }
+                    
+                    Logger.debug("📊 SUMMARY: Pushing summary for key '\(key)' with experience_id: \(configMapWithKey["experience_id"] ?? "nil")")
+                    
+                    let summaryResult = summaryManager.pushSummary(config: configMapWithKey)
+                    if case .error(let message, _, _, _) = summaryResult {
+                        Logger.warning("Failed to push summary for key '\(key)': \(message)")
                     }
                 }
                 
@@ -167,13 +181,13 @@ public class ConfigManagerImpl: ConfigManager {
             } else {
                 // Type check failed, log warning and return fallback
                 Logger.warning("Type check failed for '\(key)': \(variation)")
-                Logger.info("Using fallback value for '\(key)': \(fallbackValue)")
+                Logger.info("🔧 CONFIG VALUE: \(key): \(fallbackValue) (using fallback due to type mismatch)")
                 return fallbackValue
             }
         }
         
         // If no config exists for this key, return fallback value
-        Logger.info("No config found for key '\(key)', using fallback value: \(fallbackValue)")
+        Logger.info("🔧 CONFIG VALUE: \(key): \(fallbackValue) (using fallback)")
         return fallbackValue
     }
     
@@ -235,7 +249,7 @@ public class ConfigManagerImpl: ConfigManager {
         let dimensionId = config.dimensionId ?? ""
         let sdkSettingsUrl = "\(CFConstants.Api.SDK_SETTINGS_BASE_URL)/\(dimensionId)/cf-sdk-settings.json"
         
-        Logger.info("📡 Checking SDK settings at: \(sdkSettingsUrl)")
+        Logger.debug("📡 Checking SDK settings at: \(sdkSettingsUrl)")
         
         // Skip if we're in offline mode
         if config.offlineMode {
@@ -253,7 +267,7 @@ public class ConfigManagerImpl: ConfigManager {
             return
         }
         
-        Logger.info("📡 API POLL: Received metadata - Last-Modified: \(metadata[CFConstants.Http.HEADER_LAST_MODIFIED] ?? "none"), ETag: \(metadata[CFConstants.Http.HEADER_ETAG] ?? "none")")
+        Logger.debug("📡 API POLL: Received metadata - Last-Modified: \(metadata[CFConstants.Http.HEADER_LAST_MODIFIED] ?? "none"), ETag: \(metadata[CFConstants.Http.HEADER_ETAG] ?? "none")")
         
         // Use metadata for conditional fetching
         let currentLastModified = metadata[CFConstants.Http.HEADER_LAST_MODIFIED]
@@ -269,7 +283,7 @@ public class ConfigManagerImpl: ConfigManager {
         
         // STEP 2: Fetch full SDK settings if needed (like Kotlin does)
         if needsFullSettingsFetch {
-            Logger.info("📡 API POLL: Fetching full SDK settings with GET: \(sdkSettingsUrl)")
+            Logger.debug("📡 API POLL: Fetching full SDK settings with GET: \(sdkSettingsUrl)")
             let settingsResult = await configFetcher.fetchSdkSettingsWithMetadata(url: URL(string: sdkSettingsUrl)!)
             
             guard case .success(let data) = settingsResult else {
@@ -280,7 +294,7 @@ public class ConfigManagerImpl: ConfigManager {
             }
             
             let (freshMetadata, freshSettings) = data
-            Logger.info("📡 API POLL: Received metadata - Last-Modified: \(freshMetadata[CFConstants.Http.HEADER_LAST_MODIFIED] ?? "none"), ETag: \(freshMetadata[CFConstants.Http.HEADER_ETAG] ?? "none")")
+            Logger.debug("📡 API POLL: Received metadata - Last-Modified: \(freshMetadata[CFConstants.Http.HEADER_LAST_MODIFIED] ?? "none"), ETag: \(freshMetadata[CFConstants.Http.HEADER_ETAG] ?? "none")")
             
             // STEP 3: Store the settings and check account enablement (like Kotlin does)
             if let freshSettings = freshSettings {
@@ -299,21 +313,21 @@ public class ConfigManagerImpl: ConfigManager {
                 } else {
                     // Account is enabled and SDK should not be skipped
                     isSdkFunctionalityEnabled = true
-                    Logger.info("🔧 SDK SETTINGS: Account enabled and SDK not skipped - SDK functionality enabled")
+                    Logger.debug("🔧 SDK SETTINGS: Account enabled and SDK not skipped - SDK functionality enabled")
                 }
             }
         } else {
-            Logger.info("📡 API POLL: Using existing SDK settings, no change detected")
+            Logger.debug("📡 API POLL: Using existing SDK settings, no change detected")
         }
         
         // STEP 4: Only fetch configs if SDK functionality is enabled AND metadata changed (like Kotlin does)
         if hasMetadataChanged {
-            Logger.info("📡 API POLL: Metadata changed - fetching new config")
-            Logger.info("SDK settings changed: Previous Last-Modified=\(previousLastModified ?? "nil"), Current=\(currentLastModified ?? "nil"), Previous ETag=\(previousETag ?? "nil"), Current ETag=\(currentETag ?? "nil")")
+            Logger.debug("📡 API POLL: Metadata changed - fetching new config")
+            Logger.debug("SDK settings changed: Previous Last-Modified=\(previousLastModified ?? "nil"), Current=\(currentLastModified ?? "nil"), Previous ETag=\(previousETag ?? "nil"), Current ETag=\(currentETag ?? "nil")")
             
             // Only fetch configs if SDK functionality is enabled
             if isSdkFunctionalityEnabled {
-                Logger.info("📡 API POLL: Fetching new config due to metadata change")
+                Logger.debug("📡 API POLL: Fetching new config due to metadata change")
                 
                 let configResult = await configFetcher.fetchConfig(lastModified: nil, etag: nil)
                 
@@ -336,7 +350,7 @@ public class ConfigManagerImpl: ConfigManager {
             previousLastModified = currentLastModified
             previousETag = currentETag
         } else {
-            Logger.info("📡 API POLL: Metadata unchanged - skipping config fetch")
+            Logger.debug("📡 API POLL: Metadata unchanged - skipping config fetch")
         }
     }
     
@@ -375,6 +389,8 @@ public class ConfigManagerImpl: ConfigManager {
     }
     
     public func startPeriodicSdkSettingsCheck(interval: Int64, initialCheck: Bool = true) {
+        Logger.debug("🔧 Starting periodic SDK settings check with interval=\(interval)ms")
+        
         // Setup client queue operation with task-based error handling
         clientQueue.async { [weak self] in
             guard let self = self else { 
@@ -384,6 +400,9 @@ public class ConfigManagerImpl: ConfigManager {
             
             // Cancel existing timer if any
             self.timerMutex.lock()
+            if let existingTimer = self.sdkSettingsTimer {
+                existingTimer.invalidate()
+            }
             self.sdkSettingsTimer?.invalidate()
             self.timerMutex.unlock()
             
@@ -428,7 +447,7 @@ public class ConfigManagerImpl: ConfigManager {
                     }
                     
                     // Log periodic trigger (like Kotlin does)
-                    Logger.info("Periodic SDK settings check triggered by timer")
+                    Logger.debug("Periodic SDK settings check triggered by timer")
                     
                     // Use timeout-protected check
                     self.performTimeoutProtectedCheck()
@@ -437,6 +456,8 @@ public class ConfigManagerImpl: ConfigManager {
                 // Ensure the timer continues to fire by adding to run loop with common mode
                 if let timer = self.sdkSettingsTimer {
                     RunLoop.main.add(timer, forMode: .common)
+                } else {
+                    Logger.error("🔧 ConfigManagerImpl: Failed to create timer!")
                 }
                 
                 Logger.info("Started SDK settings check timer with interval \(actualIntervalMs) ms")

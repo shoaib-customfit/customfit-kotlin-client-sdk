@@ -17,13 +17,13 @@ public struct CFConstants {
     /// API URL constants
     public struct Api {
         /// Base URL for the CustomFit API
-        public static let BASE_API_URL = "https://api.customfit.ai/v1"
+        public static let BASE_API_URL = "https://api.customfit.ai"
         
         /// Base URL for SDK settings
         public static let SDK_SETTINGS_BASE_URL = "https://sdk.customfit.ai"
         
         /// Path for user configurations
-        public static let USER_CONFIGS_PATH = "/users/configs"
+        public static let USER_CONFIGS_PATH = "/v1/users/configs"
         
         /// Path pattern for SDK settings JSON file
         public static let SDK_SETTINGS_PATH_PATTERN = "/%s/cf-sdk-settings.json"
@@ -32,7 +32,7 @@ public struct CFConstants {
         public static let EVENTS_PATH = "/v1/cfe"
         
         /// Path for summary data
-        public static let SUMMARIES_PATH = "/v1/summary"
+        public static let SUMMARIES_PATH = "/v1/config/request/summary"
         
         /// Path for config polling
         public static let CONFIG_POLL_PATH = "/v1/config"

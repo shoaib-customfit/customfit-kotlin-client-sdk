@@ -25,7 +25,7 @@ public class ApplicationInfoProvider {
     
     /// The application's bundle identifier (e.g., "com.example.myapp").
     public var bundleId: String {
-        return Bundle.main.bundleIdentifier ?? "unknown.bundle.id"
+        return Bundle.main.bundleIdentifier ?? "ai.customfit.swift.demo"
     }
     
     // Corresponds to getAppInstallTime and getAppUpdateTime from Kotlin's ApplicationInfoDetector

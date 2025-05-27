@@ -148,32 +148,21 @@ public class EventData: Codable {
     
     // MARK: - Serialization
     
-    /// Convert to dictionary for serialization
+    /// Convert to dictionary for serialization (Kotlin-compatible format)
     /// - Returns: Dictionary representation of the event
     public func toDictionary() -> [String: Any] {
+        // Create timestamp formatter matching Kotlin's format
+        let timestampFormatter = DateFormatter()
+        timestampFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSX"
+        timestampFormatter.timeZone = TimeZone(abbreviation: "UTC")
+        
         var dict: [String: Any] = [
-            "event_id": eventId,
-            "name": name,
+            "event_customer_id": name,  // Kotlin uses event_customer_id
             "event_type": eventType.rawValue,
-            "timestamp": Int64(timestamp.timeIntervalSince1970 * 1000),
+            "event_timestamp": timestampFormatter.string(from: timestamp),  // Kotlin format
             "session_id": sessionId,
-            "is_anonymous": isAnonymous
+            "insert_id": eventId  // Kotlin uses insert_id
         ]
-        
-        // Add optional fields
-        if let userId = userId {
-            dict["user_id"] = userId
-        }
-        
-        // Add device context if available
-        if let deviceContext = deviceContext {
-            dict["device_context"] = deviceContext.toDictionary()
-        }
-        
-        // Add application info if available
-        if let appInfo = applicationInfo {
-            dict["application_info"] = appInfo.toDictionary()
-        }
         
         // Add properties
         dict["properties"] = properties

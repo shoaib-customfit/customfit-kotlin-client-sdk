@@ -381,12 +381,13 @@ public class ConfigFetcher {
     // MARK: - Metadata Fetching
     
     /// Fetches metadata from a URL with improved error handling
-    /// Optimized to use HEAD requests first to minimize bandwidth usage
+    /// Optimized to use HEAD requests first to minimize bandwidth usage (matches Kotlin implementation)
     /// - Parameter url: The URL to fetch metadata from
     /// - Returns: CFResult containing metadata headers or error details
     @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
     public func fetchMetadata(url: URL) async -> CFResult<[String: String]> {
-        if isOffline() {
+        // Skip if we're in offline mode
+        if config.offlineMode {
             Logger.debug("Not fetching metadata because client is in offline mode")
             return CFResult.createError(
                 message: "Client is in offline mode",
@@ -394,45 +395,38 @@ public class ConfigFetcher {
             )
         }
         
-        do {
+        return await withCheckedContinuation { continuation in
             // First try a lightweight HEAD request
-            Logger.info("API POLL: Fetch metadata strategy - First trying HEAD request: \(url.absoluteString)")
+            Logger.info("📡 API POLL: Fetch metadata strategy - First trying HEAD request: \(url)")
             
-            return try await withCheckedThrowingContinuation { continuation in
-                self.httpClient.makeHeadRequest(url: url) { result in
-                    switch result {
-                    case .success(let value):
-                        Logger.info("API POLL: HEAD request successful")
-                        continuation.resume(returning: CFResult.createSuccess(value: value))
-                    case .error(let message, let error, let code, let category):
-                        // If HEAD fails, fall back to the original GET method
-                        Logger.info("API POLL: HEAD request failed (\(message)), falling back to GET")
-                        
-                        self.httpClient.fetchMetadata(url: url) { getResult in
-                            switch getResult {
-                            case .success(let value):
-                                Logger.info("API POLL: Fallback GET successful")
-                                continuation.resume(returning: CFResult.createSuccess(value: value))
-                            case .error(let getMsg, let getError, let getCode, let getCategory):
-                                Logger.warning("API POLL: Both HEAD and GET failed: \(getMsg)")
-                                continuation.resume(returning: CFResult.createError(
-                                    message: getMsg,
-                                    error: getError,
-                                    code: getCode,
-                                    category: getCategory
-                                ))
-                            }
+            httpClient.makeHeadRequest(url: url) { headResult in
+                switch headResult {
+                case .success(let headers):
+                    Logger.info("📡 API POLL: HEAD request successful, using result: \(headers)")
+                    continuation.resume(returning: CFResult.createSuccess(value: headers))
+                    
+                case .error(let message, _, _, _):
+                    // If HEAD fails, fall back to the original GET method
+                    Logger.info("📡 API POLL: HEAD request failed (\(message)), falling back to GET")
+                    
+                    self.httpClient.fetchMetadata(url: url) { getResult in
+                        switch getResult {
+                        case .success(let headers):
+                            Logger.info("📡 API POLL: Fallback GET successful: \(headers)")
+                            continuation.resume(returning: CFResult.createSuccess(value: headers))
+                            
+                        case .error(let getMessage, let getError, let getCode, let getCategory):
+                            Logger.warning("📡 API POLL: Both HEAD and GET failed for \(url)")
+                            continuation.resume(returning: CFResult.createError(
+                                message: "Both HEAD and GET failed: \(getMessage)",
+                                error: getError,
+                                code: getCode,
+                                category: getCategory
+                            ))
                         }
                     }
                 }
             }
-        } catch {
-            Logger.warning("API POLL: Exception during metadata fetch: \(error.localizedDescription)")
-            return CFResult.createError(
-                message: "Error fetching metadata: \(error.localizedDescription)",
-                error: error,
-                category: .network
-            )
         }
     }
     

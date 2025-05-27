@@ -660,7 +660,7 @@ public class EventTracker {
         payload["events"] = eventsArray
         
         // Add SDK version
-        payload["cf_client_sdk_version"] = "1.0.0" 
+        payload["cf_client_sdk_version"] = "1.1.1" 
         
         return payload
     }

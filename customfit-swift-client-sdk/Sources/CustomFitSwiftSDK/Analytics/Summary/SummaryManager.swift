@@ -16,6 +16,10 @@ public class SummaryManager {
     /// Thread-safe queue for pending summaries
     private let summaryQueue: ThreadSafeQueue<SummaryData>
     
+    /// Dictionary to track which experience_ids have already been tracked to prevent duplicates
+    private var summaryTrackMap: [String: Bool] = [:]
+    private let trackMapLock = NSLock()
+    
     /// Lock for thread-safe operations
     private let lock = NSLock()
     
@@ -332,18 +336,112 @@ public class SummaryManager {
         }
     }
     
-    /// Push a configuration summary
+    /// Push a configuration summary (matches Kotlin behavior)
     /// - Parameter config: Configuration data
     /// - Returns: Result indicating success or failure
     public func pushSummary(config: [String: Any]) -> CFResult<Bool> {
-        let summary = SummaryData(
-            name: "config_summary",
-            count: 1,
-            properties: ["config": config]
+        // Log the config being processed
+        Logger.info("📊 SUMMARY: Processing summary for config: \(config["key"] ?? "unknown")")
+        
+        // Validate required fields are present
+        guard let experienceId = config["experience_id"] as? String else {
+            let message = "Missing mandatory 'experience_id' in config"
+            Logger.warning("📊 SUMMARY: Missing mandatory field 'experience_id', summary not tracked")
+            ErrorHandler.handleError(
+                message: message,
+                source: SummaryManager.SOURCE,
+                category: .validation,
+                severity: .medium
+            )
+            return CFResult.createError(message: message, category: .validation)
+        }
+        
+        // Check if this experience_id has already been tracked
+        trackMapLock.lock()
+        let shouldProcess: Bool
+        if summaryTrackMap.contains(where: { $0.key == experienceId }) {
+            Logger.debug("📊 SUMMARY: Experience already processed: \(experienceId)")
+            shouldProcess = false
+        } else {
+            summaryTrackMap[experienceId] = true
+            Logger.info("📊 SUMMARY: Summary tracked for key: \(config["key"] ?? "unknown")")
+            shouldProcess = true
+        }
+        trackMapLock.unlock()
+        
+        if !shouldProcess {
+            Logger.debug("📊 SUMMARY: Skipping duplicate summary for experience: \(experienceId)")
+            return CFResult.createSuccess(value: true) // Return success but don't track duplicate
+        }
+        
+        // Validate other mandatory fields before creating the summary
+        let configId = config["config_id"] as? String
+        let variationId = config["variation_id"] as? String
+        let versionString = config["version"] != nil ? String(describing: config["version"]!) : nil
+        
+        var missingFields: [String] = []
+        if configId == nil { missingFields.append("config_id") }
+        if variationId == nil { missingFields.append("variation_id") }
+        if versionString == nil { missingFields.append("version") }
+        
+        if !missingFields.isEmpty {
+            let message = "Missing mandatory fields for summary: \(missingFields.joined(separator: ", "))"
+            Logger.warning("📊 SUMMARY: Missing mandatory fields: \(missingFields.joined(separator: ", ")), summary not tracked")
+            ErrorHandler.handleError(
+                message: message,
+                source: SummaryManager.SOURCE,
+                category: .validation,
+                severity: .medium
+            )
+            return CFResult.createError(message: message, category: .validation)
+        }
+        
+        // Create CFConfigRequestSummary to match Kotlin structure
+        let configSummary = CFConfigRequestSummary(
+            configId: configId,
+            version: versionString,
+            userId: config["user_id"] as? String,
+            requestedTime: CFConfigRequestSummary.timestampFormatter.string(from: Date()),
+            variationId: variationId,
+            userCustomerId: user.getUser().getUserId() ?? "",
+            sessionId: UUID().uuidString, // TODO: Get actual session ID from session manager
+            behaviourId: config["behaviour_id"] as? String,
+            experienceId: experienceId,
+            ruleId: config["rule_id"] as? String
         )
         
-        let result = trackSummary(summary: summary)
+        Logger.info("📊 SUMMARY: Created summary for experience: \(experienceId), config: \(configId ?? "nil")")
+        
+        // For now, track it as a generic summary until we fully migrate the queue
+        let summaryData = SummaryData(
+            name: "config_request_summary",
+            count: 1,
+            properties: configSummary.toDictionary()
+        )
+        
+        let result = trackSummary(summary: summaryData)
         return result.isSuccess ? CFResult.createSuccess(value: true) : CFResult.createError(message: "Failed to track config summary", category: .state)
+    }
+    
+    /**
+     * Returns all tracked summaries for other components
+     * 
+     * @return Dictionary of experience IDs to tracking status
+     */
+    public func getTrackedSummaries() -> [String: Bool] {
+        trackMapLock.lock()
+        defer { trackMapLock.unlock() }
+        return summaryTrackMap
+    }
+    
+    /**
+     * Clear all tracked summaries (useful for session rotation)
+     */
+    public func clearTrackedSummaries() {
+        trackMapLock.lock()
+        defer { trackMapLock.unlock() }
+        summaryTrackMap.removeAll()
+        Logger.info("📊 SUMMARY: Cleared all tracked summaries")
     }
     
     // MARK: - Private Methods
@@ -441,24 +539,34 @@ public class SummaryManager {
         }
     }
     
-    /// Build the summary API payload
+    /// Build the summary API payload (Kotlin-compatible format)
     /// - Parameter summaries: Summaries to send
     /// - Returns: Dictionary containing the API payload
     private func buildSummaryApiPayload(summaries: [SummaryData]) -> [String: Any] {
         var payload: [String: Any] = [:]
         
-        // Add user data
-        payload["user"] = user.getUser().toDictionary()
+        // Add user data (match Kotlin format)
+        var userMap: [String: Any] = [:]
+        for (key, value) in user.getUser().toUserMap() {
+            userMap[key] = value
+        }
+        payload["user"] = userMap
         
-        // Add summaries
+        // Add summaries - for config summaries, extract the CFConfigRequestSummary data
         var summariesArray: [[String: Any]] = []
         for summary in summaries {
-            summariesArray.append(summary.toDictionary())
+            if summary.name == "config_request_summary" {
+                // This is a config summary - extract the CFConfigRequestSummary data from properties
+                summariesArray.append(summary.properties)
+            } else {
+                // This is a generic summary - convert to dictionary
+                summariesArray.append(summary.toDictionary())
+            }
         }
         payload["summaries"] = summariesArray
         
-        // Add SDK version
-        payload["cf_client_sdk_version"] = "1.0.0"
+        // Add SDK version (match Kotlin)
+        payload["cf_client_sdk_version"] = "1.1.1"
         
         return payload
     }
@@ -514,8 +622,14 @@ public class SummaryManager {
             // Set timer event handler
             self.dispatchTimer?.setEventHandler { [weak self] in
                 guard let self = self else { return }
-                Logger.debug("📊 SUMMARY: Periodic flush triggered for summaries")
-                self.flushSummaries()
+                
+                // Only trigger flush if there are summaries to flush
+                if !self.summaryQueue.isEmpty {
+                    Logger.debug("📊 SUMMARY: Periodic flush triggered for summaries")
+                    self.flushSummaries()
+                } else {
+                    Logger.debug("📊 SUMMARY: Periodic flush skipped - no summaries to flush")
+                }
             }
             
             // Start the timer

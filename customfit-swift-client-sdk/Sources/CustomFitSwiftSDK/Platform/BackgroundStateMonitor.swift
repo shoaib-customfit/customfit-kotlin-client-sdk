@@ -169,9 +169,7 @@ public class DefaultBackgroundStateMonitor: BackgroundStateMonitor {
             self?.updateBatteryState()
         }
         
-        // For command-line apps, we don't need to add to run loop
-        // The timer will work as long as the main thread doesn't block
-        Logger.debug("Background state monitoring: Timer created for command-line compatibility")
+        Logger.debug("Background state monitoring started")
         #endif
         
         isMonitoring = true

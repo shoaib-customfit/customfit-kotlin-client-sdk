@@ -86,8 +86,9 @@ public class ListenerManagerImpl: ListenerManager {
             }
         }
         
-        let pointer = unsafeBitCast(listener as AnyObject, to: AnyHashable.self)
-        listeners[pointer] = wrapper
+        // Use UUID-based identification instead of unsafe bit casting
+        let listenerId = UUID().hashValue
+        listeners[listenerId] = wrapper
         configListeners[key] = listeners
         
         Logger.debug("Added listener for key: \(key)")
@@ -97,17 +98,17 @@ public class ListenerManagerImpl: ListenerManager {
         lock.lock()
         defer { lock.unlock() }
         
-        let pointer = unsafeBitCast(listener as AnyObject, to: AnyHashable.self)
-        configListeners[key]?[pointer] = nil
+        // Since we can't safely identify individual closures, clear all listeners for this key
+        configListeners[key] = [:]
         
-        Logger.debug("Removed listener for key: \(key)")
+        Logger.debug("Cleared config listeners for key: \(key) (safe approach)")
     }
     
     public func clearConfigListeners(key: String) {
         lock.lock()
         defer { lock.unlock() }
         
-        configListeners[key] = nil
+        configListeners[key] = [:]
         
         Logger.debug("Cleared all listeners for key: \(key)")
     }
@@ -180,9 +181,7 @@ public class ListenerManagerImpl: ListenerManager {
         lock.unlock()
         
         listeners?.forEach { listener in
-            try? {
-                listener(value)
-            }()
+            listener(value)
         }
     }
     
@@ -204,9 +203,7 @@ public class ListenerManagerImpl: ListenerManager {
         lock.unlock()
         
         for listener in listeners {
-            try? {
-                listener.onFlagsChange(changedKeys: changedKeys)
-            }()
+            listener.onFlagsChange(changedKeys: changedKeys)
         }
     }
     
@@ -216,9 +213,7 @@ public class ListenerManagerImpl: ListenerManager {
         lock.unlock()
         
         for listener in listeners {
-            try? {
-                listener.onConnectionStatusChanged(newStatus: status, info: info)
-            }()
+            listener.onConnectionStatusChanged(newStatus: status, info: info)
         }
     }
     
@@ -237,6 +232,9 @@ public class ListenerManagerImpl: ListenerManager {
     public func notifyFeatureFlagChange(key: String, oldValue: Any?, newValue: Any?) {
         lock.lock()
         
+        // Get config listeners for this key
+        let configListeners = self.configListeners[key]?.values
+        
         // Notify specific flag listeners
         let flagListeners = flagChangeListeners[key]?.values
         
@@ -245,11 +243,14 @@ public class ListenerManagerImpl: ListenerManager {
         
         lock.unlock()
         
+        // Notify config listeners first
+        configListeners?.forEach { listener in
+            listener(newValue ?? oldValue ?? "")
+        }
+        
         // Notify specific flag listeners
         flagListeners?.forEach { listener in
-            try? {
-                listener.onFeatureFlagChange(key: key, oldValue: oldValue, newValue: newValue)
-            }()
+            listener.onFeatureFlagChange(key: key, oldValue: oldValue, newValue: newValue)
         }
         
         // Notify all flags listeners

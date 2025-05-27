@@ -270,7 +270,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
             clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
             listenerManager: listenerManager,
             config: self.mutableConfig.config,
-            summaryManager: summaryManager
+            summaryManager: summaryManager,
+            sessionId: self.currentSessionId
         )
         self.configManager = confManager
         
@@ -399,7 +400,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
             clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
             listenerManager: listenerManager,
             config: self.mutableConfig.config,
-            summaryManager: summaryManager
+            summaryManager: summaryManager,
+            sessionId: self.currentSessionId
         )
         self.configManager = confManager
         
@@ -528,7 +530,8 @@ public class CFClient: AppStateListener, BatteryStateListener {
             clientQueue: DispatchQueue(label: "ai.customfit.ConfigManager", qos: .utility),
             listenerManager: listenerManager,
             config: self.mutableConfig.config,
-            summaryManager: summaryManager
+            summaryManager: summaryManager,
+            sessionId: self.currentSessionId
         )
         self.configManager = confManager
         
@@ -688,49 +691,42 @@ public class CFClient: AppStateListener, BatteryStateListener {
     }
     
     private func setupListenersAsync() {
-        Logger.info("🔧 Setting up listeners asynchronously...")
+        Logger.debug("🔧 setupListenersAsync: Starting listener setup")
+        Logger.debug("🔧 setupListenersAsync: offlineMode=\(mutableConfig.offlineMode), disableBackgroundPolling=\(mutableConfig.disableBackgroundPolling)")
         
-        // Skip listener setup entirely if in offline mode or background polling is disabled
-        if mutableConfig.offlineMode || mutableConfig.disableBackgroundPolling {
-            Logger.info("🔧 SKIPPING listener setup: offlineMode=\(mutableConfig.offlineMode), disableBackgroundPolling=\(mutableConfig.disableBackgroundPolling)")
-            return
+        // Use a timeout to ensure we don't hang during initialization
+        let timeoutQueue = DispatchQueue(label: "ai.customfit.setupTimeout")
+        let timeoutWorkItem = DispatchWorkItem {
+            Logger.warning("🔧 setupListenersAsync: Timeout reached during listener setup")
         }
         
-        // Use a background queue to avoid blocking initialization
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
-            // Set up a timeout for the entire listener setup process
-            let timeoutQueue = DispatchQueue(label: "ai.customfit.listenerSetupTimeout")
-            let timeoutWorkItem = DispatchWorkItem {
-                Logger.warning("⚠️ Listener setup timed out after 5 seconds - continuing without full setup")
+        // Schedule timeout after 30 seconds
+        timeoutQueue.asyncAfter(deadline: .now() + 30.0, execute: timeoutWorkItem)
+        
+        // Use background queue to prevent blocking initialization
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { 
+                Logger.error("🔧 setupListenersAsync: self is nil!")
+                timeoutWorkItem.cancel()
+                return 
             }
             
-            // Schedule timeout after 5 seconds
-            timeoutQueue.asyncAfter(deadline: .now() + 5.0, execute: timeoutWorkItem)
-            
-            // Perform listener setup operations
-            Logger.debug("🔧 Registering app state listener...")
-            self.backgroundStateMonitor.addAppStateListener(listener: self)
-            
-            Logger.debug("🔧 Registering battery state listener...")
-            self.backgroundStateMonitor.addBatteryStateListener(listener: self)
-            
-            Logger.debug("🔧 Starting background state monitoring...")
+            // Start monitoring background state first
             self.backgroundStateMonitor.startMonitoring()
             
-            Logger.debug("🔧 Background state monitoring completed successfully!")
+            // Register for state change notifications
+            self.backgroundStateMonitor.addAppStateListener(listener: self)
+            self.backgroundStateMonitor.addBatteryStateListener(listener: self)
             
-            // Only start periodic checks if not in offline mode and polling is enabled
+            // Configure periodic SDK settings check
             if !self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling {
                 Logger.debug("🔧 Starting periodic SDK settings check...")
                 
                 // Start the config manager on the main queue to ensure timer works properly
                 DispatchQueue.main.async {
-                    Logger.info("🔧 CALLING startPeriodicSdkSettingsCheck with initialCheck=true")
                     self.configManager.startPeriodicSdkSettingsCheck(
                         interval: self.mutableConfig.sdkSettingsCheckIntervalMs,
-                        initialCheck: true // Enable initial check to match Kotlin behavior
+                        initialCheck: false // Don't do initial check since we already did it in init
                     )
                     
                     Logger.info("🔧 Periodic SDK settings check started successfully")
@@ -741,7 +737,23 @@ public class CFClient: AppStateListener, BatteryStateListener {
             
             // Cancel the main timeout since we completed successfully
             timeoutWorkItem.cancel()
-            Logger.info("🚀 All listeners set up successfully!")
+            Logger.info("🔧 setupListenersAsync: All listeners set up successfully!")
+        }
+        
+        // Add a fallback mechanism in case the async block doesn't execute
+        // This ensures the timer always starts even if there are dispatch queue issues
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            
+            // Check if we need to start the timer directly on main thread as fallback
+            if !self.mutableConfig.offlineMode && !self.mutableConfig.disableBackgroundPolling {
+                Logger.debug("🔧 setupListenersAsync: Fallback ensuring timer is started")
+                
+                self.configManager.startPeriodicSdkSettingsCheck(
+                    interval: self.mutableConfig.sdkSettingsCheckIntervalMs,
+                    initialCheck: false
+                )
+            }
         }
     }
     

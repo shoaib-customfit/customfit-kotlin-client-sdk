@@ -61,33 +61,37 @@ class CFHelper: ObservableObject {
     }
     
     static func addConfigListener<T>(key: String, listener: @escaping (T) -> Void) {
-        guard client != nil else {
+        guard let client = client else {
             print("⚠️ Cannot add config listener: CFClient not initialized")
             return
         }
         
-        // Note: Swift SDK may need to implement config listeners
-        print("📝 Config listener added for \(key)")
+        // Use the actual SDK config listener method
+        client.addConfigListener(key: key, listener: listener)
+        print("📝 Config listener added for \(key) - using real SDK listener")
     }
     
     static func removeConfigListenersByKey(_ key: String) {
-        guard client != nil else {
+        guard let client = client else {
             print("⚠️ Cannot remove config listeners: CFClient not initialized")
             return
         }
         
+        // Use the actual SDK method to clear config listeners
+        client.clearConfigListeners(key: key)
         print("🗑️ Removed config listeners for \(key)")
     }
     
     static func getAllFlags() -> [String: Any] {
-        guard client != nil else {
+        guard let client = client else {
             print("⚠️ Cannot get all flags: CFClient not initialized")
             return [:]
         }
         
-        // Note: Swift SDK may need to implement getAllFlags
-        print("📋 Retrieved feature flags")
-        return [:]
+        // Use the actual SDK method to get all flags
+        let flags = client.getAllFlags()
+        print("📋 Retrieved feature flags: \(flags)")
+        return flags
     }
 }
 
@@ -191,6 +195,9 @@ class CustomFitProvider: ObservableObject {
         }
         
         print("✅ Config listeners set up successfully")
+        
+        // No periodic polling needed - config listeners will handle updates automatically
+        print("🔄 Using config listeners for automatic updates (no periodic polling)")
     }
     
     func trackEvent(_ eventName: String, properties: [String: Any] = [:]) {
@@ -219,12 +226,25 @@ class CustomFitProvider: ObservableObject {
         // Remove listeners when provider is destroyed (matches Android pattern)
         CFHelper.removeConfigListenersByKey("hero_text")
         CFHelper.removeConfigListenersByKey("enhanced_toast")
+        
+        print("🗑️ Removed config listeners on cleanup")
     }
 }
 
 // MARK: - Main App
 @main
 struct CustomFitDemoApp: App {
+    init() {
+        // Set bundle identifier for macOS
+        if let bundle = Bundle.main.infoDictionary {
+            print("📱 Bundle info: \(bundle)")
+        }
+        
+        // Workaround for missing bundle identifier
+        setenv("CFBundleIdentifier", "ai.customfit.demo.swift", 1)
+        print("📱 Set bundle identifier: ai.customfit.demo.swift")
+    }
+    
     var body: some Scene {
         WindowGroup("CustomFit Demo") {
             ContentView()

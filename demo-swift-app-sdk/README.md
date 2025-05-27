@@ -263,18 +263,33 @@ cfHelper.recordEventWithProperties("kotlin_toast_button_interaction", [
 
 ## 🚀 How to Run
 
-### Method 1: Xcode (Recommended)
-```bash
-# Open in Xcode for full iOS/macOS experience
-open . # In demo-swift-app-sdk directory
-```
+### ⚠️ Important: Bundle Identifier Fix
 
-### Method 2: Swift Package Manager
+**macOS GUI apps require proper bundle identifiers.** This demo includes a fix for the common `BackBoardServices` bundle identifier error.
+
+### Method 1: Use the Script (Recommended) ✅
 ```bash
 cd demo-swift-app-sdk
-swift build
-# Note: SwiftUI apps require Xcode for proper display
+./run-app.sh
 ```
+*This uses Xcode build system which properly handles bundle identifiers.*
+
+### Method 2: Xcode IDE ✅  
+```bash
+# Open in Xcode for full iOS/macOS experience
+open Package.swift # Then press Cmd+R with "My Mac" destination
+```
+
+### Method 3: Manual Build ⚠️
+```bash
+# Build with proper bundle support
+xcodebuild -scheme CustomFitDemoApp -configuration Debug -destination 'platform=macOS'
+# Then find and run the built executable
+```
+
+**❌ Avoid:** `swift run CustomFitDemoApp` causes bundle identifier crashes.
+
+📖 **See [BUNDLE_IDENTIFIER_FIX.md](BUNDLE_IDENTIFIER_FIX.md) for detailed explanation.**
 
 ### Method 3: iOS Device
 1. Open in Xcode
