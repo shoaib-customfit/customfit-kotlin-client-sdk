@@ -34,6 +34,16 @@ builds/
 */android/app/build/
 */ios/build/
 
+# Generated platform directories (created by Flutter/React Native)
+demo-flutter-app-sdk/android/
+demo-flutter-app-sdk/ios/
+demo-flutter-app-sdk/linux/
+demo-flutter-app-sdk/macos/
+demo-flutter-app-sdk/web/
+demo-flutter-app-sdk/windows/
+demo-reactnative-app-sdk/android/
+demo-reactnative-app-sdk/ios/
+
 # ===============================
 # 🗂️ DEPENDENCY DIRECTORIES
 # ===============================
@@ -61,6 +71,10 @@ yarn-error.log*
 */.gradle/
 */gradle/wrapper/gradle-wrapper.jar
 */local.properties
+**/.gradle/
+
+# SDK build artifacts
+customfit-reactnative-client-sdk/lib/
 
 # ===============================
 # 🔧 DEVELOPMENT ENVIRONMENT
@@ -191,3 +205,4 @@ CustomFit_QA_Package_*.zip
 # ===============================
 # END OF GITIGNORE
 # ===============================
+customfit-kotlin-client-sdk/.gradle/
