@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# CustomFit Mobile SDKs - Git Setup and Build Collection Script
-# This script sets up Git properly and collects all builds in organized folders
+# CustomFit Mobile SDKs - Initial Git Setup Script
+# This script sets up Git repository and prepares the project for development
 
 set -e
 
@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
-echo -e "${PURPLE}🚀 CustomFit Mobile SDKs - Git Setup & Build Collection${NC}"
+echo -e "${PURPLE}🚀 CustomFit Mobile SDKs - Initial Git Setup${NC}"
 echo "=========================================================="
 
 # Function to check if we're in a git repository
@@ -88,17 +88,12 @@ find . -name "*.sh" | head -10 | xargs git add 2>/dev/null || true
 
 echo -e "${GREEN}✅ Added source files and configurations to Git${NC}"
 
-echo -e "\n${BLUE}📱 Collecting Mobile App Builds${NC}"
-echo "=================================="
+echo -e "\n${BLUE}📱 Build Collection${NC}"
+echo "=================="
 
-# Run the build collection script
-if [ -f "collect_builds.sh" ]; then
-    echo -e "${YELLOW}🚀 Running build collection script...${NC}"
-    ./collect_builds.sh
-else
-    echo -e "${RED}❌ collect_builds.sh not found${NC}"
-    exit 1
-fi
+echo -e "${YELLOW}💡 To collect builds later, run:${NC}"
+echo "   ./collect_builds.sh"
+echo -e "${GREEN}✅ Build collection script available${NC}"
 
 echo -e "\n${BLUE}📊 Git Status Summary${NC}"
 echo "======================"
@@ -164,9 +159,9 @@ echo "• IDE files (.idea/, .vscode/)"
 echo "• Organized builds directory (builds/)"
 
 echo -e "\n${YELLOW}💡 Next Steps:${NC}"
-echo "1. 📤 Push to remote: git push origin main"
-echo "2. 📱 Test APKs from builds/ directory"
-echo "3. 🔄 Re-run ./collect_builds.sh when you rebuild"
+echo "1. 🏗️ Build your SDKs (use build_*.sh scripts)"
+echo "2. 📱 Collect builds: ./collect_builds.sh"
+echo "3. 📤 Push to remote: git push origin main"
 echo "4. 🚀 Deploy your mobile SDKs!"
 
 echo -e "\n${GREEN}✅ Ready for deployment and version control!${NC}"
